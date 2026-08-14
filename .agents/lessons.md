@@ -17,8 +17,12 @@ It should be reviewed at the start of a session and updated after fixing any bug
 
 ### Local Dev Server URLs
 
-- **Rule**: Whenever starting the local Medusa backend dev server (via `local-dev` skill or scripts), always inspect the output logs for the running port and immediately provide the clickable local URLs (Backend API `http://localhost:<port>` and Admin Dashboard `http://localhost:<port>/app`) directly to the user.
-- **Context**: Prevents leaving the user guessing where the dev server and admin panel are hosted when the process runs in the background.
+- **Rule**: Whenever starting the local Medusa backend and storefront dev servers (via `local-dev` skill or scripts), always inspect the output logs for the running ports and immediately provide the clickable local URLs:
+  - **Medusa Backend API**: `http://localhost:9000`
+  - **Medusa Admin Dashboard**: `http://localhost:9000/app`
+  - **Medusa Storefront**: `http://localhost:8000`
+  directly to the user.
+- **Context**: Prevents leaving the user guessing where the dev server, admin panel, and storefront are hosted when processes run in the background.
 
 ### Mandatory Confirmation for Test Data Wipe
 
