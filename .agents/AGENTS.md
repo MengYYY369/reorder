@@ -5,7 +5,7 @@ This file defines how coding agents should work in the official `reorder` reposi
 ## Always
 
 - Write all code, comments, specs, markdown files, lessons, and commit messages in English only, regardless of the language used in the chat.
-- **Before proposing a commit or git push, present a commit message in the Conventional Commits format `type(scope): description` (e.g., `feat(ai): add create-spec skill`, `fix(dunning): resolve retry loop`) and wait for explicit user approval.**
+- **When the user approves changes after code review, propose a commit message in the Conventional Commits format `type(scope): description` (e.g., `feat(ai): add create-spec skill`, `fix(dunning): resolve retry loop`). Wait for explicit user approval of the commit message before committing and pushing changes to the repository.**
 - Identify which Reorder area you are changing and check the Task Router below before starting.
 - Read the relevant runtime documentation in `docs/` before reading implementation files.
 - Refer to `docs/README.md` for plugin overview, current scope, and implemented domains.
