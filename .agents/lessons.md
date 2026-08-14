@@ -25,6 +25,11 @@ It should be reviewed at the start of a session and updated after fixing any bug
 - **Rule**: NEVER execute destructive reset or test data wipe scripts (such as `scripts/wipe-test-data.ts` or `wipe-test-data` skill) immediately upon request. Always first explicitly warn the user that 100% of operational data (orders, customers, subscriptions, renewals, dunning, logs, analytics) will be permanently deleted, and wait for their explicit confirmation before proceeding.
 - **Context**: Protects against accidental data loss when the user invokes a wipe command or mentions clearing data without realizing the full scope.
 
+### Post-Push Docs Sync
+
+- **Rule**: Whenever you push code to GitHub (e.g. after resolving an issue or implementing a feature), ALWAYS proactively ask the user: "Czy zmiany wymagają aktualizacji dokumentacji (wewnętrznej w reorder/docs lub publicznej Mintlify w ../docs)? Jeśli tak, użyję skilla `sync-docs`."
+- **Context**: This ensures both internal technical docs (`reorder/docs/`) and the public documentation repository (`../docs`) stay in sync with codebase changes without the user having to remember it.
+
 ## General Lessons
 
 * (No lessons recorded yet. Will be updated as issues arise.)

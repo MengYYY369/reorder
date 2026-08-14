@@ -13,6 +13,7 @@ This file defines how coding agents should work in the official `reorder` reposi
 - Check `.agents/lessons.md` at the start of the session to avoid repeating past mistakes.
 - After fixing any bug or resolving a complex issue, update `.agents/lessons.md` with the lesson learned and a rule to prevent it in the future.
 - Use Medusa agentic skills whenever they fit the task.
+- After successfully pushing code to GitHub, **always** ask the user if the public Mintlify documentation needs to be updated. If yes, execute the `sync-docs` skill.
 - Keep changes minimal and local to the affected area.
 - Follow Medusa conventions (file-based routing with `route.ts`, Awilix resolve, custom modules under `src/modules/<domain>/`, models in `models/`, migrations in `migrations/`, workflows in `src/workflows/`, jobs in `src/jobs/`).
 - Write integration tests for new features (preferring HTTP integration tests in `integration-tests/http/`). Keep them self-contained.
