@@ -7,36 +7,30 @@ description: Guidelines for local development and testing of the reorder plugin 
 
 This skill describes how to sync local changes in the `reorder` plugin with an external Medusa backend during local development.
 
-## Prerequisites
+## Automated Synchronization and Startup
 
-In the Medusa backend's `package.json` file, declare the plugin dependency using a local file path:
-```json
-"@reorderjs/reorder": "file:../reorder"
+To automatically discover the backend folder, build the plugin, sync dependencies via `yalc`, run migrations and start the backend server, simply execute the following script from the root of the `reorder` repository:
+
+```bash
+./.agents/scripts/sync-and-start.sh
 ```
-Ensure you run `yarn install` in the Medusa backend project after adding or updating this path.
 
-## Synchronization Workflow
+**What this script does automatically:**
+1. Verifies you are in the `reorder` repository.
+2. Builds the plugin (`yarn build`) and pushes changes using `npx yalc push`.
+3. Auto-discovers the Medusa backend project by scanning the parent directory (`..`) for a folder containing both `medusa-config.ts` and `@reorderjs/reorder` in its `package.json`.
+4. Checks the backend's `.env` for the `DATABASE_URL` presence.
+5. Installs dependencies and runs database migrations (`yarn medusa db:migrate`).
+6. Starts the backend server using `yarn dev`.
 
-When you modify code in this repository (`reorder`) and want the external Medusa backend to import the newest changes:
+## Manual Setup (Prerequisites)
 
-1. In the `reorder` repository, run:
-   ```bash
-   yarn medusa plugin:publish
+If this is your first time setting up the backend to work with local reorder:
+
+1. Install `yalc` globally if you haven't already: `npm i yalc -g`
+2. In the Medusa backend's `package.json`, declare the plugin dependency using yalc:
+   ```json
+   "@reorderjs/reorder": "file:.yalc/@reorderjs/reorder"
    ```
-2. In the Medusa backend project directory, run:
-   ```bash
-   yarn medusa db:migrate
-   ```
-3. In the Medusa backend project directory, reinstall the package from the filesystem:
-   ```bash
-   yarn install
-   ```
-
-> [!IMPORTANT]
-> Do not assume the Medusa backend is using the newest local plugin code until this entire command sequence has successfully completed.
-
-## Useful Plugin Commands
-
-In the `reorder` directory, you can run:
-- `yarn dev` – Runs the process in development mode.
-- `yarn build` – Builds the plugin files for production.
+3. Ensure the plugin is registered in `medusa-config.ts`.
+4. Ensure your PostgreSQL database is running and the `DATABASE_URL` is set in the backend's `.env` file.
