@@ -17,7 +17,6 @@ export default async function wipeTestData({ container }: ExecArgs) {
     "payment",
     "payment_collection",
     "reservation_item",
-    "inventory_item",
     "fulfillment",
     
     // Reorder plugin tables

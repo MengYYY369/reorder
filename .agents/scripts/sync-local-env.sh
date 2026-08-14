@@ -82,18 +82,42 @@ yarn medusa db:migrate
 # 5. Prepare storefront (if found)
 if [ -n "$STOREFRONT_DIR" ]; then
   echo ">> Preparing Storefront..."
+  
+  # Fetch active publishable API key from Medusa DB if psql and DB_URL are available
+  DB_PUB_KEY=""
+  if [ -n "$DB_URL" ] && command -v psql >/dev/null 2>&1; then
+    DB_PUB_KEY=$(psql "$DB_URL" -t -A -c "SELECT id FROM api_key WHERE type = 'publishable' AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1;" 2>/dev/null || true)
+  fi
+
   cd "$STOREFRONT_DIR"
+  TARGET_ENV_FILE=""
   if [ -f ".env.local" ]; then
-    PUB_KEY=$(grep '^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=' .env.local | cut -d '=' -f2-)
+    TARGET_ENV_FILE=".env.local"
+  elif [ -f ".env" ]; then
+    TARGET_ENV_FILE=".env"
+  fi
+
+  if [ -n "$TARGET_ENV_FILE" ]; then
+    CURRENT_PUB_KEY=$(grep '^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=' "$TARGET_ENV_FILE" | cut -d '=' -f2-)
+    
+    if [ -n "$DB_PUB_KEY" ] && [ "$DB_PUB_KEY" != "$CURRENT_PUB_KEY" ]; then
+      echo "   ⚡ Detected new publishable API key in database: $DB_PUB_KEY (was: $CURRENT_PUB_KEY)"
+      echo "   Updating $TARGET_ENV_FILE with new key..."
+      if grep -q '^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=' "$TARGET_ENV_FILE"; then
+        # Replace existing key in file
+        sed -i '' "s/^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=.*/NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$DB_PUB_KEY/" "$TARGET_ENV_FILE"
+      else
+        echo "NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$DB_PUB_KEY" >> "$TARGET_ENV_FILE"
+      fi
+      PUB_KEY="$DB_PUB_KEY"
+    else
+      PUB_KEY="$CURRENT_PUB_KEY"
+    fi
+
     if [ -n "$PUB_KEY" ]; then
       echo "   Storefront publishable key: $PUB_KEY"
     else
-      echo "   Warning: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY is missing in storefront .env.local!"
-    fi
-  elif [ -f ".env" ]; then
-    PUB_KEY=$(grep '^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=' .env | cut -d '=' -f2-)
-    if [ -n "$PUB_KEY" ]; then
-      echo "   Storefront publishable key: $PUB_KEY"
+      echo "   Warning: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY is missing in storefront $TARGET_ENV_FILE!"
     fi
   else
     echo "   Warning: No .env.local or .env found in storefront directory!"

@@ -34,6 +34,15 @@ It should be reviewed at the start of a session and updated after fixing any bug
 - **Rule**: Whenever you push code to GitHub (e.g. after resolving an issue or implementing a feature), ALWAYS proactively ask the user: "Czy zmiany wymagają aktualizacji dokumentacji (wewnętrznej w reorder/docs lub publicznej Mintlify w ../docs)? Jeśli tak, użyję skilla `sync-docs`."
 - **Context**: This ensures both internal technical docs (`reorder/docs/`) and the public documentation repository (`../docs`) stay in sync with codebase changes without the user having to remember it.
 
+### Reseeding & Database Reset Invalidation Checklist
+
+- **Rule**: Whenever performing a full database reset, schema drop, or `yarn seed`:
+  1. **Recreate Admin User**: Medusa v2 `seed.ts` does not create an admin user by default. Always recreate the admin account (`yarn medusa user -e admin@medusa-test.com -p supersecret`).
+  2. **Sync Publishable API Key**: A fresh seed generates a new `publishable_api_key` in the database. Always check/update `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` in the storefront's `.env.local` to match the newly generated key, and restart the storefront dev server.
+  3. **Preserve Catalog Inventory**: In transactional data wipes (`wipe-test-data.ts`), never truncate `inventory_item` or catalog tables, as Medusa v2 requires inventory items and levels for cart item creation when `manage_inventory: true`.
+- **Context**: Prevents 401 "Invalid email or password" admin login failures, 400 "A valid publishable key is required to proceed with the request" storefront errors, and 500 cart item creation failures.
+
 ## General Lessons
 
-* (No lessons recorded yet. Will be updated as issues arise.)
+* **Publishable API Key Mismatch**: If Storefront throws `Error: A valid publishable key is required to proceed with the request`, the key in `.env.local` (`NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`) is out of sync with the active key in the Medusa backend database (table `api_key` where `type = 'publishable'`).
+* **Missing Inventory on Cart Line Items**: In Medusa v2, `addToCartWorkflow` checks inventory levels for all variants with `manage_inventory: true`. If `inventory_item` or `inventory_level` rows are missing, `POST /store/carts/:id/line-items` will fail with a 500 error.
