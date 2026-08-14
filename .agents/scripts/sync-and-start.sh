@@ -1,25 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Medusa Reorder Local Dev Workflow ==="
+# Run synchronization and preparation
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/sync-local-env.sh"
 
-# 1. Verify source directory
-if [ ! -f "package.json" ] || ! grep -q "\"name\": \"@reorderjs/reorder\"" "package.json"; then
-  echo "Error: This script must be run from the root of the 'reorder' repository."
-  exit 1
-fi
-
-REORDER_ROOT="$(pwd)"
-
-echo ">> 1/6: Building reorder plugin..."
-yarn build
-
-echo ">> 2/6: Pushing plugin locally to yalc registry..."
-npx yalc push
-
-# 2. Find Medusa backend directory
+# Locate directories
 BACKEND_DIR=""
-echo ">> 3/6: Searching for Medusa backend directory..."
 for dir in ../*/; do
   if [ -f "${dir}medusa-config.ts" ] && [ -f "${dir}package.json" ]; then
     if grep -q "@reorderjs/reorder" "${dir}package.json"; then
@@ -29,75 +16,12 @@ for dir in ../*/; do
   fi
 done
 
-if [ -z "$BACKEND_DIR" ]; then
-  echo "Error: Could not find a Medusa backend project with @reorderjs/reorder installed adjacent to this directory."
-  exit 1
-fi
-echo ">> Found backend at: $BACKEND_DIR"
-
-# 3. Find Storefront directory
 STOREFRONT_DIR=""
-echo ">> 4/6: Searching for Storefront directory..."
 if [ -d "../subscription-storefront" ] && [ -f "../subscription-storefront/package.json" ]; then
   STOREFRONT_DIR="$(cd "../subscription-storefront" && pwd)"
-else
-  for dir in ../*/; do
-    if [ -f "${dir}package.json" ] && { [ -f "${dir}next.config.js" ] || [ -f "${dir}next.config.mjs" ] || [ -f "${dir}next.config.ts" ]; }; then
-      if [ "$(cd "$dir" && pwd)" != "$BACKEND_DIR" ]; then
-        STOREFRONT_DIR="$(cd "${dir}" && pwd)"
-        break
-      fi
-    fi
-  done
 fi
 
-if [ -z "$STOREFRONT_DIR" ]; then
-  echo "Warning: Could not auto-detect Storefront directory adjacent to reorder."
-else
-  echo ">> Found storefront at: $STOREFRONT_DIR"
-fi
-
-# 4. Prepare backend: check DB & run migrations
-echo ">> 5/6: Preparing Medusa backend..."
-cd "$BACKEND_DIR"
-if [ -f ".env" ]; then
-  DB_URL=$(grep '^DATABASE_URL=' .env | cut -d '=' -f2-)
-  if [ -n "$DB_URL" ]; then
-    echo "   Database configured at: $DB_URL"
-  else
-    echo "   Warning: DATABASE_URL is missing in backend .env!"
-  fi
-else
-  echo "   Warning: .env file is missing in backend directory!"
-fi
-
-yarn install
-yarn medusa db:migrate
-
-# 5. Prepare storefront (if found)
-if [ -n "$STOREFRONT_DIR" ]; then
-  echo ">> Preparing Storefront..."
-  cd "$STOREFRONT_DIR"
-  if [ -f ".env.local" ]; then
-    PUB_KEY=$(grep '^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=' .env.local | cut -d '=' -f2-)
-    if [ -n "$PUB_KEY" ]; then
-      echo "   Storefront publishable key: $PUB_KEY"
-    else
-      echo "   Warning: NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY is missing in storefront .env.local!"
-    fi
-  elif [ -f ".env" ]; then
-    PUB_KEY=$(grep '^NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=' .env | cut -d '=' -f2-)
-    if [ -n "$PUB_KEY" ]; then
-      echo "   Storefront publishable key: $PUB_KEY"
-    fi
-  else
-    echo "   Warning: No .env.local or .env found in storefront directory!"
-  fi
-  yarn install
-fi
-
-# 6. Start servers concurrently
-echo ">> 6/6: Starting servers..."
+echo ">> Starting dev servers..."
 echo "=================================================="
 echo "🚀 Medusa Backend API:     http://localhost:9000"
 echo "🖥️  Medusa Admin Dashboard: http://localhost:9000/app"
@@ -128,6 +52,10 @@ yarn dev &
 BACKEND_PID=$!
 
 if [ -n "$STOREFRONT_DIR" ]; then
+  # Wait for backend health before starting storefront
+  until curl -s -f http://localhost:9000/health >/dev/null 2>&1; do
+    sleep 1
+  done
   cd "$STOREFRONT_DIR"
   yarn dev &
   STOREFRONT_PID=$!

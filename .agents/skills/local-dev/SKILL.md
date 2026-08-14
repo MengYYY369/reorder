@@ -1,40 +1,48 @@
 ---
 name: local-dev
-description: Guidelines for local development, syncing, and testing of the reorder plugin with an external Medusa backend project and subscription storefront.
+description: Guidelines for local development, syncing, and testing of the reorder plugin with an external Medusa backend project and subscription storefront as background tasks in Antigravity.
 ---
 
 # Local development in Medusa backend & Storefront
 
-This skill describes how to sync local changes in the `reorder` plugin with an external Medusa backend and launch the subscription storefront during local development.
+This skill describes how to sync local changes in the `reorder` plugin with an external Medusa backend and run both the Medusa backend and the subscription storefront as separate Antigravity background tasks.
 
-## Automated Synchronization and Startup
+## Workflow Execution Steps for Agents
 
-To automatically discover the backend folder and storefront, build the plugin, sync dependencies via `yalc`, run database migrations, and start both dev servers, execute the following script from the root of the `reorder` repository:
+When requested to run `/local-dev` or start the local development environment:
 
+### Step 1: Synchronize Environment & Run Migrations
+Run the synchronization script from the `reorder` root:
 ```bash
-./.agents/scripts/sync-and-start.sh
+./.agents/scripts/sync-local-env.sh
+```
+This builds `@reorderjs/reorder`, pushes it to `yalc`, discovers the backend directory (`../my-medusa-store`) and storefront directory (`../subscription-storefront`), runs `yarn medusa db:migrate`, and prepares dependencies.
+
+### Step 2: Start Medusa Backend (Background Task)
+Start the Medusa backend dev server using `run_command` with `IsDaemon: true` and working directory set to the backend directory (`Cwd: /Users/tomaszkasperski/Desktop/Development/medusa-reorder/my-medusa-store`):
+```bash
+yarn dev
 ```
 
-**What this script does automatically:**
-1. Verifies you are in the `reorder` repository.
-2. Builds the plugin (`yarn build`) and pushes changes using `npx yalc push`.
-3. Auto-discovers the Medusa backend project by scanning the parent directory (`..`) for a folder containing both `medusa-config.ts` and `@reorderjs/reorder` in its `package.json` (e.g. `../my-medusa-store`).
-4. Auto-discovers the Storefront project (e.g. `../subscription-storefront`).
-5. Checks database configuration (`DATABASE_URL`), installs dependencies, and runs database migrations (`yarn medusa db:migrate`).
-6. Verifies storefront environment variables (`MEDUSA_BACKEND_URL`, `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`) and installs dependencies.
-7. Concurrently starts both dev servers:
-   - Medusa Backend (`yarn dev` on port 9000)
-   - Storefront (`yarn dev` on port 8000)
-   with unified process termination handling on exit/SIGINT.
+### Step 3: Wait for Backend Readiness
+Poll `http://localhost:9000/health` until the backend responds with HTTP 200 OK before starting the storefront:
+```bash
+until curl -s -f http://localhost:9000/health >/dev/null 2>&1; do sleep 1; done
+```
 
-## Post-Startup Reporting Rule
-Whenever executing `local-dev` or starting dev servers in the background:
-- Always inspect the server output logs for the active ports.
-- Always immediately provide the user with the direct localhost URLs:
-  - **Medusa Backend API**: `http://localhost:9000`
-  - **Medusa Admin Dashboard**: `http://localhost:9000/app`
-  - **Storefront**: `http://localhost:8000`
-  - The paths of the detected backend and storefront projects.
+### Step 4: Start Subscription Storefront (Background Task)
+Start the storefront dev server as a separate background daemon task using `run_command` with `IsDaemon: true` and working directory set to the storefront directory (`Cwd: /Users/tomaszkasperski/Desktop/Development/medusa-reorder/subscription-storefront`):
+```bash
+yarn dev
+```
+
+### Step 5: Report URLs to the User
+Always immediately provide the clickable URLs:
+- **Medusa Backend API**: `http://localhost:9000`
+- **Medusa Admin Dashboard**: `http://localhost:9000/app`
+- **Subscription Storefront**: `http://localhost:8000`
+
+---
 
 ## Manual Setup & Storefront Connection Requirements
 
