@@ -20,6 +20,7 @@ This file defines how coding agents should work in the official `reorder` reposi
 
 ## Ask First
 
+- Ask and obtain explicit confirmation before executing destructive data wipe scripts (e.g., `wipe-test-data`).
 - Ask before changing branch/PR automation, pipeline labels, QA flows, or release behaviors.
 - Ask before making changes that span multiple domains or modules without an existing spec.
 - Ask before adding new external dependencies to `package.json`.

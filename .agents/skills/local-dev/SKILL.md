@@ -23,6 +23,14 @@ To automatically discover the backend folder, build the plugin, sync dependencie
 5. Installs dependencies and runs database migrations (`yarn medusa db:migrate`).
 6. Starts the backend server using `yarn dev`.
 
+## Post-Startup Reporting Rule
+Whenever executing `local-dev` or starting the backend server in the background:
+- Always inspect the server output logs for the active port (default: 9000).
+- Always immediately provide the user with the direct localhost URLs:
+  - **Medusa Backend API**: `http://localhost:<port>` (e.g., `http://localhost:9000`)
+  - **Medusa Admin Dashboard**: `http://localhost:<port>/app` (e.g., `http://localhost:9000/app`)
+  - The path of the detected backend project.
+
 ## Manual Setup (Prerequisites)
 
 If this is your first time setting up the backend to work with local reorder:

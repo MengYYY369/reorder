@@ -15,6 +15,16 @@ It should be reviewed at the start of a session and updated after fixing any bug
 - **Rule**: Before proposing a commit or git push to GitHub, always construct a Conventional Commits message format: `type(scope): description` and present it to the user. Wait for the user's explicit approval before proceeding with the commit and push.
 - **Context**: Helps the user audit and accept individual changes, ensuring only well-formed commits with correct scopes are pushed.
 
+### Local Dev Server URLs
+
+- **Rule**: Whenever starting the local Medusa backend dev server (via `local-dev` skill or scripts), always inspect the output logs for the running port and immediately provide the clickable local URLs (Backend API `http://localhost:<port>` and Admin Dashboard `http://localhost:<port>/app`) directly to the user.
+- **Context**: Prevents leaving the user guessing where the dev server and admin panel are hosted when the process runs in the background.
+
+### Mandatory Confirmation for Test Data Wipe
+
+- **Rule**: NEVER execute destructive reset or test data wipe scripts (such as `scripts/wipe-test-data.ts` or `wipe-test-data` skill) immediately upon request. Always first explicitly warn the user that 100% of operational data (orders, customers, subscriptions, renewals, dunning, logs, analytics) will be permanently deleted, and wait for their explicit confirmation before proceeding.
+- **Context**: Protects against accidental data loss when the user invokes a wipe command or mentions clearing data without realizing the full scope.
+
 ## General Lessons
 
 * (No lessons recorded yet. Will be updated as issues arise.)
