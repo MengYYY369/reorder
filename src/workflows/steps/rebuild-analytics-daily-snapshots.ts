@@ -561,7 +561,10 @@ async function rebuildSingleDay(
       const churnEvent = churnBySubscription.get(subscription.id) ?? null
       const latestRenewal = latestRenewalBySubscription.get(subscription.id) ?? null
       
-      const latestOrderId = latestOrderBySubscription.get(subscription.id)
+      const latestOrderId =
+        latestRenewal?.generated_order_id ??
+        latestOrderBySubscription.get(subscription.id) ??
+        null
       const latestOrder = latestOrderId ? ordersById.get(latestOrderId as string) ?? null : null
       
       const orderTotal = latestOrder ? Number(latestOrder?.total ?? 0) : null
