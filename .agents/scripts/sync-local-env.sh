@@ -86,7 +86,7 @@ if [ -n "$STOREFRONT_DIR" ]; then
   # Fetch active publishable API key from Medusa DB if psql and DB_URL are available
   DB_PUB_KEY=""
   if [ -n "$DB_URL" ] && command -v psql >/dev/null 2>&1; then
-    DB_PUB_KEY=$(psql "$DB_URL" -t -A -c "SELECT id FROM api_key WHERE type = 'publishable' AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1;" 2>/dev/null || true)
+    DB_PUB_KEY=$(psql "$DB_URL" -t -A -c "SELECT token FROM api_key WHERE type = 'publishable' AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1;" 2>/dev/null || true)
   fi
 
   cd "$STOREFRONT_DIR"

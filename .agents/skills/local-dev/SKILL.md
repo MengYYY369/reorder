@@ -11,12 +11,13 @@ This skill describes how to sync local changes in the `reorder` plugin with an e
 
 When requested to run `/local-dev` or start the local development environment:
 
-### Step 1: Synchronize Environment & Run Migrations
-Run the synchronization script from the `reorder` root:
+### Step 1: Initial Sync or Plugin Rebuild (Only when code changed)
+If you modified the `reorder` plugin code and need to rebuild and push changes to `yalc`:
 ```bash
 ./.agents/scripts/sync-local-env.sh
 ```
-This builds `@reorderjs/reorder`, pushes it to `yalc`, discovers the backend directory (`../my-medusa-store`) and storefront directory (`../subscription-storefront`), runs `yarn medusa db:migrate`, and prepares dependencies.
+> [!NOTE]
+> If the user simply requests to **restart** or **start** the backend/storefront without code changes, **do NOT** run `sync-local-env.sh`. Skip directly to Step 2 and restart the process.
 
 ### Step 2: Start Medusa Backend (Background Task)
 Start the Medusa backend dev server using `run_command` with `IsDaemon: true` and working directory set to the backend directory (`Cwd: /Users/tomaszkasperski/Desktop/Development/medusa-reorder/my-medusa-store`):
