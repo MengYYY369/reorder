@@ -1,5 +1,5 @@
 <div align="center">
-    <img width="1280" height="640" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero-new.png" />
+    <img alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero-new.png" />
 </div>
 
 <div align="center">
