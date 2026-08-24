@@ -4,11 +4,10 @@
   </a>
 </div>
 
-&nbsp;
 
 <div align="center">
   <a href="https://www.reorderjs.com">
-    <img width="800" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero.png" />
+    <img width="900" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero.png" />
   </a>
   <h1>Open Source Subscription Medusa Plugin</h1>
   <a href="https://github.com/reorder-js/reorder?tab=MIT-1-ov-file">
