@@ -1,9 +1,10 @@
 <div align="center">
-    <img width="700" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero-new.png" />
+    <img width="1280" height="640" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero-new.png" />
 </div>
 
 <div align="center">
-  <h1>Open-source subscription plugin built on standard Medusa primitives. Lifecycle management, dunning, renewals and analytics inside the Admin - and no cut of your recurring revenue.</h1>
+  <h1>Open-source subscription plugin built on standard Medusa primitives</h1>
+  <h3>Lifecycle management, dunning, renewals and analytics inside the Admin - and no cut of your recurring revenue.</h3>
 
   <a href="https://medusajs.com/blog/reorder">
     <img alt="Featured on Medusa Blog" src="https://img.shields.io/badge/Featured_on-Medusa_Blog-7C3AED.svg" />
