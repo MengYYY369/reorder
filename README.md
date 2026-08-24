@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://www.reorderjs.com">
-    <img width="1280" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero.png" />
+    <img width="2560" height="1440" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero.png" />
   </a>
 </div>
 
