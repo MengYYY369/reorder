@@ -9,6 +9,9 @@
   <a href="https://www.reorderjs.com">
     <img width="1000" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero.png" />
   </a>
+</div>
+
+<div align="center">
   <h1>Open Source Subscription Medusa Plugin</h1>
   <a href="https://github.com/reorder-js/reorder?tab=MIT-1-ov-file">
     <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg" />
@@ -16,7 +19,7 @@
   <a href="https://github.com/reorder-js/reorder/issues">
     <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat" alt="PRs welcome!" />
   </a>
-  <a href="https://www.reorderjs.com/contact">
+  <a href="https://www.reorderjs.com/get-started">
     <img alt="Support" src="https://img.shields.io/badge/support-contact%20author-blue.svg" />
   </a>
 </div>
@@ -243,7 +246,7 @@ yarn dev
 
 - **GitHub Issues** — bug reports and feature requests: [github.com/reorder-js/reorder/issues](https://github.com/reorder-js/reorder/issues)
 - **GitHub Discussions** — questions, ideas, and general help: [github.com/reorder-js/reorder/discussions](https://github.com/reorder-js/reorder/discussions)
-- **Contact** — reach the author directly at [reorderjs.com/contact](https://www.reorderjs.com/contact)
+- **Contact** — reach the author directly at [reorderjs.com/get-started](https://www.reorderjs.com/get-started)
 
 &nbsp;
 
