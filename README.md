@@ -3,7 +3,6 @@
 </div>
 
 <h1 align="center">Open-source subscription plugin built on standard Medusa primitives</h1>
-<h4>Lifecycle management, dunning, renewals and analytics inside the Admin - and no cut of your recurring revenue.</h3>
 
 <div align="center">
   <a href="https://medusajs.com/blog/reorder">
