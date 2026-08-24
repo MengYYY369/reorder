@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://www.reorderjs.com">
-    <img width="2560" height="1440" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero.png" />
+    <img width="100%" alt="Reorder — Subscriptions for Medusa, done right." src="assets/screenshots/reorder-hero-new.png" />
   </a>
 </div>
 
@@ -8,6 +8,10 @@
   <a href="https://medusajs.com/blog/reorder">
     <img alt="Featured on Medusa Blog" src="https://img.shields.io/badge/Featured_on-Medusa_Blog-7C3AED.svg" />
   </a>
+</div>
+
+<div align="center">
+  <h1>Open Source Subscription Medusa Plugin</h1>
   <a href="https://github.com/reorder-js/reorder?tab=MIT-1-ov-file">
     <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg" />
   </a>
