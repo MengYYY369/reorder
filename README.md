@@ -220,8 +220,8 @@ yarn dev
 
 ## Requirements
 
-- Minimum: Medusa `2.3+`
-- Recommended: compatible with `@medusajs/medusa >= 2.4.0`
+- Medusa `2.20.0`
+- Node `^20.19.0 || >=22.12.0`
 
 &nbsp;
 
