@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate, type ReorderTranslate } from "../../../../i18n/translate"
+import { useTranslation } from "react-i18next"
 import {
   Alert,
   Button,
@@ -51,7 +53,38 @@ const terminalStatuses = new Set<DunningCaseAdminStatus>([
   DunningCaseAdminStatus.UNRECOVERED,
 ])
 
+const DUNNING_CASE_STATUS_KEYS = {
+  [DunningCaseAdminStatus.OPEN]: "dunning.status.open",
+  [DunningCaseAdminStatus.RETRY_SCHEDULED]: "dunning.status.retryScheduled",
+  [DunningCaseAdminStatus.RETRYING]: "dunning.status.retrying",
+  [DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION]:
+    "dunning.status.awaitingManualResolution",
+  [DunningCaseAdminStatus.RECOVERED]: "dunning.status.recovered",
+  [DunningCaseAdminStatus.UNRECOVERED]: "dunning.status.unrecovered",
+} as const
+
+const DUNNING_ATTEMPT_STATUS_KEYS = {
+  [DunningAttemptAdminStatus.PROCESSING]: "dunning.attemptStatus.processing",
+  [DunningAttemptAdminStatus.SUCCEEDED]: "dunning.attemptStatus.succeeded",
+  [DunningAttemptAdminStatus.FAILED]: "dunning.attemptStatus.failed",
+} as const
+
+const SUBSCRIPTION_STATUS_KEYS: Record<string, string> = {
+  active: "subscriptions.status.active",
+  paused: "subscriptions.status.paused",
+  cancelled: "subscriptions.status.cancelled",
+  past_due: "subscriptions.status.pastDue",
+}
+
+const RENEWAL_STATUS_KEYS: Record<string, string> = {
+  scheduled: "renewals.status.scheduled",
+  processing: "renewals.status.processing",
+  succeeded: "renewals.status.succeeded",
+  failed: "renewals.status.failed",
+}
+
 const DunningDetailPage = () => {
+  const { t } = useTranslation("reorder")
   const { id } = useParams()
   const queryClient = useQueryClient()
   const prompt = usePrompt()
@@ -86,10 +119,15 @@ const DunningDetailPage = () => {
         id,
         dunningCase?.subscription.subscription_id
       )
-      toast.success("Retry started")
+      toast.success(t("dunning.detail.toast.retryStarted"))
     },
     onError: (mutationError) => {
-      toast.error(getAdminErrorMessage(mutationError, "Failed to retry now"))
+      toast.error(
+        getAdminErrorMessage(
+          mutationError,
+          t("dunning.detail.errors.retryNowFailed")
+        )
+      )
     },
   })
 
@@ -108,13 +146,13 @@ const DunningDetailPage = () => {
         id,
         dunningCase?.subscription.subscription_id
       )
-      toast.success("Case marked as recovered")
+      toast.success(t("dunning.detail.toast.markedRecovered"))
       closeDrawer()
     },
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to mark as recovered"
+        t("dunning.detail.errors.markRecoveredFailed")
       )
       setFormError(message)
       toast.error(message)
@@ -136,13 +174,13 @@ const DunningDetailPage = () => {
         id,
         dunningCase?.subscription.subscription_id
       )
-      toast.success("Case marked as unrecovered")
+      toast.success(t("dunning.detail.toast.markedUnrecovered"))
       closeDrawer()
     },
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to mark as unrecovered"
+        t("dunning.detail.errors.markUnrecoveredFailed")
       )
       setFormError(message)
       toast.error(message)
@@ -164,13 +202,13 @@ const DunningDetailPage = () => {
         id,
         dunningCase?.subscription.subscription_id
       )
-      toast.success("Retry schedule updated")
+      toast.success(t("dunning.detail.toast.retryScheduleUpdated"))
       closeDrawer()
     },
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to update retry schedule"
+        t("dunning.detail.errors.retryScheduleFailed")
       )
       setFormError(message)
       toast.error(message)
@@ -235,11 +273,10 @@ const DunningDetailPage = () => {
 
   const handleRetryNow = async () => {
     const confirmed = await prompt({
-      title: "Retry payment now?",
-      description:
-        "You are about to trigger an immediate payment retry for this dunning case.",
-      confirmText: "Retry now",
-      cancelText: "Cancel",
+      title: t("dunning.detail.prompt.retryNowTitle"),
+      description: t("dunning.detail.prompt.retryNowDescription"),
+      confirmText: t("dunning.detail.actions.retryNow"),
+      cancelText: t("common.actions.cancel"),
     })
 
     if (!confirmed) {
@@ -255,8 +292,8 @@ const DunningDetailPage = () => {
     const normalizedReason = normalizeOptionalString(reason)
 
     if (actionDrawerMode === "mark_unrecovered" && !normalizedReason) {
-      setFormError("Reason is required")
-      toast.error("Reason is required")
+      setFormError(t("dunning.detail.errors.reasonRequired"))
+      toast.error(t("dunning.detail.errors.reasonRequired"))
       return
     }
 
@@ -265,29 +302,28 @@ const DunningDetailPage = () => {
       const normalizedMaxAttempts = Number(maxAttempts)
 
       if (!normalizedIntervals.length) {
-        setFormError("At least one retry interval is required")
-        toast.error("At least one retry interval is required")
+        setFormError(t("dunning.detail.errors.intervalsRequired"))
+        toast.error(t("dunning.detail.errors.intervalsRequired"))
         return
       }
 
       if (!Number.isInteger(normalizedMaxAttempts) || normalizedMaxAttempts <= 0) {
-        setFormError("Max attempts must be a positive integer")
-        toast.error("Max attempts must be a positive integer")
+        setFormError(t("dunning.detail.errors.maxAttemptsPositive"))
+        toast.error(t("dunning.detail.errors.maxAttemptsPositive"))
         return
       }
 
       if (normalizedIntervals.length !== normalizedMaxAttempts) {
-        setFormError("Max attempts must equal the number of retry intervals")
-        toast.error("Max attempts must equal the number of retry intervals")
+        setFormError(t("dunning.detail.errors.maxAttemptsMismatch"))
+        toast.error(t("dunning.detail.errors.maxAttemptsMismatch"))
         return
       }
 
       const confirmed = await prompt({
-        title: "Override retry schedule?",
-        description:
-          "You are about to replace the current retry schedule for this dunning case.",
-        confirmText: "Save schedule",
-        cancelText: "Cancel",
+        title: t("dunning.detail.prompt.overrideTitle"),
+        description: t("dunning.detail.prompt.overrideDescription"),
+        confirmText: t("dunning.detail.actions.saveSchedule"),
+        cancelText: t("common.actions.cancel"),
       })
 
       if (!confirmed) {
@@ -305,17 +341,17 @@ const DunningDetailPage = () => {
     const confirmed = await prompt({
       title:
         actionDrawerMode === "mark_recovered"
-          ? "Mark as recovered?"
-          : "Mark as unrecovered?",
+          ? t("dunning.detail.prompt.markRecoveredTitle")
+          : t("dunning.detail.prompt.markUnrecoveredTitle"),
       description:
         actionDrawerMode === "mark_recovered"
-          ? "You are about to close this case as recovered."
-          : "You are about to close this case as unrecovered.",
+          ? t("dunning.detail.prompt.markRecoveredDescription")
+          : t("dunning.detail.prompt.markUnrecoveredDescription"),
       confirmText:
         actionDrawerMode === "mark_recovered"
-          ? "Mark recovered"
-          : "Mark unrecovered",
-      cancelText: "Cancel",
+          ? t("dunning.detail.actions.markRecovered")
+          : t("dunning.detail.actions.markUnrecovered"),
+      cancelText: t("common.actions.cancel"),
     })
 
     if (!confirmed) {
@@ -338,12 +374,12 @@ const DunningDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Dunning case</Heading>
+          <Heading level="h1">{t("dunning.detail.title")}</Heading>
         </div>
         <div className="flex items-center gap-x-2 px-6 py-6 text-ui-fg-subtle">
           <Spinner className="animate-spin" />
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Loading dunning case details...
+            {t("dunning.detail.loading")}
           </Text>
         </div>
       </Container>
@@ -354,13 +390,13 @@ const DunningDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Dunning case</Heading>
+          <Heading level="h1">{t("dunning.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
             {error instanceof Error
               ? error.message
-              : "Failed to load dunning case details."}
+              : t("dunning.detail.loadError")}
           </Alert>
         </div>
       </Container>
@@ -371,10 +407,10 @@ const DunningDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Dunning case</Heading>
+          <Heading level="h1">{t("dunning.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
-          <Alert variant="warning">Dunning case details are unavailable.</Alert>
+          <Alert variant="warning">{t("dunning.detail.unavailable")}</Alert>
         </div>
       </Container>
     )
@@ -386,16 +422,16 @@ const DunningDetailPage = () => {
         <div className="flex items-start justify-between px-6 py-4">
           <div className="flex flex-col gap-y-1">
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Dunning case
+              {t("dunning.detail.header")}
             </Text>
             <Heading level="h1">{dunningCase.id}</Heading>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Review recovery state, linked records, retry timing, and attempt history.
+              {t("dunning.detail.description")}
             </Text>
           </div>
           <div className="flex items-center gap-x-2">
             <StatusBadge color={getCaseStatusColor(dunningCase.status)}>
-              {formatCaseStatus(dunningCase.status)}
+              {t(DUNNING_CASE_STATUS_KEYS[dunningCase.status])}
             </StatusBadge>
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
@@ -413,7 +449,11 @@ const DunningDetailPage = () => {
                     }}
                   >
                     <TriangleRightMini className="text-ui-fg-subtle" />
-                    <span>{retryNowMutation.isPending ? "Retrying..." : "Retry now"}</span>
+                    <span>
+                      {retryNowMutation.isPending
+                        ? t("dunning.detail.actions.retrying")
+                        : t("dunning.detail.actions.retryNow")}
+                    </span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canMarkRecovered ? (
@@ -423,7 +463,7 @@ const DunningDetailPage = () => {
                     onClick={() => openDrawer("mark_recovered")}
                   >
                     <CheckCircle className="text-ui-fg-subtle" />
-                    <span>Mark recovered</span>
+                    <span>{t("dunning.detail.actions.markRecovered")}</span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canMarkUnrecovered ? (
@@ -433,7 +473,7 @@ const DunningDetailPage = () => {
                     onClick={() => openDrawer("mark_unrecovered")}
                   >
                     <XCircle className="text-ui-fg-subtle" />
-                    <span>Mark unrecovered</span>
+                    <span>{t("dunning.detail.actions.markUnrecovered")}</span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canEditRetrySchedule ? (
@@ -443,7 +483,7 @@ const DunningDetailPage = () => {
                     onClick={() => openDrawer("retry_schedule")}
                   >
                     <EllipsisHorizontal className="text-ui-fg-subtle" />
-                    <span>Edit retry schedule</span>
+                    <span>{t("dunning.detail.actions.editRetrySchedule")}</span>
                   </DropdownMenu.Item>
                 ) : null}
               </DropdownMenu.Content>
@@ -455,45 +495,63 @@ const DunningDetailPage = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Case overview</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.overview")}</Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailRow
-                  label="Status"
+                  label={t("common.fields.status")}
                   value={(
                     <StatusBadge color={getCaseStatusColor(dunningCase.status)}>
-                      {formatCaseStatus(dunningCase.status)}
+                      {t(DUNNING_CASE_STATUS_KEYS[dunningCase.status])}
                     </StatusBadge>
                   )}
                 />
                 <DetailRow
-                  label="Attempt count"
+                  label={t("dunning.detail.fields.attemptCount")}
                   value={`${dunningCase.attempt_count} / ${dunningCase.max_attempts}`}
                 />
                 <DetailRow
-                  label="Next retry"
-                  value={formatDateTime(dunningCase.next_retry_at)}
+                  label={t("dunning.detail.fields.nextRetry")}
+                  value={formatDateTime(
+                    dunningCase.next_retry_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Last attempt"
-                  value={formatDateTime(dunningCase.last_attempt_at)}
+                  label={t("dunning.detail.fields.lastAttempt")}
+                  value={formatDateTime(
+                    dunningCase.last_attempt_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Recovered at"
-                  value={formatDateTime(dunningCase.recovered_at)}
+                  label={t("dunning.detail.fields.recoveredAt")}
+                  value={formatDateTime(
+                    dunningCase.recovered_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Closed at"
-                  value={formatDateTime(dunningCase.closed_at)}
+                  label={t("dunning.detail.fields.closedAt")}
+                  value={formatDateTime(
+                    dunningCase.closed_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Created at"
-                  value={formatDateTime(dunningCase.created_at)}
+                  label={t("dunning.detail.fields.createdAt")}
+                  value={formatDateTime(
+                    dunningCase.created_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Updated at"
-                  value={formatDateTime(dunningCase.updated_at)}
+                  label={t("dunning.detail.fields.updatedAt")}
+                  value={formatDateTime(
+                    dunningCase.updated_at,
+                    t("common.empty.noValue")
+                  )}
                 />
               </div>
             </div>
@@ -501,35 +559,43 @@ const DunningDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Payment summary</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.payment")}</Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailRow
-                  label="Last error code"
-                  value={dunningCase.last_payment_error_code || "-"}
+                  label={t("dunning.detail.fields.lastErrorCode")}
+                  value={
+                    dunningCase.last_payment_error_code ||
+                    t("common.empty.noValue")
+                  }
                 />
                 <DetailRow
-                  label="Provider"
-                  value={dunningCase.subscription.payment_provider_id || "-"}
+                  label={t("dunning.detail.fields.provider")}
+                  value={
+                    dunningCase.subscription.payment_provider_id ||
+                    t("common.empty.noValue")
+                  }
                 />
                 <DetailRow
-                  label="Last error message"
+                  label={t("dunning.detail.fields.lastErrorMessage")}
                   value={
                     dunningCase.last_payment_error_message ||
-                    "No payment error message"
+                    t("dunning.detail.fields.noPaymentErrorMessage")
                   }
                 />
                 <DetailRow
-                  label="Latest payment reference"
+                  label={t("dunning.detail.fields.latestPaymentReference")}
                   value={
                     dunningCase.attempts[dunningCase.attempts.length - 1]
-                      ?.payment_reference || "-"
+                      ?.payment_reference || t("common.empty.noValue")
                   }
                 />
                 <DetailRow
-                  label="Recovery reason"
-                  value={dunningCase.recovery_reason || "-"}
+                  label={t("dunning.detail.fields.recoveryReason")}
+                  value={
+                    dunningCase.recovery_reason || t("common.empty.noValue")
+                  }
                 />
               </div>
             </div>
@@ -537,29 +603,38 @@ const DunningDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Retry schedule</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.retrySchedule")}</Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailRow
-                  label="Strategy"
-                  value={dunningCase.retry_schedule?.strategy || "-"}
-                />
-                <DetailRow
-                  label="Timezone"
-                  value={dunningCase.retry_schedule?.timezone || "-"}
-                />
-                <DetailRow
-                  label="Intervals"
+                  label={t("dunning.detail.fields.strategy")}
                   value={
-                    dunningCase.retry_schedule
-                      ? formatIntervals(dunningCase.retry_schedule.intervals)
-                      : "-"
+                    dunningCase.retry_schedule?.strategy ||
+                    t("common.empty.noValue")
                   }
                 />
                 <DetailRow
-                  label="Source"
-                  value={dunningCase.retry_schedule?.source || "-"}
+                  label={t("dunning.detail.fields.timezone")}
+                  value={
+                    dunningCase.retry_schedule?.timezone ||
+                    t("common.empty.noValue")
+                  }
+                />
+                <DetailRow
+                  label={t("dunning.detail.fields.intervals")}
+                  value={
+                    dunningCase.retry_schedule
+                      ? formatIntervals(dunningCase.retry_schedule.intervals, t)
+                      : t("common.empty.noValue")
+                  }
+                />
+                <DetailRow
+                  label={t("dunning.detail.fields.source")}
+                  value={
+                    dunningCase.retry_schedule?.source ||
+                    t("common.empty.noValue")
+                  }
                 />
               </div>
             </div>
@@ -567,19 +642,29 @@ const DunningDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Attempt timeline</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.attempts")}</Heading>
             </div>
             <div className="px-6 py-4">
               {dunningCase.attempts.length ? (
                 <Table>
                   <Table.Header>
                     <Table.Row>
-                      <Table.HeaderCell>Attempt</Table.HeaderCell>
-                      <Table.HeaderCell>Status</Table.HeaderCell>
-                      <Table.HeaderCell>Started</Table.HeaderCell>
-                      <Table.HeaderCell>Finished</Table.HeaderCell>
-                      <Table.HeaderCell>Error</Table.HeaderCell>
-                      <Table.HeaderCell>Payment reference</Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("dunning.detail.fields.attempt")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>{t("common.fields.status")}</Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("dunning.detail.fields.started")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("dunning.detail.fields.finished")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("dunning.detail.fields.error")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("dunning.detail.fields.paymentReference")}
+                      </Table.HeaderCell>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -592,33 +677,46 @@ const DunningDetailPage = () => {
                         </Table.Cell>
                         <Table.Cell>
                           <StatusBadge color={getAttemptStatusColor(attempt.status)}>
-                            {formatAttemptStatus(attempt.status)}
+                            {t(DUNNING_ATTEMPT_STATUS_KEYS[attempt.status])}
                           </StatusBadge>
                         </Table.Cell>
-                        <Table.Cell>{formatDateTime(attempt.started_at)}</Table.Cell>
-                        <Table.Cell>{formatDateTime(attempt.finished_at)}</Table.Cell>
+                        <Table.Cell>
+                          {formatDateTime(
+                            attempt.started_at,
+                            t("common.empty.noValue")
+                          )}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {formatDateTime(
+                            attempt.finished_at,
+                            t("common.empty.noValue")
+                          )}
+                        </Table.Cell>
                         <Table.Cell>
                           <div className="flex flex-col gap-y-0.5">
                             <Text size="small" leading="compact">
-                              {attempt.error_code || "-"}
+                              {attempt.error_code || t("common.empty.noValue")}
                             </Text>
                             <Text
                               size="small"
                               leading="compact"
                               className="text-ui-fg-subtle"
                             >
-                              {attempt.error_message || "No error message"}
+                              {attempt.error_message ||
+                                t("dunning.detail.empty.noError")}
                             </Text>
                           </div>
                         </Table.Cell>
-                        <Table.Cell>{attempt.payment_reference || "-"}</Table.Cell>
+                        <Table.Cell>
+                          {attempt.payment_reference || t("common.empty.noValue")}
+                        </Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>
                 </Table>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No attempts have been recorded for this dunning case yet.
+                  {t("dunning.detail.empty.noAttempts")}
                 </Text>
               )}
             </div>
@@ -626,7 +724,7 @@ const DunningDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Technical metadata</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.metadata")}</Heading>
             </div>
             <div className="px-6 py-4">
               {metadataRows.length ? (
@@ -637,7 +735,7 @@ const DunningDetailPage = () => {
                 </div>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No metadata was stored for this dunning case.
+                  {t("dunning.detail.empty.noMetadata")}
                 </Text>
               )}
             </div>
@@ -647,7 +745,9 @@ const DunningDetailPage = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Subscription summary</Heading>
+              <Heading level="h2">
+                {t("dunning.detail.sections.subscription")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -681,29 +781,32 @@ const DunningDetailPage = () => {
                   </div>
                 </Link>
                 <DetailRow
-                  label="Status"
-                  value={formatSubscriptionStatus(dunningCase.subscription.status)}
+                  label={t("common.fields.status")}
+                  value={formatSubscriptionStatus(dunningCase.subscription.status, t)}
                 />
                 <DetailRow
-                  label="Customer"
+                  label={t("common.fields.customer")}
                   value={dunningCase.subscription.customer_name}
                 />
                 <DetailRow
-                  label="Product"
+                  label={t("common.fields.product")}
                   value={dunningCase.subscription.product_title}
                 />
                 <DetailRow
-                  label="Variant"
+                  label={t("common.fields.variant")}
                   value={dunningCase.subscription.variant_title}
                 />
-                <DetailRow label="SKU" value={dunningCase.subscription.sku || "-"} />
+                <DetailRow
+                  label={t("common.fields.sku")}
+                  value={dunningCase.subscription.sku || t("common.empty.noValue")}
+                />
               </div>
             </div>
           </Container>
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Renewal summary</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.renewal")}</Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -728,7 +831,7 @@ const DunningDetailPage = () => {
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            {formatRenewalStatus(dunningCase.renewal.status)}
+                            {formatRenewalStatus(dunningCase.renewal.status, t)}
                           </Text>
                         </div>
                         <div className="size-7 flex items-center justify-center">
@@ -739,24 +842,30 @@ const DunningDetailPage = () => {
                   </Link>
                 ) : (
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    No linked renewal
+                    {t("dunning.detail.empty.noLinkedRenewal")}
                   </Text>
                 )}
                 <DetailRow
-                  label="Renewal status"
+                  label={t("dunning.detail.fields.renewalStatus")}
                   value={
                     dunningCase.renewal
-                      ? formatRenewalStatus(dunningCase.renewal.status)
-                      : "-"
+                      ? formatRenewalStatus(dunningCase.renewal.status, t)
+                      : t("common.empty.noValue")
                   }
                 />
                 <DetailRow
-                  label="Scheduled for"
-                  value={formatDateTime(dunningCase.renewal?.scheduled_for ?? null)}
+                  label={t("dunning.detail.fields.scheduledFor")}
+                  value={formatDateTime(
+                    dunningCase.renewal?.scheduled_for ?? null,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Generated order id"
-                  value={dunningCase.renewal?.generated_order_id || "-"}
+                  label={t("dunning.detail.fields.generatedOrderId")}
+                  value={
+                    dunningCase.renewal?.generated_order_id ||
+                    t("common.empty.noValue")
+                  }
                 />
               </div>
             </div>
@@ -764,7 +873,7 @@ const DunningDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Order / payment summary</Heading>
+              <Heading level="h2">{t("dunning.detail.sections.order")}</Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -798,11 +907,21 @@ const DunningDetailPage = () => {
                   </Link>
                 ) : (
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    No linked order
+                    {t("dunning.detail.empty.noLinkedOrder")}
                   </Text>
                 )}
-                <DetailRow label="Order status" value={dunningCase.order?.status || "-"} />
-                <DetailRow label="Order ID" value={dunningCase.order?.order_id || "-"} />
+                <DetailRow
+                  label={t("dunning.detail.fields.orderStatus")}
+                  value={
+                    dunningCase.order?.status || t("common.empty.noValue")
+                  }
+                />
+                <DetailRow
+                  label={t("dunning.detail.fields.orderId")}
+                  value={
+                    dunningCase.order?.order_id || t("common.empty.noValue")
+                  }
+                />
               </div>
             </div>
           </Container>
@@ -812,28 +931,32 @@ const DunningDetailPage = () => {
       <Drawer open={actionDrawerOpen} onOpenChange={setActionDrawerOpen}>
         <Drawer.Content>
           <Drawer.Header>
-            <Drawer.Title>{getDrawerTitle(actionDrawerMode)}</Drawer.Title>
+            <Drawer.Title>{getDrawerTitle(actionDrawerMode, t)}</Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-4 p-4">
             {formError ? <Alert variant="error">{formError}</Alert> : null}
             {actionDrawerMode === "retry_schedule" ? (
               <Alert variant="warning">
-                Overriding the retry schedule updates future retry timing for this case.
+                {t("dunning.detail.drawer.warning")}
               </Alert>
             ) : null}
             {actionDrawerMode === "retry_schedule" ? (
               <>
                 <div className="flex flex-col gap-y-2">
-                  <Label htmlFor="retry-intervals">Retry intervals (minutes)</Label>
+                  <Label htmlFor="retry-intervals">
+                    {t("dunning.detail.drawer.intervals")}
+                  </Label>
                   <Input
                     id="retry-intervals"
                     value={intervals}
                     onChange={(event) => setIntervals(event.target.value)}
-                    placeholder="1440, 4320, 10080"
+                    placeholder={t("dunning.detail.drawer.intervalsPlaceholder")}
                   />
                 </div>
                 <div className="flex flex-col gap-y-2">
-                  <Label htmlFor="retry-max-attempts">Max attempts</Label>
+                  <Label htmlFor="retry-max-attempts">
+                    {t("dunning.detail.drawer.maxAttempts")}
+                  </Label>
                   <Input
                     id="retry-max-attempts"
                     type="number"
@@ -846,7 +969,9 @@ const DunningDetailPage = () => {
             ) : null}
             <div className="flex flex-col gap-y-2">
               <Label htmlFor="dunning-reason">
-                {actionDrawerMode === "mark_unrecovered" ? "Reason *" : "Reason"}
+                {actionDrawerMode === "mark_unrecovered"
+                  ? t("dunning.detail.drawer.reasonRequired")
+                  : t("common.fields.reason")}
               </Label>
               <Textarea
                 id="dunning-reason"
@@ -854,10 +979,10 @@ const DunningDetailPage = () => {
                 onChange={(event) => setReason(event.target.value)}
                 placeholder={
                   actionDrawerMode === "retry_schedule"
-                    ? "Optional note about this retry policy override"
+                    ? t("dunning.detail.drawer.retryScheduleNote")
                     : actionDrawerMode === "mark_recovered"
-                      ? "Optional recovery note"
-                      : "Required reason"
+                      ? t("dunning.detail.drawer.recoveredNote")
+                      : t("dunning.detail.drawer.unrecoveredReason")
                 }
               />
             </div>
@@ -871,7 +996,7 @@ const DunningDetailPage = () => {
                   type="button"
                   disabled={isActionPending}
                 >
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </Drawer.Close>
               <Button
@@ -883,10 +1008,7 @@ const DunningDetailPage = () => {
                   void handleSubmitDrawer()
                 }}
               >
-                {getDrawerSubmitLabel(
-                  actionDrawerMode,
-                  isActionPending
-                )}
+                {getDrawerSubmitLabel(actionDrawerMode, isActionPending, t)}
               </Button>
             </div>
           </Drawer.Footer>
@@ -900,7 +1022,7 @@ export default DunningDetailPage
 
 export const handle = {
   breadcrumb: ({ params, data }: UIMatch<DunningCaseAdminDetailResponse>) =>
-    params?.id || data?.dunning_case?.id || "Dunning",
+    params?.id || data?.dunning_case?.id || translate("dunning.breadcrumb"),
 }
 
 const DetailRow = ({
@@ -940,57 +1062,47 @@ function parseIntervals(value: string) {
     .filter((part) => Number.isInteger(part) && part > 0)
 }
 
-function getDrawerTitle(mode: ActionDrawerMode) {
+function getDrawerTitle(mode: ActionDrawerMode, t: ReorderTranslate) {
   switch (mode) {
     case "mark_recovered":
-      return "Mark recovered"
+      return t("dunning.detail.actions.markRecovered")
     case "mark_unrecovered":
-      return "Mark unrecovered"
+      return t("dunning.detail.actions.markUnrecovered")
     case "retry_schedule":
-      return "Edit retry schedule"
+      return t("dunning.detail.actions.editRetrySchedule")
   }
 }
 
 function getDrawerSubmitLabel(
   mode: ActionDrawerMode,
-  pending = false
+  pending: boolean,
+  t: ReorderTranslate
 ) {
   switch (mode) {
     case "mark_recovered":
-      return pending ? "Marking recovered..." : "Mark recovered"
+      return pending
+        ? t("dunning.detail.actions.markingRecovered")
+        : t("dunning.detail.actions.markRecovered")
     case "mark_unrecovered":
-      return pending ? "Marking unrecovered..." : "Mark unrecovered"
+      return pending
+        ? t("dunning.detail.actions.markingUnrecovered")
+        : t("dunning.detail.actions.markUnrecovered")
     case "retry_schedule":
-      return pending ? "Saving schedule..." : "Save schedule"
+      return pending
+        ? t("dunning.detail.actions.savingSchedule")
+        : t("dunning.detail.actions.saveSchedule")
   }
 }
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, emptyValue: string) {
   if (!value) {
-    return "-"
+    return emptyValue
   }
 
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value))
-}
-
-function formatCaseStatus(status: DunningCaseAdminStatus) {
-  switch (status) {
-    case DunningCaseAdminStatus.OPEN:
-      return "Open"
-    case DunningCaseAdminStatus.RETRY_SCHEDULED:
-      return "Retry scheduled"
-    case DunningCaseAdminStatus.RETRYING:
-      return "Retrying"
-    case DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION:
-      return "Awaiting manual resolution"
-    case DunningCaseAdminStatus.RECOVERED:
-      return "Recovered"
-    case DunningCaseAdminStatus.UNRECOVERED:
-      return "Unrecovered"
-  }
 }
 
 function getCaseStatusColor(status: DunningCaseAdminStatus) {
@@ -1010,17 +1122,6 @@ function getCaseStatusColor(status: DunningCaseAdminStatus) {
   }
 }
 
-function formatAttemptStatus(status: DunningAttemptAdminStatus) {
-  switch (status) {
-    case DunningAttemptAdminStatus.PROCESSING:
-      return "Processing"
-    case DunningAttemptAdminStatus.SUCCEEDED:
-      return "Succeeded"
-    case DunningAttemptAdminStatus.FAILED:
-      return "Failed"
-  }
-}
-
 function getAttemptStatusColor(status: DunningAttemptAdminStatus) {
   switch (status) {
     case DunningAttemptAdminStatus.PROCESSING:
@@ -1032,38 +1133,18 @@ function getAttemptStatusColor(status: DunningAttemptAdminStatus) {
   }
 }
 
-function formatSubscriptionStatus(
-  status: DunningCaseAdminDetail["subscription"]["status"]
-) {
-  switch (status) {
-    case "active":
-      return "Active"
-    case "paused":
-      return "Paused"
-    case "cancelled":
-      return "Cancelled"
-    case "past_due":
-      return "Past due"
-  }
+function formatSubscriptionStatus(status: string, t: ReorderTranslate) {
+  return t(SUBSCRIPTION_STATUS_KEYS[status] ?? status)
 }
 
-function formatRenewalStatus(
-  status: NonNullable<DunningCaseAdminDetail["renewal"]>["status"]
-) {
-  switch (status) {
-    case "scheduled":
-      return "Scheduled"
-    case "processing":
-      return "Processing"
-    case "succeeded":
-      return "Succeeded"
-    case "failed":
-      return "Failed"
-  }
+function formatRenewalStatus(status: string, t: ReorderTranslate) {
+  return t(RENEWAL_STATUS_KEYS[status] ?? status)
 }
 
-function formatIntervals(intervals: number[]) {
-  return intervals.map((interval) => `${interval} min`).join(", ")
+function formatIntervals(intervals: number[], t: ReorderTranslate) {
+  return intervals
+    .map((interval) => t("dunning.intervals.minuteUnit", { value: interval }))
+    .join(", ")
 }
 
 function getAdminErrorMessage(error: unknown, fallback: string) {

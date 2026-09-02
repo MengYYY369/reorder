@@ -1,0 +1,1084 @@
+{
+  "menuItems": {
+    "subscriptions": "Subscriptions",
+    "planOffers": "Plans & Offers",
+    "renewals": "Renewals",
+    "dunning": "Dunning",
+    "cancellations": "Cancellation & Retention",
+    "analytics": "Analytics",
+    "activityLog": "Activity Log",
+    "settings": "Subscription Settings"
+  },
+  "common": {
+    "actions": {
+      "cancel": "Cancel",
+      "apply": "Apply",
+      "save": "Save",
+      "search": "Search",
+      "close": "Close"
+    },
+    "fields": {
+      "id": "ID",
+      "product": "Product",
+      "variant": "Variant",
+      "status": "Status",
+      "frequency": "Frequency",
+      "discount": "Discount",
+      "nextRenewal": "Next renewal",
+      "subscription": "Subscription",
+      "reference": "Reference",
+      "customer": "Customer",
+      "order": "Order",
+      "sku": "SKU",
+      "reason": "Reason",
+      "email": "Email",
+      "createdAt": "Created"
+    },
+    "filters": {
+      "yes": "Yes",
+      "no": "No",
+      "is": "is",
+      "clearAll": "Clear all",
+      "clearAllFilters": "Clear all filters",
+      "addFilter": "Add filter",
+      "removeFilter": "Remove {{label}} filter"
+    },
+    "placeholders": {
+      "searchProducts": "Search products..."
+    },
+    "empty": {
+      "noValue": "-"
+    },
+    "intervals": {
+      "week": "Weekly",
+      "month": "Monthly",
+      "year": "Yearly"
+    }
+  },
+  "planOffers": {
+    "pickers": {
+      "selectProduct": "Select product",
+      "selectProductHint": "Search and select the product that this configuration belongs to.",
+      "selectVariant": "Select variant",
+      "selectVariantHint": "Choose a variant from {{productTitle}}.",
+      "selectProductFirst": "Select a product first."
+    },
+    "list": {
+      "title": "Plans & Offers",
+      "description": "Configure product-level and variant-level subscription offers.",
+      "loadError": "Failed to load plan offers.",
+      "backToSubscriptions": "Back to Subscriptions",
+      "emptyFiltered": "No matching plan offers",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No plan offers yet",
+      "emptyHint": "Create a product-level or variant-level subscription offer to get started."
+    },
+    "columns": {
+      "name": "Name",
+      "target": "Target",
+      "status": "Status",
+      "frequencies": "Frequencies",
+      "effectiveSource": "Effective source",
+      "updated": "Updated",
+      "allVariants": "All variants",
+      "moreCount": "+{{count}} more"
+    },
+    "filters": {
+      "status": "Status",
+      "scope": "Scope",
+      "frequency": "Frequency",
+      "discountRange": "Discount range",
+      "discountRangeUpTo": "Up to {{max}}"
+    },
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "inactive": "Inactive"
+    },
+    "scope": {
+      "product": "Product",
+      "variant": "Variant"
+    },
+    "actions": {
+      "create": "Create",
+      "edit": "Edit",
+      "enable": "Enable",
+      "enabling": "Enabling...",
+      "disable": "Disable",
+      "disabling": "Disabling..."
+    },
+    "toast": {
+      "enabled": "Plan offer enabled",
+      "disabled": "Plan offer disabled",
+      "created": "Plan offer created",
+      "updated": "Plan offer updated"
+    },
+    "errors": {
+      "updateFailed": "Failed to update plan offer",
+      "createFailed": "Failed to create plan offer",
+      "loadFailed": "Failed to load plan offer."
+    },
+    "prompt": {
+      "enableTitle": "Enable plan offer?",
+      "enableDescription": "You are about to enable this plan offer. Do you want to continue?",
+      "disableTitle": "Disable plan offer?",
+      "disableDescription": "You are about to disable this plan offer. Do you want to continue?",
+      "removeFrequencyTitle": "Remove frequency?",
+      "removeFrequencyDescription": "This frequency row and its discount configuration will be removed.",
+      "remove": "Remove"
+    },
+    "form": {
+      "createTitle": "Create plan offer",
+      "createDescription": "Create a product-level or variant-level subscription offer.",
+      "editTitle": "Edit plan offer",
+      "loading": "Loading plan offer...",
+      "name": "Name",
+      "scope": "Scope",
+      "target": "Target",
+      "productLevelConfig": "Product-level configuration",
+      "variantLevelConfig": "Variant-level configuration",
+      "noProductSelected": "No product selected",
+      "noVariantSelected": "No variant selected",
+      "change": "Change",
+      "select": "Select",
+      "offerEnabled": "Offer enabled",
+      "offerEnabledHint": "Enable this offer as soon as it is created.",
+      "offerEnabledEditHint": "Enable or disable this configuration.",
+      "offerRules": "Offer rules",
+      "offerRulesHint": "Define optional offer constraints such as minimum period, trial behavior, and stacking policy.",
+      "offerRulesEditHint": "Update minimum period, trial behavior, and stacking policy.",
+      "minimumCycles": "Minimum cycles",
+      "minimumCyclesHint": "Leave empty if there is no minimum subscription period.",
+      "stackingPolicy": "Stacking policy",
+      "stackingPolicyHint": "Control whether this offer can stack with other discounts.",
+      "stackingAllowed": "Allowed",
+      "stackingDisallowAll": "Disallow all",
+      "stackingDisallowSubscriptionDiscounts": "Disallow subscription discounts",
+      "trialEnabled": "Trial enabled",
+      "trialEnabledHint": "Allow a trial period for this offer.",
+      "trialDays": "Trial days",
+      "frequencies": "Frequencies",
+      "frequenciesHint": "Define allowed frequencies and optional discounts.",
+      "frequenciesEditHint": "Update allowed frequencies and their discounts.",
+      "addFrequency": "Add frequency",
+      "interval": "Interval",
+      "value": "Value",
+      "discountForFrequency": "Discount for this frequency",
+      "discountForFrequencyHint": "Enable only if this frequency should have a discount.",
+      "discountType": "Discount type",
+      "percentage": "Percentage",
+      "fixed": "Fixed",
+      "discountValue": "Discount value"
+    },
+    "validation": {
+      "selectVariant": "Select a variant",
+      "frequencyUnique": "Frequency must be unique",
+      "discountValueRequired": "Discount value is required",
+      "trialDaysRequired": "Trial days is required when trial is enabled",
+      "trialDaysPositive": "Trial days must be greater than 0"
+    }
+  },
+  "subscriptions": {
+    "breadcrumb": "Subscription",
+    "status": {
+      "active": "Active",
+      "paused": "Paused",
+      "cancelled": "Cancelled",
+      "pastDue": "Past due"
+    },
+    "orderWidget": {
+      "title": "Subscription",
+      "badge": "Subscription order",
+      "loading": "Loading subscription summary...",
+      "loadError": "Failed to load subscription summary",
+      "oneTimeOrder": "One-time order",
+      "noDiscount": "No discount"
+    },
+    "list": {
+      "title": "Subscriptions",
+      "description": "Monitor subscription status, cadence, and upcoming renewals.",
+      "loadError": "Failed to load subscriptions.",
+      "emptyFiltered": "No matching subscriptions",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No subscriptions yet",
+      "emptyHint": "Subscriptions will appear here once customers start recurring orders."
+    },
+    "columns": {
+      "reference": "Reference",
+      "projectedAfterSkip": "Projected after skipped cycle",
+      "scheduled": "Scheduled"
+    },
+    "filters": {
+      "trial": "Trial",
+      "skipNextCycle": "Skip next cycle",
+      "overdue": "Overdue",
+      "next7Days": "Next 7 days",
+      "next30Days": "Next 30 days",
+      "next90Days": "Next 90 days"
+    },
+    "actions": {
+      "pause": "Pause",
+      "pausing": "Pausing...",
+      "resume": "Resume",
+      "resuming": "Resuming...",
+      "cancelling": "Cancelling...",
+      "cancelSubscription": "Cancel subscription",
+      "keepSubscription": "Keep subscription"
+    },
+    "prompt": {
+      "pauseTitle": "Pause subscription?",
+      "pauseDescription": "You are about to pause this subscription. Do you want to continue?",
+      "resumeTitle": "Resume subscription?",
+      "resumeDescription": "You are about to resume this subscription. Do you want to continue?",
+      "cancelTitle": "Cancel subscription?",
+      "cancelDescription": "You are about to cancel this subscription. This action cannot be undone."
+    },
+    "toast": {
+      "paused": "Subscription paused",
+      "resumed": "Subscription resumed",
+      "cancelled": "Subscription cancelled"
+    },
+    "errors": {
+      "pauseFailed": "Failed to pause subscription",
+      "resumeFailed": "Failed to resume subscription",
+      "cancelFailed": "Failed to cancel subscription",
+      "planChange": "Plan change scheduled",
+      "planChangeFailed": "Failed to schedule plan change",
+      "addressUpdated": "Shipping address updated",
+      "addressFailed": "Failed to update shipping address"
+    },
+    "detail": {
+      "title": "Subscription",
+      "description": "Subscription details and upcoming plan changes.",
+      "loading": "Loading subscription details...",
+      "loadError": "Failed to load subscription details.",
+      "unavailable": "Subscription details are unavailable.",
+      "editShippingAddress": "Edit shipping address",
+      "noPendingChange": "No pending plan change is scheduled for this subscription.",
+      "noLinkedOrders": "No linked orders yet",
+      "latestRenewal": "Latest renewal",
+      "initialOrder": "Initial order",
+      "renewalNumbered": "Renewal {{index}}",
+      "sections": {
+        "overview": "Overview",
+        "subscription": "Subscription",
+        "shippingAddress": "Shipping address",
+        "customer": "Customer",
+        "product": "Product",
+        "orders": "Orders",
+        "pendingPlanChange": "Pending plan change",
+        "activityLog": "Activity Log",
+        "subscriptionSnapshot": "Subscription snapshot",
+        "changedFields": "Changed fields",
+        "previousState": "Previous state",
+        "newState": "New state",
+        "metadata": "Metadata"
+      },
+      "errors": {
+        "addressRequired": "Fill in all required address fields",
+        "postalCodeInvalid": "Enter a valid postal code and 2-letter country code"
+      },
+      "fields": {
+        "startedAt": "Started at",
+        "lastRenewal": "Last renewal",
+        "effectiveAt": "Effective at",
+        "variantId": "Variant ID",
+        "customerId": "Customer ID",
+        "event": "Event",
+        "actor": "Actor",
+        "created": "Created",
+        "createdFrom": "Created from",
+        "createdTo": "Created to",
+        "summary": "Summary",
+        "domain": "Domain",
+        "recipient": "Recipient",
+        "address": "Address",
+        "addressLine1": "Address line 1",
+        "addressLine2": "Address line 2",
+        "city": "City",
+        "postalCode": "Postal code",
+        "province": "Province / State",
+        "countryCode": "Country code",
+        "country": "Country",
+        "phone": "Phone",
+        "company": "Company",
+        "firstName": "First name",
+        "lastName": "Last name"
+      }
+    },
+    "addressHints": {
+      "effectiveAtOptional": "Leave empty to let the backend use the default effective date.",
+      "countryCodeIso": "Use the two-letter ISO country code, for example PL or US."
+    },
+    "planChange": {
+      "title": "Schedule plan change",
+      "frequencyInterval": "Frequency interval",
+      "frequencyValue": "Frequency value",
+      "selectVariant": "Select a variant",
+      "selectInterval": "Select interval",
+      "loadingVariants": "Loading variants...",
+      "variantLoadError": "Failed to load product variants.",
+      "noVariants": "No variants are available for this product.",
+      "errors": {
+        "variantRequired": "Select a variant",
+        "frequencyValueInvalid": "Frequency value must be a positive integer"
+      }
+    },
+    "timeline": {
+      "loading": "Loading activity log...",
+      "loadError": "Failed to load activity log.",
+      "empty": "No activity log events found.",
+      "eventTitle": "Activity Log Event",
+      "eventLoading": "Loading activity event...",
+      "eventLoadError": "Failed to load activity event details.",
+      "noSummary": "No summary",
+      "noChangedFields": "No changed fields captured",
+      "noData": "No data",
+      "actors": {
+        "admin": "Admin",
+        "customer": "Customer",
+        "system": "System",
+        "scheduler": "Scheduler"
+      },
+      "domains": {
+        "subscriptions": "Subscriptions",
+        "renewals": "Renewals",
+        "dunning": "Dunning",
+        "cancellations": "Cancellation"
+      },
+      "summaryFields": {
+        "subscriptionCreated": "Subscription created",
+        "pendingUpdateData": "Scheduled plan change",
+        "status": "Status changed",
+        "recipient": "Recipient updated",
+        "address": "Address",
+        "addressLinesChanged": "Address updated",
+        "postalCodeChanged": "Postal code updated",
+        "phoneChanged": "Phone updated",
+        "countryCode": "Country updated",
+        "province": "Province updated",
+        "city": "City updated"
+      }
+    }
+  },
+  "renewals": {
+    "breadcrumb": "Renewal",
+    "list": {
+      "title": "Renewals",
+      "description": "Monitor scheduled subscription renewal cycles and their latest execution state.",
+      "loadError": "Failed to load renewals.",
+      "emptyFiltered": "No matching renewal cycles",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No renewal cycles yet",
+      "emptyHint": "Renewal cycles will appear here once subscriptions are scheduled for processing."
+    },
+    "columns": {
+      "scheduled": "Scheduled",
+      "subscription": "Subscription",
+      "status": "Status",
+      "approval": "Approval",
+      "lastAttempt": "Last attempt",
+      "operationalCycle": "Operational cycle: {{value}}",
+      "noAttemptsYet": "No attempts yet"
+    },
+    "filters": {
+      "status": "Status",
+      "approvalStatus": "Approval status",
+      "lastAttemptResult": "Last attempt result",
+      "scheduledFrom": "Scheduled from",
+      "scheduledTo": "Scheduled to"
+    },
+    "status": {
+      "scheduled": "Scheduled",
+      "processing": "Processing",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "attemptStatus": {
+      "processing": "Processing",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "approval": {
+      "notRequired": "Not required",
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "pendingApproval": "Pending approval"
+    },
+    "relativeStatus": {
+      "awaitingProcessing": "Awaiting processing",
+      "currentlyProcessing": "Currently processing",
+      "processed": "Processed",
+      "needsReview": "Needs review"
+    },
+    "detail": {
+      "title": "Renewal",
+      "loading": "Loading renewal details...",
+      "loadError": "Failed to load renewal details.",
+      "unavailable": "Renewal details are unavailable.",
+      "header": "Renewal cycle",
+      "description": "Review execution status, approval state, linked records, and attempt history.",
+      "actions": {
+        "forceRenewal": "Force renewal",
+        "forcing": "Forcing...",
+        "approveChanges": "Approve changes",
+        "rejectChanges": "Reject changes",
+        "approve": "Approve",
+        "reject": "Reject"
+      },
+      "prompt": {
+        "forceTitle": "Force renewal?",
+        "forceDescription": "You are about to manually trigger this renewal cycle. Do you want to continue?",
+        "approveTitle": "Approve changes?",
+        "approveDescription": "You are about to approve the pending changes for this renewal cycle.",
+        "rejectTitle": "Reject changes?",
+        "rejectDescription": "You are about to reject the pending changes for this renewal cycle."
+      },
+      "toast": {
+        "forced": "Renewal forced",
+        "approved": "Pending changes approved",
+        "rejected": "Pending changes rejected"
+      },
+      "errors": {
+        "forceFailed": "Failed to force renewal",
+        "approveFailed": "Failed to approve changes",
+        "rejectFailed": "Failed to reject changes",
+        "reasonRequired": "Reason is required"
+      },
+      "sections": {
+        "cycleOverview": "Cycle overview",
+        "approvalSummary": "Approval summary",
+        "pendingChanges": "Pending changes",
+        "attemptHistory": "Attempt history",
+        "technicalMetadata": "Technical metadata",
+        "subscriptionSummary": "Subscription summary",
+        "generatedOrderSummary": "Generated order summary"
+      },
+      "fields": {
+        "projectedDelivery": "Projected delivery",
+        "operationalCycle": "Operational cycle",
+        "processedAt": "Processed at",
+        "createdAt": "Created at",
+        "lastError": "Last error",
+        "noErrorRecorded": "No error recorded",
+        "required": "Required",
+        "decidedAt": "Decided at",
+        "decidedBy": "Decided by",
+        "effectiveAt": "Effective at",
+        "variantId": "Variant ID",
+        "noPendingChanges": "No pending changes are attached to this renewal cycle.",
+        "attempt": "Attempt",
+        "started": "Started",
+        "finished": "Finished",
+        "error": "Error",
+        "order": "Order",
+        "noErrorMessage": "No error message",
+        "noAttempts": "No attempts have been recorded for this renewal cycle yet.",
+        "noMetadata": "No metadata was stored for this renewal cycle.",
+        "noOrderGenerated": "No order generated",
+        "orderStatus": "Order status",
+        "orderId": "Order ID"
+      },
+      "drawer": {
+        "approveTitle": "Approve changes",
+        "rejectTitle": "Reject changes",
+        "reasonRequired": "Reason *",
+        "optionalNote": "Optional review note",
+        "requiredRejectionReason": "Required rejection reason"
+      }
+    }
+  },
+  "dunning": {
+    "breadcrumb": "Dunning",
+    "list": {
+      "title": "Dunning",
+      "description": "Monitor past-due subscriptions, retry timing, and recovery state.",
+      "loadError": "Failed to load dunning cases.",
+      "emptyFiltered": "No matching dunning cases",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No dunning cases yet",
+      "emptyHint": "Dunning cases will appear here after failed renewal payments enter the recovery flow."
+    },
+    "columns": {
+      "subscription": "Subscription",
+      "status": "Status",
+      "nextRetry": "Next retry",
+      "attempts": "Attempts",
+      "lastError": "Last error",
+      "lastAttemptAt": "Last attempt {{value}}",
+      "noRetryAttemptsYet": "No retry attempts yet",
+      "noPaymentErrorCode": "No payment error code",
+      "unknownProvider": "Unknown provider"
+    },
+    "filters": {
+      "status": "Status",
+      "providerId": "Provider id",
+      "errorCode": "Error code",
+      "attemptRange": "Attempt range",
+      "min": "Min",
+      "max": "Max",
+      "nextRetryFrom": "Next retry from",
+      "nextRetryTo": "Next retry to",
+      "provider": "Provider",
+      "attemptCount": "Attempt count",
+      "upTo": "Up to {{max}}"
+    },
+    "status": {
+      "open": "Open",
+      "retryScheduled": "Retry scheduled",
+      "retrying": "Retrying",
+      "awaitingManualResolution": "Awaiting manual resolution",
+      "recovered": "Recovered",
+      "unrecovered": "Unrecovered"
+    },
+    "attemptStatus": {
+      "processing": "Processing",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "retryWindow": {
+      "recovered": "Recovered",
+      "closedUnrecovered": "Closed as unrecovered",
+      "waitingManualResolution": "Waiting for manual resolution",
+      "noRetryScheduled": "No retry scheduled",
+      "queuedForRetry": "Queued for retry"
+    },
+    "dateRange": {
+      "fromTo": "{{from}} to {{to}}",
+      "from": "From {{value}}",
+      "until": "Until {{value}}"
+    },
+    "intervals": {
+      "minuteUnit": "{{value}} min"
+    },
+    "detail": {
+      "title": "Dunning case",
+      "loading": "Loading dunning case details...",
+      "loadError": "Failed to load dunning case details.",
+      "unavailable": "Dunning case details are unavailable.",
+      "header": "Dunning case",
+      "description": "Review recovery state, linked records, retry timing, and attempt history.",
+      "actions": {
+        "retryNow": "Retry now",
+        "retrying": "Retrying...",
+        "markRecovered": "Mark recovered",
+        "markUnrecovered": "Mark unrecovered",
+        "markingRecovered": "Marking recovered...",
+        "markingUnrecovered": "Marking unrecovered...",
+        "editRetrySchedule": "Edit retry schedule",
+        "saveSchedule": "Save schedule",
+        "savingSchedule": "Saving schedule..."
+      },
+      "prompt": {
+        "retryNowTitle": "Retry payment now?",
+        "retryNowDescription": "You are about to trigger an immediate payment retry for this dunning case.",
+        "overrideTitle": "Override retry schedule?",
+        "overrideDescription": "You are about to replace the current retry schedule for this dunning case.",
+        "markRecoveredTitle": "Mark as recovered?",
+        "markRecoveredDescription": "You are about to close this case as recovered.",
+        "markUnrecoveredTitle": "Mark as unrecovered?",
+        "markUnrecoveredDescription": "You are about to close this case as unrecovered."
+      },
+      "toast": {
+        "retryStarted": "Retry started",
+        "markedRecovered": "Case marked as recovered",
+        "markedUnrecovered": "Case marked as unrecovered",
+        "retryScheduleUpdated": "Retry schedule updated"
+      },
+      "errors": {
+        "retryNowFailed": "Failed to retry now",
+        "markRecoveredFailed": "Failed to mark as recovered",
+        "markUnrecoveredFailed": "Failed to mark as unrecovered",
+        "retryScheduleFailed": "Failed to update retry schedule",
+        "reasonRequired": "Reason is required",
+        "intervalsRequired": "At least one retry interval is required",
+        "maxAttemptsPositive": "Max attempts must be a positive integer",
+        "maxAttemptsMismatch": "Max attempts must equal the number of retry intervals"
+      },
+      "sections": {
+        "overview": "Case overview",
+        "payment": "Payment summary",
+        "retrySchedule": "Retry schedule",
+        "attempts": "Attempt timeline",
+        "metadata": "Technical metadata",
+        "subscription": "Subscription summary",
+        "renewal": "Renewal summary",
+        "order": "Order / payment summary"
+      },
+      "fields": {
+        "attemptCount": "Attempt count",
+        "nextRetry": "Next retry",
+        "lastAttempt": "Last attempt",
+        "recoveredAt": "Recovered at",
+        "closedAt": "Closed at",
+        "createdAt": "Created at",
+        "updatedAt": "Updated at",
+        "lastErrorCode": "Last error code",
+        "provider": "Provider",
+        "lastErrorMessage": "Last error message",
+        "noPaymentErrorMessage": "No payment error message",
+        "latestPaymentReference": "Latest payment reference",
+        "recoveryReason": "Recovery reason",
+        "strategy": "Strategy",
+        "timezone": "Timezone",
+        "intervals": "Intervals",
+        "source": "Source",
+        "attempt": "Attempt",
+        "started": "Started",
+        "finished": "Finished",
+        "error": "Error",
+        "paymentReference": "Payment reference",
+        "renewalStatus": "Renewal status",
+        "scheduledFor": "Scheduled for",
+        "generatedOrderId": "Generated order id",
+        "orderStatus": "Order status",
+        "orderId": "Order ID"
+      },
+      "empty": {
+        "noAttempts": "No attempts have been recorded for this dunning case yet.",
+        "noMetadata": "No metadata was stored for this dunning case.",
+        "noError": "No error message",
+        "noLinkedRenewal": "No linked renewal",
+        "noLinkedOrder": "No linked order"
+      },
+      "drawer": {
+        "warning": "Overriding the retry schedule updates future retry timing for this case.",
+        "intervals": "Retry intervals (minutes)",
+        "intervalsPlaceholder": "1440, 4320, 10080",
+        "maxAttempts": "Max attempts",
+        "reasonRequired": "Reason *",
+        "retryScheduleNote": "Optional note about this retry policy override",
+        "recoveredNote": "Optional recovery note",
+        "unrecoveredReason": "Required reason"
+      }
+    }
+  },
+  "cancellations": {
+    "breadcrumb": "Cancellation",
+    "list": {
+      "title": "Cancellation & Retention",
+      "description": "Review cancellation cases, churn reasons, and retention outcomes.",
+      "loadError": "Failed to load cancellation cases.",
+      "empty": "No cancellation cases",
+      "emptyHint": "No cancellation and retention cases match the current filters."
+    },
+    "columns": {
+      "subscription": "Subscription",
+      "reasonCategory": "Reason category",
+      "outcome": "Outcome",
+      "created": "Created"
+    },
+    "filters": {
+      "createdFrom": "Created from",
+      "createdTo": "Created to"
+    },
+    "caseStatus": {
+      "requested": "Requested",
+      "evaluating": "Evaluating",
+      "evaluatingRetention": "Evaluating retention",
+      "retentionOffered": "Retention offered",
+      "retained": "Retained",
+      "paused": "Paused",
+      "canceled": "Canceled"
+    },
+    "outcome": {
+      "retained": "Retained",
+      "paused": "Paused",
+      "canceled": "Canceled"
+    },
+    "offerType": {
+      "pauseOffer": "Pause offer",
+      "discountOffer": "Discount offer",
+      "bonusOffer": "Bonus offer"
+    },
+    "decisionStatus": {
+      "proposed": "Proposed",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "applied": "Applied",
+      "expired": "Expired"
+    },
+    "reasonCategory": {
+      "price": "Price",
+      "productFit": "Product fit",
+      "delivery": "Delivery",
+      "billing": "Billing",
+      "temporaryPause": "Temporary pause",
+      "switchedCompetitor": "Switched competitor",
+      "other": "Other",
+      "unclassified": "Unclassified"
+    },
+    "fields": {
+      "offerType": "Offer type",
+      "finalizedBy": "Finalized by",
+      "finalizedAt": "Finalized at",
+      "cancellationEffectiveAt": "Cancellation effective at",
+      "cancelledAt": "Cancelled at"
+    },
+    "actions": {
+      "applyOffer": "Apply retention offer",
+      "applyPauseOffer": "Apply pause offer",
+      "finalize": "Finalize cancellation",
+      "editReason": "Edit reason"
+    },
+    "toast": {
+      "offerApplied": "Retention offer applied",
+      "finalized": "Cancellation finalized",
+      "reasonUpdated": "Reason updated"
+    },
+    "errors": {
+      "applyOfferFailed": "Failed to apply retention offer",
+      "finalizeFailed": "Failed to finalize cancellation",
+      "reasonUpdateFailed": "Failed to update reason",
+      "reasonRequired": "Reason is required",
+      "offerNotAllowed": "Selected retention offer is not allowed for this case",
+      "pauseOfferRequiresCyclesOrResume": "Pause offer requires pause cycles or resume date",
+      "discountValuePositive": "Discount value must be greater than 0",
+      "bonusValueRequired": "Bonus value is required for free cycle or credit"
+    },
+    "prompt": {
+      "applyPauseTitle": "Apply pause offer?",
+      "applyPauseDescription": "You are about to pause the subscription as a retention outcome and close this case as paused.",
+      "applyDiscountTitle": "Apply discount offer?",
+      "applyDiscountDescription": "You are about to apply a retention discount and close this case as retained.",
+      "applyBonusTitle": "Apply bonus offer?",
+      "applyBonusDescription": "You are about to apply a retention bonus and close this case as retained.",
+      "finalizeTitle": "Finalize cancellation?",
+      "finalizeDescription": "You are about to finalize this case as canceled and update the subscription lifecycle."
+    },
+    "drawer": {
+      "updateReason": "Update reason",
+      "loadingLatest": "Loading latest case data for this action...",
+      "selectOfferType": "Select offer type",
+      "noOffersAvailable": "No retention offers are available for the current subscription state.",
+      "pauseCycles": "Pause cycles",
+      "resumeAt": "Resume at",
+      "discountType": "Discount type",
+      "percentage": "Percentage",
+      "fixed": "Fixed",
+      "discountValue": "Discount value",
+      "durationCycles": "Duration cycles",
+      "bonusType": "Bonus type",
+      "freeCycle": "Free cycle",
+      "gift": "Gift",
+      "credit": "Credit",
+      "bonusValue": "Value",
+      "label": "Label",
+      "optionalLabel": "Optional label",
+      "offerNote": "Offer note",
+      "offerNotePlaceholder": "Optional note attached to the offer payload",
+      "decisionReason": "Decision reason",
+      "decisionReasonPlaceholder": "Optional reason or customer response",
+      "reasonRequiredHint": "Reason is required before final cancel",
+      "notes": "Notes",
+      "optionalOperatorNotes": "Optional operator notes",
+      "optionalFinalNotes": "Optional final cancellation notes",
+      "selectCategory": "Select a category",
+      "changeReason": "Change reason",
+      "optionalUpdateExplanation": "Optional explanation for the update",
+      "captureChurnReason": "Capture the churn reason",
+      "effectiveAt": "Effective at",
+      "immediately": "Immediately",
+      "endOfCycle": "End of cycle",
+      "applyOfferFooter": "Apply offer",
+      "continueFooter": "Continue"
+    },
+    "detail": {
+      "title": "Cancellation case",
+      "header": "Cancellation case",
+      "description": "Review cancellation context, retention actions, linked module summaries, and final outcome.",
+      "loading": "Loading cancellation case details...",
+      "loadError": "Failed to load cancellation case details.",
+      "unavailable": "Cancellation case details are unavailable.",
+      "sections": {
+        "caseOverview": "Case overview",
+        "timeline": "Decision timeline",
+        "offerHistory": "Offer history",
+        "metadata": "Technical metadata",
+        "subscriptionSummary": "Subscription summary",
+        "linkedDunning": "Linked dunning summary",
+        "linkedRenewal": "Linked renewal summary"
+      },
+      "fields": {
+        "offer": "Offer",
+        "decided": "Decided",
+        "applied": "Applied",
+        "scheduledFor": "Scheduled for",
+        "approval": "Approval",
+        "generatedOrder": "Generated order",
+        "attemptCount": "Attempt count",
+        "nextRetry": "Next retry",
+        "lastError": "Last error"
+      },
+      "timeline": {
+        "offerEventRecorded": "Retention offer event recorded",
+        "finalOutcome": "Final outcome",
+        "terminalOutcome": "Case reached a terminal outcome",
+        "effectiveAt": "Effective at {{date}}"
+      },
+      "empty": {
+        "noOutcome": "No final outcome yet",
+        "noReason": "No reason recorded",
+        "noTimelineEntries": "No retention offers or final outcome entries have been recorded yet.",
+        "noOffers": "No retention offers have been recorded for this case yet.",
+        "noPayloadSummary": "No payload summary",
+        "noMetadata": "No metadata was stored for this case.",
+        "noLinkedDunning": "No active dunning case linked",
+        "noLinkedRenewal": "No linked renewal cycle"
+      }
+    }
+  },
+  "activityLog": {
+    "list": {
+      "title": "Activity Log",
+      "description": "Review subscription lifecycle events across renewals, dunning, and cancellation workflows.",
+      "loadError": "Failed to load activity log entries.",
+      "emptyFiltered": "No log entries match the current filters",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No activity log entries yet",
+      "emptyHint": "Activity log entries will appear here as subscription workflows run."
+    },
+    "columns": {
+      "subscription": "Subscription",
+      "created": "Created",
+      "actor": "Actor",
+      "event": "Event",
+      "reason": "Reason"
+    },
+    "filters": {
+      "addFilter": "Add filter",
+      "quickPresets": "Quick presets",
+      "eventType": "Event type",
+      "preset": "Preset",
+      "createdFrom": "Created from",
+      "createdTo": "Created to"
+    },
+    "actor": {
+      "admin": "Admin",
+      "customer": "Customer",
+      "system": "System",
+      "scheduler": "Scheduler"
+    },
+    "domains": {
+      "subscriptions": "Subscriptions",
+      "renewals": "Renewals",
+      "dunning": "Dunning",
+      "cancellation": "Cancellation",
+      "cancellationFull": "Cancellation & Retention",
+      "unknown": "Activity"
+    },
+    "summaryFields": {
+      "subscriptionCreated": "Subscription created",
+      "pendingUpdateData": "Scheduled plan change",
+      "status": "Status changed",
+      "recipient": "Recipient updated",
+      "address": "Address",
+      "addressLinesChanged": "Address updated",
+      "postalCodeChanged": "Postal code updated",
+      "phoneChanged": "Phone updated",
+      "countryCode": "Country updated",
+      "province": "Province updated",
+      "city": "City updated"
+    },
+    "eventDetail": {
+      "title": "Activity Log Event",
+      "loading": "Loading event details...",
+      "loadError": "Failed to load activity log detail.",
+      "close": "Close",
+      "overview": "Overview",
+      "event": "Event",
+      "domain": "Domain",
+      "actor": "Actor",
+      "created": "Created",
+      "reason": "Reason",
+      "summary": "Summary",
+      "subscriptionSnapshot": "Subscription Snapshot",
+      "reference": "Reference",
+      "customer": "Customer",
+      "product": "Product",
+      "variant": "Variant",
+      "changedFields": "Changed Fields",
+      "changedFieldsLabel": "Changed fields",
+      "noChangedFields": "No changed fields captured",
+      "previousState": "Previous State",
+      "newState": "New State",
+      "metadata": "Metadata",
+      "noData": "No data",
+      "noSummary": "No summary"
+    }
+  },
+  "analytics": {
+    "list": {
+      "title": "Analytics",
+      "description": "Review recurring revenue, churn, LTV, and subscription creation trends from the analytics read model.",
+      "loadError": "Failed to load analytics.",
+      "exportError": "Failed to export analytics",
+      "trendOverview": "Trend overview",
+      "noDataRange": "No analytics data for this range",
+      "noDataRangeHint": "Try widening the date range or removing filters to inspect a broader slice of subscription activity.",
+      "noBuckets": "No buckets returned for the current range.",
+      "noComparisonWindow": "No comparison window available yet.",
+      "noTrendPoints": "No trend points available",
+      "noTrendPointsHint": "This metric does not have enough snapshot data for the selected filters.",
+      "noDailyBuckets": "No daily buckets available",
+      "noDailyBucketsHint": "Pick a valid date range to inspect daily subscription creation."
+    },
+    "filters": {
+      "addFilter": "Add filter",
+      "dateFrom": "Date from",
+      "dateTo": "Date to",
+      "groupBy": "Group by",
+      "status": "Status",
+      "frequency": "Frequency",
+      "product": "Product",
+      "allProducts": "All products"
+    },
+    "metricTabs": {
+      "mrr": "MRR",
+      "churn": "Churn",
+      "ltv": "LTV",
+      "created": "Created"
+    },
+    "status": {
+      "active": "Active",
+      "paused": "Paused",
+      "pastDue": "Past due",
+      "cancelled": "Cancelled"
+    },
+    "groupBy": {
+      "day": "Day",
+      "week": "Week",
+      "month": "Month"
+    },
+    "frequency": {
+      "weekly": "Weekly",
+      "every2Weeks": "Every 2 weeks",
+      "monthly": "Monthly",
+      "quarterly": "Quarterly",
+      "yearly": "Yearly",
+      "everyNWeeks": "Every {{value}} weeks",
+      "everyNMonths": "Every {{value}} months",
+      "everyNYears": "Every {{value}} years"
+    },
+    "units": {
+      "currency": "Currency",
+      "percent": "Percent",
+      "count": "Subscriptions",
+      "unavailable": "Unavailable"
+    },
+    "trend": {
+      "rangeSummary": "{{from}} to {{to}}",
+      "rangeEmpty": "No buckets returned for the current range.",
+      "max": "Max",
+      "min": "Min",
+      "dailyBars": "Daily bars",
+      "bucketsDay": "Day buckets",
+      "bucketsWeek": "Week buckets",
+      "bucketsMonth": "Month buckets",
+      "createdUtcNote": "Created always renders one UTC bar per day.",
+      "createdRangeNote": "Created uses one UTC bar per day and only follows the selected date range.",
+      "trendUtcNote": "Trends are bucketed in UTC and follow the same filters as the KPI cards.",
+      "ariaTrendChart": "{{label}} trend chart",
+      "ariaBarChart": "{{label}} bar chart",
+      "flat": "Flat vs previous window · {{delta}}",
+      "up": "Trending up vs previous window · {{delta}}",
+      "down": "Trending down vs previous window · {{delta}}",
+      "createdBarTitle": "{{bucket}}: {{value}} subscriptions created"
+    },
+    "export": {
+      "button": "Export",
+      "csv": "Export CSV",
+      "json": "Export JSON"
+    },
+    "toast": {
+      "exported": "Analytics {{format}} export downloaded"
+    }
+  },
+  "settings": {
+    "list": {
+      "title": "Subscription Settings",
+      "description": "Manage runtime defaults for trials, dunning, renewals, and cancellation flows.",
+      "loading": "Loading current runtime configuration…",
+      "loadError": "Failed to load subscription settings"
+    },
+    "intro": {
+      "futureOperations": "Changes apply to future operations and newly created process state.",
+      "existingCases": "Existing active dunning, cancellation, and renewal processes keep their persisted configuration."
+    },
+    "status": {
+      "fallbackDefaults": "Using fallback defaults until the first save",
+      "noRecord": "No persisted settings record exists yet.",
+      "persistedVersion": "Persisted version {{version}}",
+      "lastUpdatedAt": "Last updated at {{date}}",
+      "updatedBy": "Updated by {{actor}}",
+      "bootstrapNoActor": "Updated by system bootstrap or no actor recorded."
+    },
+    "alerts": {
+      "resetUnsupported": "Reset to defaults is not supported yet in the admin UI.",
+      "unsavedChanges": "Unsaved changes in: {{sections}}",
+      "narrowImpact": "These changes update global defaults for future subscription operations.",
+      "wideImpact": "These changes affect defaults for future renewal, dunning, or cancellation operations. Existing active cases keep their persisted process state.",
+      "applyAfterSave": "Changes will apply after this save completes.",
+      "noUnsavedChanges": "No unsaved changes.",
+      "saving": "Saving updated defaults…"
+    },
+    "sections": {
+      "trial": "Trial",
+      "dunning": "Dunning",
+      "renewals": "Renewals",
+      "cancellation": "Cancellation Defaults",
+      "trialDescription": "Configure the default trial period applied to future subscription operations.",
+      "dunningDescription": "Define the retry schedule used when a new dunning case is created.",
+      "renewalsDescription": "Choose the default behavior used when a new renewal cycle is created.",
+      "cancellationDescription": "Define how newly created cancellation cases should start."
+    },
+    "changedSections": {
+      "trial": "Trial",
+      "dunning": "Dunning",
+      "renewals": "Renewals",
+      "cancellation": "Cancellation"
+    },
+    "fields": {
+      "defaultTrialDays": "Default trial days",
+      "retryIntervals": "Retry intervals",
+      "retryIntervalsHint": "Values are stored in minutes and must be strictly increasing.",
+      "addInterval": "Add interval",
+      "maxDunningAttempts": "Max dunning attempts",
+      "defaultRenewalBehavior": "Default renewal behavior",
+      "defaultCancellationBehavior": "Default cancellation behavior"
+    },
+    "behaviorOptions": {
+      "renewal": {
+        "process_immediately": {
+          "label": "Process immediately",
+          "hint": "New renewal cycles default to immediate processing when no reviewable change is pending."
+        },
+        "require_review_for_pending_changes": {
+          "label": "Review pending changes",
+          "hint": "New renewal cycles require approval when a pending subscription update becomes applicable."
+        }
+      },
+      "cancellation": {
+        "recommend_retention_first": {
+          "label": "Recommend retention first",
+          "hint": "New cancellation cases start with a retention-first posture before direct cancellation."
+        },
+        "allow_direct_cancellation": {
+          "label": "Allow direct cancellation",
+          "hint": "New cancellation cases can proceed directly to cancellation without a retention-first default."
+        }
+      }
+    },
+    "validation": {
+      "retryIntervalPositive": "Retry interval must be a positive integer",
+      "retryIntervalsStrictlyIncreasing": "Retry intervals must be strictly increasing",
+      "maxAttemptsMatchIntervals": "Max dunning attempts must match the number of retry intervals"
+    },
+    "toast": {
+      "updated": "Subscription settings updated",
+      "updateFailed": "Failed to update subscription settings",
+      "versionConflict": "Settings changed in another session. Refresh the page and try saving again."
+    }
+  }
+}

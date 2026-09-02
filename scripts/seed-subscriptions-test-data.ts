@@ -154,14 +154,6 @@ type OrderModuleService = {
   createOrders(data: Record<string, unknown>): Promise<{ id: string }>
 }
 
-type PgConnection = {
-  (tableName: string): {
-    select(...columns: string[]): {
-      whereRaw(sql: string, bindings?: unknown[]): Promise<Array<{ id: string }>>
-    }
-  }
-}
-
 const FIXED_TIME = new Date("2026-04-15T10:00:00.000Z")
 
 const IDS = {
@@ -588,7 +580,7 @@ async function ensureRenewalOrders(
 ) {
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const link = container.resolve(ContainerRegistrationKeys.LINK)
-  const pgConnection = container.resolve<PgConnection>(
+  const pgConnection = container.resolve(
     ContainerRegistrationKeys.PG_CONNECTION
   )
   const subscriptionById = new Map(subscriptions.map((sub) => [sub.id, sub]))

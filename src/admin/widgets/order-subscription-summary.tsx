@@ -9,6 +9,7 @@ import {
 import { ArrowPath, ShoppingBag, TriangleRightMini } from "@medusajs/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { sdk } from "../lib/client";
 import {
   AdminOrderSubscriptionSummaryResponse,
@@ -28,9 +29,16 @@ const getSubscriptionStatusColor = (status: SubscriptionAdminStatus) => {
   }
 };
 
-const formatDateTime = (value: string | null) => {
+const SUBSCRIPTION_STATUS_KEYS: Record<SubscriptionAdminStatus, string> = {
+  [SubscriptionAdminStatus.ACTIVE]: "subscriptions.status.active",
+  [SubscriptionAdminStatus.PAUSED]: "subscriptions.status.paused",
+  [SubscriptionAdminStatus.CANCELLED]: "subscriptions.status.cancelled",
+  [SubscriptionAdminStatus.PAST_DUE]: "subscriptions.status.pastDue",
+};
+
+const formatDateTime = (value: string | null, emptyValue: string) => {
   if (!value) {
-    return "-";
+    return emptyValue;
   }
 
   return new Date(value).toLocaleString();
@@ -39,6 +47,7 @@ const formatDateTime = (value: string | null) => {
 const OrderSubscriptionSummaryWidget = ({
   data: order,
 }: DetailWidgetProps<AdminOrder>) => {
+  const { t } = useTranslation("reorder");
   const { data, isLoading, isError } =
     useQuery<AdminOrderSubscriptionSummaryResponse>({
       queryKey: ["admin-order-subscription-summary", order.id],
@@ -51,28 +60,30 @@ const OrderSubscriptionSummaryWidget = ({
   return (
     <Container className="divide-y p-0">
       <div className="px-6 py-4">
-        <Heading level="h2">Subscription</Heading>
+        <Heading level="h2">{t("subscriptions.orderWidget.title")}</Heading>
       </div>
       <div className="px-6 py-4">
         {isLoading ? (
           <div className="flex items-center gap-2">
             <ArrowPath className="animate-spin text-ui-fg-subtle" />
             <Text size="small" className="text-ui-fg-subtle">
-              Loading subscription summary...
+              {t("subscriptions.orderWidget.loading")}
             </Text>
           </div>
         ) : isError ? (
           <Text size="small" className="text-ui-fg-subtle">
-            Failed to load subscription summary
+            {t("subscriptions.orderWidget.loadError")}
           </Text>
         ) : !summary?.is_subscription_order || !summary.subscription ? (
           <Text size="small" className="text-ui-fg-subtle">
-            One-time order
+            {t("subscriptions.orderWidget.oneTimeOrder")}
           </Text>
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-2">
-              <StatusBadge color="green">Subscription order</StatusBadge>
+              <StatusBadge color="green">
+                {t("subscriptions.orderWidget.badge")}
+              </StatusBadge>
             </div>
             <Link
               to={`/subscriptions/${summary.subscription.id}`}
@@ -92,7 +103,7 @@ const OrderSubscriptionSummaryWidget = ({
                       leading="compact"
                       className="text-ui-fg-subtle"
                     >
-                      Subscription
+                      {t("common.fields.subscription")}
                     </Text>
                   </div>
                   <div className="flex items-center">
@@ -104,17 +115,17 @@ const OrderSubscriptionSummaryWidget = ({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <Text size="small" className="text-ui-fg-subtle">
-                  Status
+                  {t("common.fields.status")}
                 </Text>
                 <StatusBadge
                   color={getSubscriptionStatusColor(summary.subscription.status)}
                 >
-                  {summary.subscription.status}
+                  {t(SUBSCRIPTION_STATUS_KEYS[summary.subscription.status])}
                 </StatusBadge>
               </div>
               <div className="flex flex-col gap-1">
                 <Text size="small" className="text-ui-fg-subtle">
-                  Frequency
+                  {t("common.fields.frequency")}
                 </Text>
                 <Text size="small" weight="plus">
                   {summary.subscription.frequency_label}
@@ -122,21 +133,22 @@ const OrderSubscriptionSummaryWidget = ({
               </div>
               <div className="flex flex-col gap-1">
                 <Text size="small" className="text-ui-fg-subtle">
-                  Discount
+                  {t("common.fields.discount")}
                 </Text>
                 <Text size="small" weight="plus">
                   {summary.subscription.discount?.label ??
-                    "subscription_discount"}
+                    t("subscriptions.orderWidget.noDiscount")}
                 </Text>
               </div>
               <div className="flex flex-col gap-1 sm:col-span-2">
                 <Text size="small" className="text-ui-fg-subtle">
-                  Next renewal
+                  {t("common.fields.nextRenewal")}
                 </Text>
                 <Text size="small" weight="plus">
                   {formatDateTime(
                     summary.subscription.effective_next_renewal_at ??
-                      summary.subscription.next_renewal_at
+                      summary.subscription.next_renewal_at,
+                    t("common.empty.noValue")
                   )}
                 </Text>
               </div>

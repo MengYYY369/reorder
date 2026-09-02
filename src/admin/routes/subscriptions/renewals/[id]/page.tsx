@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate, type ReorderTranslate } from "../../../../i18n/translate";
+import { useTranslation } from "react-i18next";
 import {
   Alert,
   Button,
@@ -50,7 +52,34 @@ const forceableStatuses = new Set<RenewalCycleAdminStatus>([
 
 type DecisionDrawerMode = "approve" | "reject";
 
+const RENEWAL_CYCLE_STATUS_KEYS = {
+  [RenewalCycleAdminStatus.SCHEDULED]: "renewals.status.scheduled",
+  [RenewalCycleAdminStatus.PROCESSING]: "renewals.status.processing",
+  [RenewalCycleAdminStatus.SUCCEEDED]: "renewals.status.succeeded",
+  [RenewalCycleAdminStatus.FAILED]: "renewals.status.failed",
+} as const;
+
+const RENEWAL_ATTEMPT_STATUS_KEYS = {
+  [RenewalAttemptAdminStatus.PROCESSING]: "renewals.attemptStatus.processing",
+  [RenewalAttemptAdminStatus.SUCCEEDED]: "renewals.attemptStatus.succeeded",
+  [RenewalAttemptAdminStatus.FAILED]: "renewals.attemptStatus.failed",
+} as const;
+
+const SUBSCRIPTION_STATUS_KEYS: Record<string, string> = {
+  active: "subscriptions.status.active",
+  paused: "subscriptions.status.paused",
+  cancelled: "subscriptions.status.cancelled",
+  past_due: "subscriptions.status.pastDue",
+};
+
+const RENEWAL_INTERVAL_KEYS: Record<string, string> = {
+  week: "common.intervals.week",
+  month: "common.intervals.month",
+  year: "common.intervals.year",
+};
+
 const RenewalDetailPage = () => {
+  const { t } = useTranslation("reorder");
   const { id } = useParams();
   const queryClient = useQueryClient();
   const prompt = usePrompt();
@@ -77,10 +106,12 @@ const RenewalDetailPage = () => {
         id,
         renewal?.subscription.subscription_id
       );
-      toast.success("Renewal forced");
+      toast.success(t("renewals.detail.toast.forced"));
     },
     onError: (mutationError) => {
-      toast.error(getAdminErrorMessage(mutationError, "Failed to force renewal"));
+      toast.error(
+        getAdminErrorMessage(mutationError, t("renewals.detail.errors.forceFailed"))
+      );
     },
   });
 
@@ -99,7 +130,7 @@ const RenewalDetailPage = () => {
         id,
         renewal?.subscription.subscription_id
       );
-      toast.success("Pending changes approved");
+      toast.success(t("renewals.detail.toast.approved"));
       setDecisionDrawerOpen(false);
       setDecisionReason("");
       setDecisionError(null);
@@ -107,7 +138,7 @@ const RenewalDetailPage = () => {
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to approve changes"
+        t("renewals.detail.errors.approveFailed")
       );
 
       setDecisionError(message);
@@ -130,7 +161,7 @@ const RenewalDetailPage = () => {
         id,
         renewal?.subscription.subscription_id
       );
-      toast.success("Pending changes rejected");
+      toast.success(t("renewals.detail.toast.rejected"));
       setDecisionDrawerOpen(false);
       setDecisionReason("");
       setDecisionError(null);
@@ -138,7 +169,7 @@ const RenewalDetailPage = () => {
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to reject changes"
+        t("renewals.detail.errors.rejectFailed")
       );
 
       setDecisionError(message);
@@ -168,11 +199,10 @@ const RenewalDetailPage = () => {
 
   const handleForceRenewal = async () => {
     const confirmed = await prompt({
-      title: "Force renewal?",
-      description:
-        "You are about to manually trigger this renewal cycle. Do you want to continue?",
-      confirmText: "Force renewal",
-      cancelText: "Cancel",
+      title: t("renewals.detail.prompt.forceTitle"),
+      description: t("renewals.detail.prompt.forceDescription"),
+      confirmText: t("renewals.detail.actions.forceRenewal"),
+      cancelText: t("common.actions.cancel"),
     });
 
     if (!confirmed) {
@@ -195,8 +225,8 @@ const RenewalDetailPage = () => {
     const normalizedReason = normalizeOptionalString(decisionReason);
 
     if (decisionMode === "reject" && !normalizedReason) {
-      setDecisionError("Reason is required");
-      toast.error("Reason is required");
+      setDecisionError(t("renewals.detail.errors.reasonRequired"));
+      toast.error(t("renewals.detail.errors.reasonRequired"));
       return;
     }
 
@@ -205,14 +235,17 @@ const RenewalDetailPage = () => {
     const confirmed = await prompt({
       title:
         decisionMode === "approve"
-          ? "Approve changes?"
-          : "Reject changes?",
+          ? t("renewals.detail.prompt.approveTitle")
+          : t("renewals.detail.prompt.rejectTitle"),
       description:
         decisionMode === "approve"
-          ? "You are about to approve the pending changes for this renewal cycle."
-          : "You are about to reject the pending changes for this renewal cycle.",
-      confirmText: decisionMode === "approve" ? "Approve" : "Reject",
-      cancelText: "Cancel",
+          ? t("renewals.detail.prompt.approveDescription")
+          : t("renewals.detail.prompt.rejectDescription"),
+      confirmText:
+        decisionMode === "approve"
+          ? t("renewals.detail.actions.approve")
+          : t("renewals.detail.actions.reject"),
+      cancelText: t("common.actions.cancel"),
     });
 
     if (!confirmed) {
@@ -235,12 +268,12 @@ const RenewalDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Renewal</Heading>
+          <Heading level="h1">{t("renewals.detail.title")}</Heading>
         </div>
         <div className="flex items-center gap-x-2 px-6 py-6 text-ui-fg-subtle">
           <Spinner className="animate-spin" />
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Loading renewal details...
+            {t("renewals.detail.loading")}
           </Text>
         </div>
       </Container>
@@ -251,13 +284,13 @@ const RenewalDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Renewal</Heading>
+          <Heading level="h1">{t("renewals.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
             {error instanceof Error
               ? error.message
-              : "Failed to load renewal details."}
+              : t("renewals.detail.loadError")}
           </Alert>
         </div>
       </Container>
@@ -268,10 +301,10 @@ const RenewalDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Renewal</Heading>
+          <Heading level="h1">{t("renewals.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
-          <Alert variant="warning">Renewal details are unavailable.</Alert>
+          <Alert variant="warning">{t("renewals.detail.unavailable")}</Alert>
         </div>
       </Container>
     );
@@ -283,17 +316,16 @@ const RenewalDetailPage = () => {
         <div className="flex items-start justify-between px-6 py-4">
           <div className="flex flex-col gap-y-1">
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Renewal cycle
+              {t("renewals.detail.header")}
             </Text>
             <Heading level="h1">{renewal.id}</Heading>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Review execution status, approval state, linked records, and
-              attempt history.
+              {t("renewals.detail.description")}
             </Text>
           </div>
           <div className="flex items-center gap-x-2">
             <StatusBadge color={getCycleStatusColor(renewal.status)}>
-              {formatCycleStatus(renewal.status)}
+              {t(RENEWAL_CYCLE_STATUS_KEYS[renewal.status])}
             </StatusBadge>
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
@@ -312,7 +344,9 @@ const RenewalDetailPage = () => {
                   >
                     <TriangleRightMini className="text-ui-fg-subtle" />
                     <span>
-                      {forceMutation.isPending ? "Forcing..." : "Force renewal"}
+                      {forceMutation.isPending
+                        ? t("renewals.detail.actions.forcing")
+                        : t("renewals.detail.actions.forceRenewal")}
                     </span>
                   </DropdownMenu.Item>
                 ) : null}
@@ -323,7 +357,7 @@ const RenewalDetailPage = () => {
                     onClick={() => openDecisionDrawer("approve")}
                   >
                     <CheckCircle className="text-ui-fg-subtle" />
-                    <span>Approve changes</span>
+                    <span>{t("renewals.detail.actions.approveChanges")}</span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canDecideApproval ? (
@@ -333,7 +367,7 @@ const RenewalDetailPage = () => {
                     onClick={() => openDecisionDrawer("reject")}
                   >
                     <XCircle className="text-ui-fg-subtle" />
-                    <span>Reject changes</span>
+                    <span>{t("renewals.detail.actions.rejectChanges")}</span>
                   </DropdownMenu.Item>
                 ) : null}
               </DropdownMenu.Content>
@@ -345,37 +379,52 @@ const RenewalDetailPage = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Cycle overview</Heading>
+              <Heading level="h2">{t("renewals.detail.sections.cycleOverview")}</Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailRow
-                  label="Status"
+                  label={t("common.fields.status")}
                   value={(
                     <StatusBadge color={getCycleStatusColor(renewal.status)}>
-                      {formatCycleStatus(renewal.status)}
+                      {t(RENEWAL_CYCLE_STATUS_KEYS[renewal.status])}
                     </StatusBadge>
                   )}
                 />
                 <DetailRow
-                  label="Projected delivery"
-                  value={formatDateTime(renewal.effective_scheduled_for)}
+                  label={t("renewals.detail.fields.projectedDelivery")}
+                  value={formatDateTime(
+                    renewal.effective_scheduled_for,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Operational cycle"
-                  value={formatDateTime(renewal.scheduled_for)}
+                  label={t("renewals.detail.fields.operationalCycle")}
+                  value={formatDateTime(
+                    renewal.scheduled_for,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Processed at"
-                  value={formatDateTime(renewal.processed_at)}
+                  label={t("renewals.detail.fields.processedAt")}
+                  value={formatDateTime(
+                    renewal.processed_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Created at"
-                  value={formatDateTime(renewal.created_at)}
+                  label={t("renewals.detail.fields.createdAt")}
+                  value={formatDateTime(
+                    renewal.created_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Last error"
-                  value={renewal.last_error || "No error recorded"}
+                  label={t("renewals.detail.fields.lastError")}
+                  value={
+                    renewal.last_error ||
+                    t("renewals.detail.fields.noErrorRecorded")
+                  }
                 />
               </div>
             </div>
@@ -383,65 +432,81 @@ const RenewalDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Approval summary</Heading>
+              <Heading level="h2">
+                {t("renewals.detail.sections.approvalSummary")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailRow
-                  label="Approval"
+                  label={t("renewals.columns.approval")}
                   value={(
                     <StatusBadge color={getApprovalStatusColor(renewal.approval)}>
-                      {formatApprovalStatus(renewal.approval)}
+                      {formatApprovalStatus(renewal.approval, t)}
                     </StatusBadge>
                   )}
                 />
                 <DetailRow
-                  label="Required"
-                  value={renewal.approval.required ? "Yes" : "No"}
+                  label={t("renewals.detail.fields.required")}
+                  value={
+                    renewal.approval.required
+                      ? t("common.filters.yes")
+                      : t("common.filters.no")
+                  }
                 />
                 <DetailRow
-                  label="Decided at"
-                  value={formatDateTime(renewal.approval.decided_at)}
+                  label={t("renewals.detail.fields.decidedAt")}
+                  value={formatDateTime(
+                    renewal.approval.decided_at,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Decided by"
-                  value={renewal.approval.decided_by || "-"}
+                  label={t("renewals.detail.fields.decidedBy")}
+                  value={
+                    renewal.approval.decided_by || t("common.empty.noValue")
+                  }
                 />
-                <DetailRow label="Reason" value={renewal.approval.reason || "-"} />
+                <DetailRow
+                  label={t("common.fields.reason")}
+                  value={renewal.approval.reason || t("common.empty.noValue")}
+                />
               </div>
             </div>
           </Container>
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Pending changes</Heading>
+              <Heading level="h2">{t("renewals.detail.sections.pendingChanges")}</Heading>
             </div>
             <div className="px-6 py-4">
               {renewal.pending_changes ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <DetailRow
-                    label="Variant"
+                    label={t("common.fields.variant")}
                     value={renewal.pending_changes.variant_title}
                   />
                   <DetailRow
-                    label="Frequency"
-                    value={formatFrequency(
-                      renewal.pending_changes.frequency_interval,
-                      renewal.pending_changes.frequency_value
+                    label={t("common.fields.frequency")}
+                    value={`${t(
+                      RENEWAL_INTERVAL_KEYS[renewal.pending_changes.frequency_interval]
+                    )} × ${renewal.pending_changes.frequency_value}`}
+                  />
+                  <DetailRow
+                    label={t("renewals.detail.fields.effectiveAt")}
+                    value={formatDateTime(
+                      renewal.pending_changes.effective_at,
+                      t("common.empty.noValue")
                     )}
                   />
                   <DetailRow
-                    label="Effective at"
-                    value={formatDateTime(renewal.pending_changes.effective_at)}
-                  />
-                  <DetailRow
-                    label="Variant ID"
+                    label={t("renewals.detail.fields.variantId")}
                     value={renewal.pending_changes.variant_id}
                   />
                 </div>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No pending changes are attached to this renewal cycle.
+                  {t("renewals.detail.fields.noPendingChanges")}
                 </Text>
               )}
             </div>
@@ -449,19 +514,29 @@ const RenewalDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Attempt history</Heading>
+              <Heading level="h2">{t("renewals.detail.sections.attemptHistory")}</Heading>
             </div>
             <div className="px-6 py-4">
               {renewal.attempts.length ? (
                 <Table>
                   <Table.Header>
                     <Table.Row>
-                      <Table.HeaderCell>Attempt</Table.HeaderCell>
-                      <Table.HeaderCell>Status</Table.HeaderCell>
-                      <Table.HeaderCell>Started</Table.HeaderCell>
-                      <Table.HeaderCell>Finished</Table.HeaderCell>
-                      <Table.HeaderCell>Error</Table.HeaderCell>
-                      <Table.HeaderCell>Order</Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("renewals.detail.fields.attempt")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>{t("common.fields.status")}</Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("renewals.detail.fields.started")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("renewals.detail.fields.finished")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("renewals.detail.fields.error")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("renewals.detail.fields.order")}
+                      </Table.HeaderCell>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -474,33 +549,46 @@ const RenewalDetailPage = () => {
                         </Table.Cell>
                         <Table.Cell>
                           <StatusBadge color={getAttemptStatusColor(attempt.status)}>
-                            {formatAttemptStatus(attempt.status)}
+                            {t(RENEWAL_ATTEMPT_STATUS_KEYS[attempt.status])}
                           </StatusBadge>
                         </Table.Cell>
-                        <Table.Cell>{formatDateTime(attempt.started_at)}</Table.Cell>
-                        <Table.Cell>{formatDateTime(attempt.finished_at)}</Table.Cell>
+                        <Table.Cell>
+                          {formatDateTime(
+                            attempt.started_at,
+                            t("common.empty.noValue")
+                          )}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {formatDateTime(
+                            attempt.finished_at,
+                            t("common.empty.noValue")
+                          )}
+                        </Table.Cell>
                         <Table.Cell>
                           <div className="flex flex-col gap-y-0.5">
                             <Text size="small" leading="compact">
-                              {attempt.error_code || "-"}
+                              {attempt.error_code || t("common.empty.noValue")}
                             </Text>
                             <Text
                               size="small"
                               leading="compact"
                               className="text-ui-fg-subtle"
                             >
-                              {attempt.error_message || "No error message"}
+                              {attempt.error_message ||
+                                t("renewals.detail.fields.noErrorMessage")}
                             </Text>
                           </div>
                         </Table.Cell>
-                        <Table.Cell>{attempt.order_id || "-"}</Table.Cell>
+                        <Table.Cell>
+                          {attempt.order_id || t("common.empty.noValue")}
+                        </Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>
                 </Table>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No attempts have been recorded for this renewal cycle yet.
+                  {t("renewals.detail.fields.noAttempts")}
                 </Text>
               )}
             </div>
@@ -508,7 +596,9 @@ const RenewalDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Technical metadata</Heading>
+              <Heading level="h2">
+                {t("renewals.detail.sections.technicalMetadata")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               {metadataRows.length ? (
@@ -519,7 +609,7 @@ const RenewalDetailPage = () => {
                 </div>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No metadata was stored for this renewal cycle.
+                  {t("renewals.detail.fields.noMetadata")}
                 </Text>
               )}
             </div>
@@ -529,7 +619,9 @@ const RenewalDetailPage = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Subscription summary</Heading>
+              <Heading level="h2">
+                {t("renewals.detail.sections.subscriptionSummary")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -563,23 +655,34 @@ const RenewalDetailPage = () => {
                   </div>
                 </Link>
                 <DetailRow
-                  label="Status"
-                  value={formatSubscriptionStatus(renewal.subscription.status)}
+                  label={t("common.fields.status")}
+                  value={formatSubscriptionStatus(renewal.subscription.status, t)}
                 />
                 <DetailRow
-                  label="Customer"
+                  label={t("common.fields.customer")}
                   value={renewal.subscription.customer_name}
                 />
-                <DetailRow label="Product" value={renewal.subscription.product_title} />
-                <DetailRow label="Variant" value={renewal.subscription.variant_title} />
-                <DetailRow label="SKU" value={renewal.subscription.sku || "-"} />
+                <DetailRow
+                  label={t("common.fields.product")}
+                  value={renewal.subscription.product_title}
+                />
+                <DetailRow
+                  label={t("common.fields.variant")}
+                  value={renewal.subscription.variant_title}
+                />
+                <DetailRow
+                  label={t("common.fields.sku")}
+                  value={renewal.subscription.sku || t("common.empty.noValue")}
+                />
               </div>
             </div>
           </Container>
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Generated order summary</Heading>
+              <Heading level="h2">
+                {t("renewals.detail.sections.generatedOrderSummary")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -613,16 +716,20 @@ const RenewalDetailPage = () => {
                   </Link>
                 ) : (
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    No order generated
+                    {t("renewals.detail.fields.noOrderGenerated")}
                   </Text>
                 )}
                 <DetailRow
-                  label="Status"
-                  value={renewal.generated_order?.status || "-"}
+                  label={t("common.fields.status")}
+                  value={
+                    renewal.generated_order?.status || t("common.empty.noValue")
+                  }
                 />
                 <DetailRow
-                  label="Order ID"
-                  value={renewal.generated_order?.order_id || "-"}
+                  label={t("renewals.detail.fields.orderId")}
+                  value={
+                    renewal.generated_order?.order_id || t("common.empty.noValue")
+                  }
                 />
               </div>
             </div>
@@ -634,14 +741,18 @@ const RenewalDetailPage = () => {
         <Drawer.Content>
           <Drawer.Header>
             <Drawer.Title>
-              {decisionMode === "approve" ? "Approve changes" : "Reject changes"}
+              {decisionMode === "approve"
+                ? t("renewals.detail.drawer.approveTitle")
+                : t("renewals.detail.drawer.rejectTitle")}
             </Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-4 p-4">
             {decisionError ? <Alert variant="error">{decisionError}</Alert> : null}
             <div className="flex flex-col gap-y-2">
               <Label htmlFor="decision-reason">
-                {decisionMode === "approve" ? "Reason" : "Reason *"}
+                {decisionMode === "approve"
+                  ? t("common.fields.reason")
+                  : t("renewals.detail.drawer.reasonRequired")}
               </Label>
               <Textarea
                 id="decision-reason"
@@ -649,8 +760,8 @@ const RenewalDetailPage = () => {
                 onChange={(event) => setDecisionReason(event.target.value)}
                 placeholder={
                   decisionMode === "approve"
-                    ? "Optional review note"
-                    : "Required rejection reason"
+                    ? t("renewals.detail.drawer.optionalNote")
+                    : t("renewals.detail.drawer.requiredRejectionReason")
                 }
               />
             </div>
@@ -664,7 +775,7 @@ const RenewalDetailPage = () => {
                   type="button"
                   disabled={approveMutation.isPending || rejectMutation.isPending}
                 >
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </Drawer.Close>
               <Button
@@ -680,7 +791,9 @@ const RenewalDetailPage = () => {
                   void handleSubmitDecision();
                 }}
               >
-                {decisionMode === "approve" ? "Approve" : "Reject"}
+                {decisionMode === "approve"
+                  ? t("renewals.detail.actions.approve")
+                  : t("renewals.detail.actions.reject")}
               </Button>
             </div>
           </Drawer.Footer>
@@ -694,7 +807,7 @@ export default RenewalDetailPage;
 
 export const handle = {
   breadcrumb: ({ params, data }: UIMatch<RenewalCycleAdminDetailResponse>) =>
-    params?.id || data?.renewal?.id || "Renewal",
+    params?.id || data?.renewal?.id || translate("renewals.breadcrumb"),
 };
 
 const DetailRow = ({
@@ -727,9 +840,9 @@ function normalizeOptionalString(value: string) {
   return trimmed.length ? trimmed : undefined;
 }
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, emptyValue: string) {
   if (!value) {
-    return "-";
+    return emptyValue;
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -738,72 +851,26 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function formatCycleStatus(status: RenewalCycleAdminStatus) {
-  switch (status) {
-    case RenewalCycleAdminStatus.SCHEDULED:
-      return "Scheduled";
-    case RenewalCycleAdminStatus.PROCESSING:
-      return "Processing";
-    case RenewalCycleAdminStatus.SUCCEEDED:
-      return "Succeeded";
-    case RenewalCycleAdminStatus.FAILED:
-      return "Failed";
-  }
-}
-
-function formatAttemptStatus(status: RenewalAttemptAdminStatus) {
-  switch (status) {
-    case RenewalAttemptAdminStatus.PROCESSING:
-      return "Processing";
-    case RenewalAttemptAdminStatus.SUCCEEDED:
-      return "Succeeded";
-    case RenewalAttemptAdminStatus.FAILED:
-      return "Failed";
-  }
-}
-
-function formatApprovalStatus(approval: RenewalAdminApprovalSummary) {
+function formatApprovalStatus(
+  approval: RenewalAdminApprovalSummary,
+  t: ReorderTranslate
+) {
   if (!approval.required || !approval.status) {
-    return "Not required";
+    return t("renewals.approval.notRequired");
   }
 
   switch (approval.status) {
     case RenewalApprovalStatus.PENDING:
-      return "Pending approval";
+      return t("renewals.approval.pendingApproval");
     case RenewalApprovalStatus.APPROVED:
-      return "Approved";
+      return t("renewals.approval.approved");
     case RenewalApprovalStatus.REJECTED:
-      return "Rejected";
+      return t("renewals.approval.rejected");
   }
 }
 
-function formatSubscriptionStatus(
-  status: RenewalCycleAdminDetail["subscription"]["status"]
-) {
-  switch (status) {
-    case "active":
-      return "Active";
-    case "paused":
-      return "Paused";
-    case "cancelled":
-      return "Cancelled";
-    case "past_due":
-      return "Past due";
-  }
-}
-
-function formatFrequency(
-  interval: "week" | "month" | "year",
-  value: number
-) {
-  switch (interval) {
-    case "week":
-      return value === 1 ? "Every week" : `Every ${value} weeks`;
-    case "month":
-      return value === 1 ? "Every month" : `Every ${value} months`;
-    case "year":
-      return value === 1 ? "Every year" : `Every ${value} years`;
-  }
+function formatSubscriptionStatus(status: string, t: ReorderTranslate) {
+  return t(SUBSCRIPTION_STATUS_KEYS[status] ?? status);
 }
 
 function getCycleStatusColor(status: RenewalCycleAdminStatus) {

@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate, type ReorderTranslate } from "../../../i18n/translate"
+import { useTranslation } from "react-i18next"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -36,140 +38,39 @@ const DEFAULT_DATE_TO = toLocalDateTimeInputValue(new Date())
 
 const columnHelper = createDataTableColumnHelper<ActivityLogAdminListItem>()
 
-const actorFilterOptions = [
-  { label: "Admin", value: ActivityLogAdminActorType.USER },
-  { label: "Customer", value: ActivityLogAdminActorType.CUSTOMER },
-  { label: "System", value: ActivityLogAdminActorType.SYSTEM },
-  { label: "Scheduler", value: ActivityLogAdminActorType.SCHEDULER },
-] as const
+const ACTIVITY_ACTOR_KEYS: Record<ActivityLogAdminActorType, string> = {
+  [ActivityLogAdminActorType.USER]: "activityLog.actor.admin",
+  [ActivityLogAdminActorType.CUSTOMER]: "activityLog.actor.customer",
+  [ActivityLogAdminActorType.SYSTEM]: "activityLog.actor.system",
+  [ActivityLogAdminActorType.SCHEDULER]: "activityLog.actor.scheduler",
+}
 
-const domainPresetOptions = [
-  {
-    label: "Subscriptions",
-    value: "subscriptions",
-    eventTypes: [
-      "subscription.created",
-      "subscription.paused",
-      "subscription.resumed",
-      "subscription.canceled",
-      "subscription.plan_change_scheduled",
-      "subscription.shipping_address_updated",
-      "subscription.next_delivery_skipped",
-    ],
-  },
-  {
-    label: "Renewals",
-    value: "renewals",
-    eventTypes: [
-      "renewal.cycle_created",
-      "renewal.approval_approved",
-      "renewal.approval_rejected",
-      "renewal.force_requested",
-      "renewal.succeeded",
-      "renewal.failed",
-    ],
-  },
-  {
-    label: "Dunning",
-    value: "dunning",
-    eventTypes: [
-      "dunning.started",
-      "dunning.retry_executed",
-      "dunning.recovered",
-      "dunning.unrecovered",
-      "dunning.retry_schedule_updated",
-    ],
-  },
-  {
-    label: "Cancellation",
-    value: "cancellation",
-    eventTypes: [
-      "cancellation.case_started",
-      "cancellation.offer_applied",
-      "cancellation.reason_updated",
-      "cancellation.finalized",
-    ],
-  },
-] as const
-
-const baseColumns = [
-  columnHelper.accessor("subscription.reference", {
-    id: "subscription_reference",
-    header: "Subscription",
-    enableSorting: true,
-    sortLabel: "Subscription",
-    cell: ({ row }) => (
-      <div className="flex flex-col gap-y-0.5">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.subscription.reference}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.subscription.customer_name}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {[
-            row.original.subscription.product_title,
-            row.original.subscription.variant_title,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("created_at", {
-    header: "Created",
-    enableSorting: true,
-    sortLabel: "Created",
-    cell: ({ getValue }) => (
-      <Text size="small" leading="compact">
-        {formatDateTime(getValue())}
-      </Text>
-    ),
-  }),
-  columnHelper.accessor("actor_type", {
-    header: "Actor",
-    enableSorting: true,
-    sortLabel: "Actor",
-    cell: ({ row }) => (
-      <Text size="small" leading="compact">
-        {getActorDisplay(row.original)}
-      </Text>
-    ),
-  }),
-  columnHelper.accessor("event_type", {
-    header: "Event",
-    enableSorting: true,
-    sortLabel: "Event",
-    cell: ({ row }) => (
-      <StatusBadge
-        color={getEventColor(row.original.event_type)}
-        className="w-fit text-nowrap"
-      >
-        {formatEventType(row.original.event_type)}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("reason", {
-    header: "Reason",
-    enableSorting: true,
-    sortLabel: "Reason",
-    cell: ({ row }) => (
-      <div className="flex flex-col gap-y-0.5">
-        <Text size="small" leading="compact" weight="plus">
-          {formatSummary(row.original)}
-        </Text>
-        {row.original.reason ? (
-          <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            {row.original.reason}
-          </Text>
-        ) : null}
-      </div>
-    ),
-  }),
+const ACTIVITY_DOMAIN_KEYS: Array<{
+  prefix: string
+  key: string
+}> = [
+  { prefix: "subscription.", key: "activityLog.domains.subscriptions" },
+  { prefix: "renewal.", key: "activityLog.domains.renewals" },
+  { prefix: "dunning.", key: "activityLog.domains.dunning" },
+  { prefix: "cancellation.", key: "activityLog.domains.cancellation" },
 ]
 
+const ACTIVITY_SUMMARY_FIELD_KEYS: Record<string, string> = {
+  subscription_created: "activityLog.summaryFields.subscriptionCreated",
+  pending_update_data: "activityLog.summaryFields.pendingUpdateData",
+  status: "activityLog.summaryFields.status",
+  recipient: "activityLog.summaryFields.recipient",
+  address: "activityLog.summaryFields.address",
+  address_lines_changed: "activityLog.summaryFields.addressLinesChanged",
+  postal_code_changed: "activityLog.summaryFields.postalCodeChanged",
+  phone_changed: "activityLog.summaryFields.phoneChanged",
+  country_code: "activityLog.summaryFields.countryCode",
+  province: "activityLog.summaryFields.province",
+  city: "activityLog.summaryFields.city",
+}
+
 const ActivityLogPage = () => {
+  const { t } = useTranslation("reorder")
   const [search, setSearch] = useState("")
   const [filtering, setFiltering] = useState<DataTableFilteringState>(() => ({
     date_from: DEFAULT_DATE_FROM,
@@ -185,6 +86,167 @@ const ActivityLogPage = () => {
   })
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null)
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false)
+
+  const actorFilterOptions = useMemo(
+    () =>
+      [
+        {
+          label: t("activityLog.actor.admin"),
+          value: ActivityLogAdminActorType.USER,
+        },
+        {
+          label: t("activityLog.actor.customer"),
+          value: ActivityLogAdminActorType.CUSTOMER,
+        },
+        {
+          label: t("activityLog.actor.system"),
+          value: ActivityLogAdminActorType.SYSTEM,
+        },
+        {
+          label: t("activityLog.actor.scheduler"),
+          value: ActivityLogAdminActorType.SCHEDULER,
+        },
+      ] as const,
+    [t]
+  )
+
+  const domainPresetOptions = useMemo(
+    () =>
+      [
+        {
+          label: t("activityLog.domains.subscriptions"),
+          value: "subscriptions",
+          eventTypes: [
+            "subscription.created",
+            "subscription.paused",
+            "subscription.resumed",
+            "subscription.canceled",
+            "subscription.plan_change_scheduled",
+            "subscription.shipping_address_updated",
+            "subscription.next_delivery_skipped",
+          ],
+        },
+        {
+          label: t("activityLog.domains.renewals"),
+          value: "renewals",
+          eventTypes: [
+            "renewal.cycle_created",
+            "renewal.approval_approved",
+            "renewal.approval_rejected",
+            "renewal.force_requested",
+            "renewal.succeeded",
+            "renewal.failed",
+          ],
+        },
+        {
+          label: t("activityLog.domains.dunning"),
+          value: "dunning",
+          eventTypes: [
+            "dunning.started",
+            "dunning.retry_executed",
+            "dunning.recovered",
+            "dunning.unrecovered",
+            "dunning.retry_schedule_updated",
+          ],
+        },
+        {
+          label: t("activityLog.domains.cancellation"),
+          value: "cancellation",
+          eventTypes: [
+            "cancellation.case_started",
+            "cancellation.offer_applied",
+            "cancellation.reason_updated",
+            "cancellation.finalized",
+          ],
+        },
+      ] as const,
+    [t]
+  )
+
+  const allEventTypes = useMemo(
+    () => domainPresetOptions.flatMap((option) => option.eventTypes),
+    [domainPresetOptions]
+  )
+
+  const baseColumns = useMemo(
+    () => [
+      columnHelper.accessor("subscription.reference", {
+        id: "subscription_reference",
+        header: t("common.fields.subscription"),
+        enableSorting: true,
+        sortLabel: t("common.fields.subscription"),
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-y-0.5">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.subscription.reference}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.subscription.customer_name}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {[
+                row.original.subscription.product_title,
+                row.original.subscription.variant_title,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("created_at", {
+        header: t("activityLog.columns.created"),
+        enableSorting: true,
+        sortLabel: t("activityLog.columns.created"),
+        cell: ({ getValue }) => (
+          <Text size="small" leading="compact">
+            {formatDateTime(getValue(), t("common.empty.noValue"))}
+          </Text>
+        ),
+      }),
+      columnHelper.accessor("actor_type", {
+        header: t("activityLog.columns.actor"),
+        enableSorting: true,
+        sortLabel: t("activityLog.columns.actor"),
+        cell: ({ row }) => (
+          <Text size="small" leading="compact">
+            {getActorDisplay(row.original, t)}
+          </Text>
+        ),
+      }),
+      columnHelper.accessor("event_type", {
+        header: t("activityLog.columns.event"),
+        enableSorting: true,
+        sortLabel: t("activityLog.columns.event"),
+        cell: ({ row }) => (
+          <StatusBadge
+            color={getEventColor(row.original.event_type)}
+            className="w-fit text-nowrap"
+          >
+            {formatEventType(row.original.event_type)}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("reason", {
+        header: t("activityLog.columns.reason"),
+        enableSorting: true,
+        sortLabel: t("activityLog.columns.reason"),
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-y-0.5">
+            <Text size="small" leading="compact" weight="plus">
+              {formatSummary(row.original, t)}
+            </Text>
+            {row.original.reason ? (
+              <Text size="small" leading="compact" className="text-ui-fg-subtle">
+                {row.original.reason}
+              </Text>
+            ) : null}
+          </div>
+        ),
+      }),
+    ],
+    [t]
+  )
 
   const eventTypeFilters = useMemo(
     () =>
@@ -263,10 +325,9 @@ const ActivityLogPage = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between gap-x-4">
             <div className="flex flex-col">
-              <Heading level="h1">Activity Log</Heading>
+              <Heading level="h1">{t("activityLog.list.title")}</Heading>
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                Review subscription lifecycle events across renewals, dunning,
-                and cancellation workflows.
+                {t("activityLog.list.description")}
               </Text>
             </div>
           </div>
@@ -275,7 +336,7 @@ const ActivityLogPage = () => {
           <Alert variant="error">
             {error instanceof Error
               ? error.message
-              : "Failed to load activity log entries."}
+              : t("activityLog.list.loadError")}
           </Alert>
         </div>
       </Container>
@@ -293,10 +354,9 @@ const ActivityLogPage = () => {
       <Container className="divide-y p-0">
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex flex-col">
-            <Heading level="h1">Activity Log</Heading>
+            <Heading level="h1">{t("activityLog.list.title")}</Heading>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Review subscription lifecycle events across renewals, dunning,
-              and cancellation workflows.
+              {t("activityLog.list.description")}
             </Text>
           </div>
         </div>
@@ -305,7 +365,7 @@ const ActivityLogPage = () => {
             <div className="flex flex-wrap items-center gap-2">
               {activePreset ? (
                 <FilterChip
-                  label="Preset"
+                  label={t("activityLog.filters.preset")}
                   value={activePreset.label}
                   onRemove={() => {
                     setFiltering((current) => ({
@@ -319,7 +379,7 @@ const ActivityLogPage = () => {
                 ? eventTypeFilters.map((eventType) => (
                     <FilterChip
                       key={eventType}
-                      label="Event"
+                      label={t("activityLog.columns.event")}
                       value={formatEventType(eventType)}
                       onRemove={() => {
                         setFiltering((current) => ({
@@ -335,8 +395,8 @@ const ActivityLogPage = () => {
               {actorTypeFilters.map((actorType) => (
                 <FilterChip
                   key={actorType}
-                  label="Actor"
-                  value={formatActorType(actorType)}
+                  label={t("activityLog.columns.actor")}
+                  value={formatActorType(actorType, t)}
                   onRemove={() => {
                     setFiltering((current) => ({
                       ...current,
@@ -350,13 +410,13 @@ const ActivityLogPage = () => {
               <DropdownMenu>
                 <DropdownMenu.Trigger asChild>
                 <Button size="small" variant="secondary" type="button">
-                  Add filter
+                  {t("activityLog.filters.addFilter")}
                 </Button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content align="start">
                   <DropdownMenu.SubMenu>
                     <DropdownMenu.SubMenuTrigger>
-                      Quick presets
+                      {t("activityLog.filters.quickPresets")}
                     </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent>
                       {domainPresetOptions.map((option) => (
@@ -380,7 +440,7 @@ const ActivityLogPage = () => {
                   </DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenu>
                     <DropdownMenu.SubMenuTrigger>
-                      Event type
+                      {t("activityLog.filters.eventType")}
                     </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent className="max-h-80 overflow-y-auto">
                       {allEventTypes.map((eventType) => (
@@ -405,7 +465,9 @@ const ActivityLogPage = () => {
                     </DropdownMenu.SubMenuContent>
                   </DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenu>
-                    <DropdownMenu.SubMenuTrigger>Actor</DropdownMenu.SubMenuTrigger>
+                    <DropdownMenu.SubMenuTrigger>
+                      {t("activityLog.columns.actor")}
+                    </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent>
                       {actorFilterOptions.map((option) => (
                         <DropdownMenu.CheckboxItem
@@ -443,7 +505,7 @@ const ActivityLogPage = () => {
                     })
                   }}
                 >
-                  Clear all
+                  {t("common.filters.clearAll")}
                 </button>
               ) : null}
             </div>
@@ -452,7 +514,7 @@ const ActivityLogPage = () => {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="flex flex-col gap-y-1">
                   <Text size="small" leading="compact" weight="plus">
-                    Created from
+                    {t("activityLog.filters.createdFrom")}
                   </Text>
                   <Input
                     type="datetime-local"
@@ -471,7 +533,7 @@ const ActivityLogPage = () => {
                 </div>
                 <div className="flex flex-col gap-y-1">
                   <Text size="small" leading="compact" weight="plus">
-                    Created to
+                    {t("activityLog.filters.createdTo")}
                   </Text>
                   <Input
                     type="datetime-local"
@@ -491,7 +553,7 @@ const ActivityLogPage = () => {
               </div>
               <div className="flex items-center gap-x-2 self-end">
                 <div className="w-full md:w-auto">
-                  <DataTable.Search placeholder="Search" />
+                  <DataTable.Search placeholder={t("common.actions.search")} />
                 </div>
                 <DataTable.SortingMenu />
               </div>
@@ -569,13 +631,13 @@ const ActivityLogPage = () => {
             <div className="flex min-h-[250px] w-full flex-col items-center justify-center border-y px-6 py-4 text-center">
               <Text size="base" weight="plus">
                 {hasActiveFilters || search
-                  ? "No log entries match the current filters"
-                  : "No activity log entries yet"}
+                  ? t("activityLog.list.emptyFiltered")
+                  : t("activityLog.list.empty")}
               </Text>
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
                 {hasActiveFilters || search
-                  ? "Try changing the search term or active filters."
-                  : "Activity log entries will appear here as subscription workflows run."}
+                  ? t("activityLog.list.emptyFilteredHint")
+                  : t("activityLog.list.emptyHint")}
               </Text>
             </div>
           )}
@@ -595,12 +657,12 @@ const ActivityLogPage = () => {
       >
         <Drawer.Content>
           <Drawer.Header>
-            <Drawer.Title>Activity Log Event</Drawer.Title>
+            <Drawer.Title>{t("activityLog.eventDetail.title")}</Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-6 overflow-y-auto p-4">
             {isDetailLoading ? (
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                Loading event details...
+                {t("activityLog.eventDetail.loading")}
               </Text>
             ) : detailData?.subscription_log ? (
               <ActivityLogDetailContent
@@ -609,7 +671,7 @@ const ActivityLogPage = () => {
             ) : (
               <Alert variant="error">
                 <Text size="small" leading="compact">
-                  Failed to load activity log detail.
+                  {t("activityLog.eventDetail.loadError")}
                 </Text>
               </Alert>
             )}
@@ -618,7 +680,7 @@ const ActivityLogPage = () => {
             <div className="flex w-full items-center justify-end">
               <Drawer.Close asChild>
                 <Button size="small" variant="secondary" type="button">
-                  Close
+                  {t("activityLog.eventDetail.close")}
                 </Button>
               </Drawer.Close>
             </div>
@@ -630,13 +692,15 @@ const ActivityLogPage = () => {
 }
 
 const ActivityLogDetailContent = ({ log }: { log: ActivityLogAdminDetail }) => {
+  const { t } = useTranslation("reorder")
+
   return (
     <div className="flex flex-col gap-y-6">
       <DetailBlock
-        title="Overview"
+        title={t("activityLog.eventDetail.overview")}
         rows={[
           {
-            label: "Event",
+            label: t("activityLog.eventDetail.event"),
             value: (
               <StatusBadge color={getEventColor(log.event_type)}>
                 {formatEventType(log.event_type)}
@@ -644,72 +708,85 @@ const ActivityLogDetailContent = ({ log }: { log: ActivityLogAdminDetail }) => {
             ),
           },
           {
-            label: "Domain",
-            value: formatDomainLabel(log.event_type),
+            label: t("activityLog.eventDetail.domain"),
+            value: formatDomainLabel(log.event_type, t),
           },
           {
-            label: "Actor",
-            value: getActorDisplay(log),
+            label: t("activityLog.eventDetail.actor"),
+            value: getActorDisplay(log, t),
           },
           {
-            label: "Created",
-            value: formatDateTime(log.created_at),
+            label: t("activityLog.eventDetail.created"),
+            value: formatDateTime(log.created_at, t("common.empty.noValue")),
           },
           {
-            label: "Reason",
-            value: log.reason || "-",
+            label: t("activityLog.eventDetail.reason"),
+            value: log.reason || t("common.empty.noValue"),
           },
           {
-            label: "Summary",
-            value: formatSummary(log),
+            label: t("activityLog.eventDetail.summary"),
+            value: formatSummary(log, t),
           },
         ]}
       />
 
       <DetailBlock
-        title="Subscription Snapshot"
+        title={t("activityLog.eventDetail.subscriptionSnapshot")}
         rows={[
           {
-            label: "Reference",
+            label: t("activityLog.eventDetail.reference"),
             value: log.subscription.reference,
           },
           {
-            label: "Customer",
+            label: t("activityLog.eventDetail.customer"),
             value: log.subscription.customer_name,
           },
           {
-            label: "Product",
+            label: t("activityLog.eventDetail.product"),
             value: log.subscription.product_title,
           },
           {
-            label: "Variant",
+            label: t("activityLog.eventDetail.variant"),
             value: log.subscription.variant_title,
           },
         ]}
       />
 
       <DetailBlock
-        title="Changed Fields"
+        title={t("activityLog.eventDetail.changedFields")}
         rows={
           log.changed_fields.length
             ? log.changed_fields.map((field) => ({
-                label: formatSummaryField(field.field),
-                value: `${formatUnknown(field.before)} → ${formatUnknown(
-                  field.after
+                label: formatSummaryField(field.field, t),
+                value: `${formatUnknown(field.before, t("common.empty.noValue"))} → ${formatUnknown(
+                  field.after,
+                  t("common.empty.noValue")
                 )}`,
               }))
             : [
                 {
-                  label: "Changed fields",
-                  value: "No changed fields captured",
+                  label: t("activityLog.eventDetail.changedFieldsLabel"),
+                  value: t("activityLog.eventDetail.noChangedFields"),
                 },
               ]
         }
       />
 
-      <JsonBlock title="Previous State" value={log.previous_state} />
-      <JsonBlock title="New State" value={log.new_state} />
-      <JsonBlock title="Metadata" value={log.metadata} />
+      <JsonBlock
+        title={t("activityLog.eventDetail.previousState")}
+        value={log.previous_state}
+        noDataLabel={t("activityLog.eventDetail.noData")}
+      />
+      <JsonBlock
+        title={t("activityLog.eventDetail.newState")}
+        value={log.new_state}
+        noDataLabel={t("activityLog.eventDetail.noData")}
+      />
+      <JsonBlock
+        title={t("activityLog.eventDetail.metadata")}
+        value={log.metadata}
+        noDataLabel={t("activityLog.eventDetail.noData")}
+      />
     </div>
   )
 }
@@ -756,9 +833,11 @@ const DetailBlock = ({
 const JsonBlock = ({
   title,
   value,
+  noDataLabel,
 }: {
   title: string
   value: Record<string, unknown> | null
+  noDataLabel: string
 }) => {
   return (
     <div className="rounded-lg border border-ui-border-base">
@@ -769,7 +848,7 @@ const JsonBlock = ({
       </div>
       <div className="px-4 py-3">
         <pre className="overflow-x-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-ui-fg-subtle">
-          {value ? JSON.stringify(value, null, 2) : "No data"}
+          {value ? JSON.stringify(value, null, 2) : noDataLabel}
         </pre>
       </div>
     </div>
@@ -777,11 +856,12 @@ const JsonBlock = ({
 }
 
 export const config = defineRouteConfig({
-  label: "Activity Log",
+  label: "menuItems.activityLog",
+  translationNs: "reorder",
 })
 
 export const handle = {
-  breadcrumb: () => "Activity Log",
+  breadcrumb: () => translate("menuItems.activityLog"),
 }
 
 export default ActivityLogPage
@@ -793,11 +873,13 @@ type FilterChipProps = {
 }
 
 const FilterChip = ({ label, value, onRemove }: FilterChipProps) => {
+  const { t } = useTranslation("reorder")
+
   return (
     <div className="shadow-buttons-neutral txt-compact-small-plus bg-ui-button-neutral text-ui-fg-base inline-flex items-center overflow-hidden rounded-md">
       <span className="border-ui-border-base border-r px-3 py-1.5">{label}</span>
       <span className="border-ui-border-base border-r px-3 py-1.5 text-ui-fg-subtle">
-        is
+        {t("common.filters.is")}
       </span>
       <span className="border-ui-border-base border-r px-3 py-1.5">{value}</span>
       <button
@@ -820,80 +902,59 @@ function formatEventType(value: string) {
     .join(" ") ?? value
 }
 
-function formatDomainLabel(value: string) {
-  if (value.startsWith("subscription.")) {
-    return "Subscriptions"
+function formatDomainLabel(value: string, t: ReorderTranslate) {
+  const match = ACTIVITY_DOMAIN_KEYS.find((domain) =>
+    value.startsWith(domain.prefix)
+  )
+
+  if (!match) {
+    return t("activityLog.domains.unknown")
   }
 
-  if (value.startsWith("renewal.")) {
-    return "Renewals"
+  if (match.key === "activityLog.domains.cancellation") {
+    return t("activityLog.domains.cancellationFull")
   }
 
-  if (value.startsWith("dunning.")) {
-    return "Dunning"
-  }
-
-  if (value.startsWith("cancellation.")) {
-    return "Cancellation & Retention"
-  }
-
-  return "Activity"
+  return t(match.key)
 }
 
 function getActorDisplay(
-  log: Pick<ActivityLogAdminListItem, "actor" | "actor_id" | "actor_type">
+  log: Pick<ActivityLogAdminListItem, "actor" | "actor_id" | "actor_type">,
+  t: ReorderTranslate
 ) {
-  return log.actor.display || log.actor_id || formatActorType(log.actor_type)
+  return log.actor.display || log.actor_id || formatActorType(log.actor_type, t)
 }
 
 function formatSummary(
-  log: Pick<ActivityLogAdminListItem, "change_summary" | "reason">
+  log: Pick<ActivityLogAdminListItem, "change_summary" | "reason">,
+  t: ReorderTranslate
 ) {
   if (log.reason) {
     return log.reason
   }
 
   if (!log.change_summary) {
-    return "No summary"
+    return t("activityLog.eventDetail.noSummary")
   }
 
   return log.change_summary
     .split(",")
-    .map((part) => formatSummaryField(part.trim()))
+    .map((part) => formatSummaryField(part.trim(), t))
     .filter(Boolean)
     .join(", ")
 }
 
-function formatSummaryField(value: string) {
-  switch (value) {
-    case "subscription_created":
-      return "Subscription created"
-    case "pending_update_data":
-      return "Scheduled plan change"
-    case "status":
-      return "Status changed"
-    case "recipient":
-      return "Recipient updated"
-    case "address":
-      return "Address"
-    case "address_lines_changed":
-      return "Address updated"
-    case "postal_code_changed":
-      return "Postal code updated"
-    case "phone_changed":
-      return "Phone updated"
-    case "country_code":
-      return "Country updated"
-    case "province":
-      return "Province updated"
-    case "city":
-      return "City updated"
-    default:
-      return value
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ")
+function formatSummaryField(value: string, t: ReorderTranslate) {
+  const key = ACTIVITY_SUMMARY_FIELD_KEYS[value]
+
+  if (key) {
+    return t(key)
   }
+
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
 }
 
 function getEventColor(value: string) {
@@ -920,17 +981,8 @@ function getEventColor(value: string) {
   }
 }
 
-function formatActorType(value: ActivityLogAdminActorType) {
-  switch (value) {
-    case ActivityLogAdminActorType.USER:
-      return "Admin"
-    case ActivityLogAdminActorType.CUSTOMER:
-      return "Customer"
-    case ActivityLogAdminActorType.SYSTEM:
-      return "System"
-    case ActivityLogAdminActorType.SCHEDULER:
-      return "Scheduler"
-  }
+function formatActorType(value: ActivityLogAdminActorType, t: ReorderTranslate) {
+  return t(ACTIVITY_ACTOR_KEYS[value])
 }
 
 function getActorColor(value: ActivityLogAdminActorType) {
@@ -946,15 +998,15 @@ function getActorColor(value: ActivityLogAdminActorType) {
   }
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value: string | null | undefined, emptyValue: string) {
   if (!value) {
-    return "-"
+    return emptyValue
   }
 
   const date = new Date(value)
 
   if (Number.isNaN(date.getTime())) {
-    return "-"
+    return emptyValue
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -963,9 +1015,9 @@ function formatDateTime(value?: string | null) {
   }).format(date)
 }
 
-function formatUnknown(value: unknown) {
+function formatUnknown(value: unknown, emptyValue: string) {
   if (value === null || value === undefined) {
-    return "-"
+    return emptyValue
   }
 
   if (typeof value === "string") {
@@ -1006,5 +1058,3 @@ function toLocalDateTimeInputValue(date: Date) {
 
   return `${year}-${month}-${day}T${hours}:${minutes}`
 }
-
-const allEventTypes = domainPresetOptions.flatMap((option) => option.eventTypes)

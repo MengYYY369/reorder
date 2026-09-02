@@ -13,8 +13,9 @@ import {
   toast,
 } from "@medusajs/ui"
 import type { ReactNode } from "react"
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { Controller, useFieldArray, useForm } from "react-hook-form"
+import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type {
   AdminSubscriptionCancellationBehavior,
@@ -26,40 +27,6 @@ import {
   useAdminSubscriptionSettingsUpdateMutation,
   useAdminSubscriptionSettingsQuery,
 } from "./data-loading"
-
-const renewalBehaviorOptions: Array<{
-  value: AdminSubscriptionRenewalBehavior
-  label: string
-  hint: string
-}> = [
-  {
-    value: "process_immediately",
-    label: "Process immediately",
-    hint: "New renewal cycles default to immediate processing when no reviewable change is pending.",
-  },
-  {
-    value: "require_review_for_pending_changes",
-    label: "Review pending changes",
-    hint: "New renewal cycles require approval when a pending subscription update becomes applicable.",
-  },
-]
-
-const cancellationBehaviorOptions: Array<{
-  value: AdminSubscriptionCancellationBehavior
-  label: string
-  hint: string
-}> = [
-  {
-    value: "recommend_retention_first",
-    label: "Recommend retention first",
-    hint: "New cancellation cases start with a retention-first posture before direct cancellation.",
-  },
-  {
-    value: "allow_direct_cancellation",
-    label: "Allow direct cancellation",
-    hint: "New cancellation cases can proceed directly to cancellation without a retention-first default.",
-  },
-]
 
 const settingsSchema = z
   .object({
@@ -88,7 +55,7 @@ const settingsSchema = z
       if (!Number.isInteger(interval) || interval <= 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Retry interval must be a positive integer",
+          message: "settings.validation.retryIntervalPositive",
           path: ["dunning_retry_intervals", index, "value"],
         })
       }
@@ -96,7 +63,7 @@ const settingsSchema = z
       if (index > 0 && interval <= intervals[index - 1]) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Retry intervals must be strictly increasing",
+          message: "settings.validation.retryIntervalsStrictlyIncreasing",
           path: ["dunning_retry_intervals", index, "value"],
         })
       }
@@ -105,14 +72,22 @@ const settingsSchema = z
     if (values.max_dunning_attempts !== intervals.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "Max dunning attempts must match the number of retry intervals",
+        message: "settings.validation.maxAttemptsMatchIntervals",
         path: ["max_dunning_attempts"],
       })
     }
   })
 
 type SubscriptionSettingsFormValues = z.infer<typeof settingsSchema>
+
+type ChangedSection = "trial" | "dunning" | "renewals" | "cancellation"
+
+const SECTION_LABEL_KEYS: Record<ChangedSection, string> = {
+  trial: "settings.changedSections.trial",
+  dunning: "settings.changedSections.dunning",
+  renewals: "settings.changedSections.renewals",
+  cancellation: "settings.changedSections.cancellation",
+}
 
 const defaultFormValues: SubscriptionSettingsFormValues = {
   default_trial_days: 0,
@@ -124,32 +99,33 @@ const defaultFormValues: SubscriptionSettingsFormValues = {
 
 function getChangedSections(
   dirtyFields: Partial<Record<keyof SubscriptionSettingsFormValues, unknown>>
-) {
-  const sections: string[] = []
+): ChangedSection[] {
+  const sections: ChangedSection[] = []
 
   if (dirtyFields.default_trial_days) {
-    sections.push("Trial")
+    sections.push("trial")
   }
 
   if (
     dirtyFields.dunning_retry_intervals ||
     dirtyFields.max_dunning_attempts
   ) {
-    sections.push("Dunning")
+    sections.push("dunning")
   }
 
   if (dirtyFields.default_renewal_behavior) {
-    sections.push("Renewals")
+    sections.push("renewals")
   }
 
   if (dirtyFields.default_cancellation_behavior) {
-    sections.push("Cancellation")
+    sections.push("cancellation")
   }
 
   return sections
 }
 
 const SubscriptionSettingsPage = () => {
+  const { t } = useTranslation("reorder")
   const {
     data,
     isLoading,
@@ -190,6 +166,64 @@ const SubscriptionSettingsPage = () => {
 
   const saveMutation = useAdminSubscriptionSettingsUpdateMutation()
 
+  const renewalBehaviorOptions = useMemo<
+    Array<{
+      value: AdminSubscriptionRenewalBehavior
+      label: string
+      hint: string
+    }>
+  >(
+    () => [
+      {
+        value: "process_immediately",
+        label: t("settings.behaviorOptions.renewal.process_immediately.label"),
+        hint: t(
+          "settings.behaviorOptions.renewal.process_immediately.hint"
+        ),
+      },
+      {
+        value: "require_review_for_pending_changes",
+        label: t(
+          "settings.behaviorOptions.renewal.require_review_for_pending_changes.label"
+        ),
+        hint: t(
+          "settings.behaviorOptions.renewal.require_review_for_pending_changes.hint"
+        ),
+      },
+    ],
+    [t]
+  )
+
+  const cancellationBehaviorOptions = useMemo<
+    Array<{
+      value: AdminSubscriptionCancellationBehavior
+      label: string
+      hint: string
+    }>
+  >(
+    () => [
+      {
+        value: "recommend_retention_first",
+        label: t(
+          "settings.behaviorOptions.cancellation.recommend_retention_first.label"
+        ),
+        hint: t(
+          "settings.behaviorOptions.cancellation.recommend_retention_first.hint"
+        ),
+      },
+      {
+        value: "allow_direct_cancellation",
+        label: t(
+          "settings.behaviorOptions.cancellation.allow_direct_cancellation.label"
+        ),
+        hint: t(
+          "settings.behaviorOptions.cancellation.allow_direct_cancellation.hint"
+        ),
+      },
+    ],
+    [t]
+  )
+
   const handleSuccessfulSave = (response: SubscriptionSettingsAdminResponse) => {
     form.reset({
       default_trial_days: response.subscription_settings.default_trial_days,
@@ -204,22 +238,20 @@ const SubscriptionSettingsPage = () => {
         response.subscription_settings.default_cancellation_behavior,
     })
 
-    toast.success("Subscription settings updated")
+    toast.success(t("settings.toast.updated"))
   }
 
   const handleFailedSave = (mutationError: unknown) => {
     const message =
       mutationError instanceof Error
         ? mutationError.message
-        : "Failed to update subscription settings"
+        : t("settings.toast.updateFailed")
 
     if (
       message.toLowerCase().includes("version") ||
       message.toLowerCase().includes("conflict")
     ) {
-      toast.error(
-        "Settings changed in another session. Refresh the page and try saving again."
-      )
+      toast.error(t("settings.toast.versionConflict"))
       return
     }
 
@@ -249,13 +281,13 @@ const SubscriptionSettingsPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscription Settings</Heading>
+          <Heading level="h1">{t("settings.list.title")}</Heading>
           <Text
             size="small"
             leading="compact"
             className="text-ui-fg-subtle"
           >
-            Loading current runtime configuration…
+            {t("settings.list.loading")}
           </Text>
         </div>
       </Container>
@@ -266,14 +298,14 @@ const SubscriptionSettingsPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscription Settings</Heading>
+          <Heading level="h1">{t("settings.list.title")}</Heading>
         </div>
         <div className="px-6 py-4">
           <Alert variant="error">
             <Text size="small" leading="compact">
               {error instanceof Error
                 ? error.message
-                : "Failed to load subscription settings"}
+                : t("settings.list.loadError")}
             </Text>
           </Alert>
         </div>
@@ -284,7 +316,7 @@ const SubscriptionSettingsPage = () => {
   const currentSettings = data?.subscription_settings
   const changedSections = getChangedSections(form.formState.dirtyFields)
   const hasWideImpactChanges = changedSections.some((section) =>
-    ["Dunning", "Renewals", "Cancellation"].includes(section)
+    ["dunning", "renewals", "cancellation"].includes(section)
   )
 
   return (
@@ -292,23 +324,21 @@ const SubscriptionSettingsPage = () => {
       <Container className="divide-y p-0">
         <div className="flex items-start justify-between px-6 py-4">
           <div className="flex flex-col">
-            <Heading level="h1">Subscription Settings</Heading>
+            <Heading level="h1">{t("settings.list.title")}</Heading>
             <Text
               size="small"
               leading="compact"
               className="text-ui-fg-subtle"
             >
-              Manage runtime defaults for trials, dunning, renewals, and
-              cancellation flows.
+              {t("settings.list.description")}
             </Text>
             <Text
               size="small"
               leading="compact"
               className="mt-2 text-ui-fg-subtle"
             >
-              Changes apply to future operations and newly created process
-              state. Existing active dunning, cancellation, and renewal
-              processes keep their persisted configuration.
+              {t("settings.intro.futureOperations")}{" "}
+              {t("settings.intro.existingCases")}
             </Text>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -318,7 +348,7 @@ const SubscriptionSettingsPage = () => {
               isLoading={saveMutation.isPending}
               disabled={saveMutation.isPending || !form.formState.isDirty}
             >
-              Save
+              {t("common.actions.save")}
             </Button>
             <Text
               size="small"
@@ -326,10 +356,10 @@ const SubscriptionSettingsPage = () => {
               className="text-ui-fg-subtle"
             >
               {saveMutation.isPending
-                ? "Saving updated defaults…"
+                ? t("settings.alerts.saving")
                 : form.formState.isDirty
-                  ? "Changes will apply after this save completes."
-                  : "No unsaved changes."}
+                  ? t("settings.alerts.applyAfterSave")
+                  : t("settings.alerts.noUnsavedChanges")}
             </Text>
           </div>
         </div>
@@ -340,8 +370,10 @@ const SubscriptionSettingsPage = () => {
               <div className="flex flex-col gap-1">
                 <Text size="small" leading="compact">
                   {currentSettings.is_persisted
-                    ? `Persisted version ${currentSettings.version}`
-                    : "Using fallback defaults until the first save"}
+                    ? t("settings.status.persistedVersion", {
+                        version: currentSettings.version,
+                      })
+                    : t("settings.status.fallbackDefaults")}
                 </Text>
                 <Text
                   size="small"
@@ -349,10 +381,12 @@ const SubscriptionSettingsPage = () => {
                   className="text-ui-fg-subtle"
                 >
                   {currentSettings.updated_at
-                    ? `Last updated at ${new Date(
-                        currentSettings.updated_at
-                      ).toLocaleString()}`
-                    : "No persisted settings record exists yet."}
+                    ? t("settings.status.lastUpdatedAt", {
+                        date: new Date(
+                          currentSettings.updated_at
+                        ).toLocaleString(),
+                      })
+                    : t("settings.status.noRecord")}
                 </Text>
                 <Text
                   size="small"
@@ -360,8 +394,10 @@ const SubscriptionSettingsPage = () => {
                   className="text-ui-fg-subtle"
                 >
                   {currentSettings.updated_by
-                    ? `Updated by ${currentSettings.updated_by}`
-                    : "Updated by system bootstrap or no actor recorded."}
+                    ? t("settings.status.updatedBy", {
+                        actor: currentSettings.updated_by,
+                      })
+                    : t("settings.status.bootstrapNoActor")}
                 </Text>
                 {!adminSubscriptionSettingsCapabilities.supportsReset && (
                   <Text
@@ -369,7 +405,7 @@ const SubscriptionSettingsPage = () => {
                     leading="compact"
                     className="text-ui-fg-subtle"
                   >
-                    Reset to defaults is not supported yet in the admin UI.
+                    {t("settings.alerts.resetUnsupported")}
                   </Text>
                 )}
               </div>
@@ -380,12 +416,16 @@ const SubscriptionSettingsPage = () => {
             <Alert variant="warning">
               <div className="flex flex-col gap-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Unsaved changes in: {changedSections.join(", ")}
+                  {t("settings.alerts.unsavedChanges", {
+                    sections: changedSections
+                      .map((section) => t(SECTION_LABEL_KEYS[section]))
+                      .join(", "),
+                  })}
                 </Text>
                 <Text size="small" leading="compact">
                   {hasWideImpactChanges
-                    ? "These changes affect defaults for future renewal, dunning, or cancellation operations. Existing active cases keep their persisted process state."
-                    : "These changes update global defaults for future subscription operations."}
+                    ? t("settings.alerts.wideImpact")
+                    : t("settings.alerts.narrowImpact")}
                 </Text>
               </div>
             </Alert>
@@ -396,11 +436,13 @@ const SubscriptionSettingsPage = () => {
             className="flex flex-col gap-4 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <SettingsSection
-              title="Trial"
-              description="Configure the default trial period applied to future subscription operations."
+              title={t("settings.sections.trial")}
+              description={t("settings.sections.trialDescription")}
             >
               <div className="flex flex-col gap-y-2">
-                <Label htmlFor="default_trial_days">Default trial days</Label>
+                <Label htmlFor="default_trial_days">
+                  {t("settings.fields.defaultTrialDays")}
+                </Label>
                 <Input
                   id="default_trial_days"
                   type="number"
@@ -415,19 +457,19 @@ const SubscriptionSettingsPage = () => {
             </SettingsSection>
 
             <SettingsSection
-              title="Dunning"
-              description="Define the retry schedule used when a new dunning case is created."
+              title={t("settings.sections.dunning")}
+              description={t("settings.sections.dunningDescription")}
             >
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col">
-                    <Label>Retry intervals</Label>
+                    <Label>{t("settings.fields.retryIntervals")}</Label>
                     <Text
                       size="small"
                       leading="compact"
                       className="text-ui-fg-subtle"
                     >
-                      Values are stored in minutes and must be strictly increasing.
+                      {t("settings.fields.retryIntervalsHint")}
                     </Text>
                   </div>
                   <Button
@@ -442,7 +484,7 @@ const SubscriptionSettingsPage = () => {
                     }}
                   >
                     <PlusMini />
-                    Add interval
+                    {t("settings.fields.addInterval")}
                   </Button>
                 </div>
 
@@ -485,7 +527,9 @@ const SubscriptionSettingsPage = () => {
                 </div>
 
                 <div className="flex flex-col gap-y-2">
-                  <Label htmlFor="max_dunning_attempts">Max dunning attempts</Label>
+                  <Label htmlFor="max_dunning_attempts">
+                    {t("settings.fields.maxDunningAttempts")}
+                  </Label>
                   <Input
                     id="max_dunning_attempts"
                     type="number"
@@ -503,12 +547,12 @@ const SubscriptionSettingsPage = () => {
             </SettingsSection>
 
             <SettingsSection
-              title="Renewals"
-              description="Choose the default behavior used when a new renewal cycle is created."
+              title={t("settings.sections.renewals")}
+              description={t("settings.sections.renewalsDescription")}
             >
               <div className="flex flex-col gap-y-2">
                 <Label htmlFor="default_renewal_behavior">
-                  Default renewal behavior
+                  {t("settings.fields.defaultRenewalBehavior")}
                 </Label>
                 <Controller
                   control={form.control}
@@ -551,12 +595,12 @@ const SubscriptionSettingsPage = () => {
             </SettingsSection>
 
             <SettingsSection
-              title="Cancellation Defaults"
-              description="Define how newly created cancellation cases should start."
+              title={t("settings.sections.cancellation")}
+              description={t("settings.sections.cancellationDescription")}
             >
               <div className="flex flex-col gap-y-2">
                 <Label htmlFor="default_cancellation_behavior">
-                  Default cancellation behavior
+                  {t("settings.fields.defaultCancellationBehavior")}
                 </Label>
                 <Controller
                   control={form.control}
@@ -637,19 +681,22 @@ const SettingsSection = ({
 }
 
 const FieldError = ({ message }: { message?: string }) => {
+  const { t } = useTranslation("reorder")
+
   if (!message) {
     return null
   }
 
   return (
     <Text size="small" leading="compact" className="text-ui-fg-error">
-      {message}
+      {t(message)}
     </Text>
   )
 }
 
 export const config = defineRouteConfig({
-  label: "Subscription Settings",
+  label: "menuItems.settings",
+  translationNs: "reorder",
 })
 
 export default SubscriptionSettingsPage

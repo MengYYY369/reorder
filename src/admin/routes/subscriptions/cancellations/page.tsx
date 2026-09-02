@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate, type ReorderTranslate } from "../../../i18n/translate"
+import { useTranslation } from "react-i18next"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -37,86 +39,39 @@ const DEFAULT_CREATED_TO = toLocalDateTimeInputValue(
 const columnHelper =
   createDataTableColumnHelper<CancellationCaseAdminListItem>()
 
-const reasonCategoryFilterOptions = [
-  { label: "Price", value: "price" },
-  { label: "Product fit", value: "product_fit" },
-  { label: "Delivery", value: "delivery" },
-  { label: "Billing", value: "billing" },
-  { label: "Temporary pause", value: "temporary_pause" },
-  { label: "Switched competitor", value: "switched_competitor" },
-  { label: "Other", value: "other" },
-] as const
+const CANCELLATION_REASON_KEYS: Record<string, string> = {
+  price: "cancellations.reasonCategory.price",
+  product_fit: "cancellations.reasonCategory.productFit",
+  delivery: "cancellations.reasonCategory.delivery",
+  billing: "cancellations.reasonCategory.billing",
+  temporary_pause: "cancellations.reasonCategory.temporaryPause",
+  switched_competitor: "cancellations.reasonCategory.switchedCompetitor",
+  other: "cancellations.reasonCategory.other",
+}
 
-const finalOutcomeFilterOptions = [
-  { label: "Retained", value: CancellationFinalOutcomeAdmin.RETAINED },
-  { label: "Paused", value: CancellationFinalOutcomeAdmin.PAUSED },
-  { label: "Canceled", value: CancellationFinalOutcomeAdmin.CANCELED },
-] as const
+const CANCELLATION_OUTCOME_KEYS: Record<string, string> = {
+  retained: "cancellations.outcome.retained",
+  paused: "cancellations.outcome.paused",
+  canceled: "cancellations.outcome.canceled",
+}
 
-const offerTypeFilterOptions = [
-  { label: "Pause offer", value: "pause_offer" },
-  { label: "Discount offer", value: "discount_offer" },
-  { label: "Bonus offer", value: "bonus_offer" },
-] as const
+const CANCELLATION_OFFER_TYPE_KEYS: Record<string, string> = {
+  pause_offer: "cancellations.offerType.pauseOffer",
+  discount_offer: "cancellations.offerType.discountOffer",
+  bonus_offer: "cancellations.offerType.bonusOffer",
+}
 
-const baseColumns = [
-  columnHelper.accessor("subscription.reference", {
-    id: "subscription_reference",
-    header: "Subscription",
-    enableSorting: true,
-    sortLabel: "Subscription",
-    cell: ({ row }) => (
-      <div className="flex flex-col gap-y-0.5">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.subscription.reference}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.subscription.customer_name}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {[
-            row.original.subscription.product_title,
-            row.original.subscription.variant_title,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("reason_category", {
-    header: "Reason category",
-    enableSorting: true,
-    sortLabel: "Reason category",
-    cell: ({ getValue }) => (
-      <StatusBadge color="grey" className="text-nowrap">
-        {formatReasonCategory(getValue())}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("final_outcome", {
-    header: "Outcome",
-    enableSorting: true,
-    sortLabel: "Outcome",
-    cell: ({ row }) => (
-      <StatusBadge color={getOutcomeColor(row.original)} className="text-nowrap">
-        {formatOutcome(row.original)}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("created_at", {
-    header: "Created",
-    enableSorting: true,
-    sortLabel: "Created",
-    cell: ({ getValue }) => (
-      <Text size="small" leading="compact">
-        {formatDateTime(getValue())}
-      </Text>
-    ),
-  }),
-]
+const CANCELLATION_CASE_STATUS_KEYS: Record<string, string> = {
+  requested: "cancellations.caseStatus.requested",
+  evaluating_retention: "cancellations.caseStatus.evaluating",
+  retention_offered: "cancellations.caseStatus.retentionOffered",
+  retained: "cancellations.caseStatus.retained",
+  paused: "cancellations.caseStatus.paused",
+  canceled: "cancellations.caseStatus.canceled",
+}
 
 const CancellationsPage = () => {
+  const { t } = useTranslation("reorder")
   const navigate = useNavigate()
   const [search, setSearch] = useState("")
   const [filtering, setFiltering] = useState<DataTableFilteringState>(() => ({
@@ -160,6 +115,56 @@ const CancellationsPage = () => {
     return typeof filtering.created_to === "string" ? filtering.created_to : ""
   }, [filtering])
 
+  const reasonCategoryFilterOptions = useMemo(
+    () =>
+      [
+        { label: t("cancellations.reasonCategory.price"), value: "price" },
+        { label: t("cancellations.reasonCategory.productFit"), value: "product_fit" },
+        { label: t("cancellations.reasonCategory.delivery"), value: "delivery" },
+        { label: t("cancellations.reasonCategory.billing"), value: "billing" },
+        {
+          label: t("cancellations.reasonCategory.temporaryPause"),
+          value: "temporary_pause",
+        },
+        {
+          label: t("cancellations.reasonCategory.switchedCompetitor"),
+          value: "switched_competitor",
+        },
+        { label: t("cancellations.reasonCategory.other"), value: "other" },
+      ] as const,
+    [t]
+  )
+  const finalOutcomeFilterOptions = useMemo(
+    () =>
+      [
+        {
+          label: t("cancellations.outcome.retained"),
+          value: CancellationFinalOutcomeAdmin.RETAINED,
+        },
+        {
+          label: t("cancellations.outcome.paused"),
+          value: CancellationFinalOutcomeAdmin.PAUSED,
+        },
+        {
+          label: t("cancellations.outcome.canceled"),
+          value: CancellationFinalOutcomeAdmin.CANCELED,
+        },
+      ] as const,
+    [t]
+  )
+  const offerTypeFilterOptions = useMemo(
+    () =>
+      [
+        { label: t("cancellations.offerType.pauseOffer"), value: "pause_offer" },
+        {
+          label: t("cancellations.offerType.discountOffer"),
+          value: "discount_offer",
+        },
+        { label: t("cancellations.offerType.bonusOffer"), value: "bonus_offer" },
+      ] as const,
+    [t]
+  )
+
   const { data, isLoading, isError, error } = useAdminCancellationsDisplayQuery({
     pagination,
     search,
@@ -167,8 +172,70 @@ const CancellationsPage = () => {
     sorting,
   })
 
+  const columns = useMemo(() => {
+    return [
+      columnHelper.accessor("subscription.reference", {
+        id: "subscription_reference",
+        header: t("cancellations.columns.subscription"),
+        enableSorting: true,
+        sortLabel: t("cancellations.columns.subscription"),
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-y-0.5">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.subscription.reference}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.subscription.customer_name}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {[
+                row.original.subscription.product_title,
+                row.original.subscription.variant_title,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("reason_category", {
+        header: t("cancellations.columns.reasonCategory"),
+        enableSorting: true,
+        sortLabel: t("cancellations.columns.reasonCategory"),
+        cell: ({ getValue }) => (
+          <StatusBadge color="grey" className="text-nowrap">
+            {formatReasonCategory(getValue(), t)}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("final_outcome", {
+        header: t("cancellations.columns.outcome"),
+        enableSorting: true,
+        sortLabel: t("cancellations.columns.outcome"),
+        cell: ({ row }) => (
+          <StatusBadge
+            color={getOutcomeColor(row.original)}
+            className="text-nowrap"
+          >
+            {formatOutcome(row.original, t)}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("created_at", {
+        header: t("cancellations.columns.created"),
+        enableSorting: true,
+        sortLabel: t("cancellations.columns.created"),
+        cell: ({ getValue }) => (
+          <Text size="small" leading="compact">
+            {formatDateTime(getValue(), t("common.empty.noValue"))}
+          </Text>
+        ),
+      }),
+    ]
+  }, [t])
+
   const table = useDataTable({
-    columns: baseColumns,
+    columns,
     data: data?.cancellations || [],
     getRowId: (row) => row.id,
     rowCount: data?.count || 0,
@@ -196,7 +263,7 @@ const CancellationsPage = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between gap-x-4">
             <div className="flex flex-col">
-              <Heading level="h1">Cancellation &amp; Retention</Heading>
+              <Heading level="h1">{t("cancellations.list.title")}</Heading>
             </div>
           </div>
         </div>
@@ -205,7 +272,7 @@ const CancellationsPage = () => {
             <Text size="small" leading="compact">
               {error instanceof Error
                 ? error.message
-                : "Failed to load cancellation cases."}
+                : t("cancellations.list.loadError")}
             </Text>
           </Alert>
         </div>
@@ -225,9 +292,9 @@ const CancellationsPage = () => {
       <div className="px-6 py-4">
         <div className="flex items-center justify-between gap-x-4">
           <div className="flex flex-col">
-            <Heading level="h1">Cancellation &amp; Retention</Heading>
+            <Heading level="h1">{t("cancellations.list.title")}</Heading>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Review cancellation cases, churn reasons, and retention outcomes.
+              {t("cancellations.list.description")}
             </Text>
           </div>
         </div>
@@ -239,8 +306,8 @@ const CancellationsPage = () => {
             {reasonCategoryFilters.map((reasonCategory) => (
               <FilterChip
                 key={reasonCategory}
-                label="Reason category"
-                value={formatReasonCategory(reasonCategory)}
+                label={t("cancellations.columns.reasonCategory")}
+                value={formatReasonCategory(reasonCategory, t)}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -254,8 +321,8 @@ const CancellationsPage = () => {
             {finalOutcomeFilters.map((finalOutcome) => (
               <FilterChip
                 key={finalOutcome}
-                label="Outcome"
-                value={formatFinalOutcomeFilter(finalOutcome)}
+                label={t("cancellations.columns.outcome")}
+                value={formatFinalOutcomeFilter(finalOutcome, t)}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -269,8 +336,8 @@ const CancellationsPage = () => {
             {offerTypeFilters.map((offerType) => (
               <FilterChip
                 key={offerType}
-                label="Offer type"
-                value={formatOfferTypeFilter(offerType)}
+                label={t("cancellations.fields.offerType")}
+                value={formatOfferTypeFilter(offerType, t)}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -284,13 +351,13 @@ const CancellationsPage = () => {
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
                 <Button size="small" variant="secondary" type="button">
-                  Add filter
+                  {t("common.filters.addFilter")}
                 </Button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="start">
                 <DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenuTrigger>
-                    Reason category
+                    {t("cancellations.columns.reasonCategory")}
                   </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {reasonCategoryFilterOptions.map((option) => (
@@ -317,7 +384,9 @@ const CancellationsPage = () => {
                   </DropdownMenu.SubMenuContent>
                 </DropdownMenu.SubMenu>
                 <DropdownMenu.SubMenu>
-                  <DropdownMenu.SubMenuTrigger>Outcome</DropdownMenu.SubMenuTrigger>
+                  <DropdownMenu.SubMenuTrigger>
+                    {t("cancellations.columns.outcome")}
+                  </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {finalOutcomeFilterOptions.map((option) => (
                       <DropdownMenu.CheckboxItem
@@ -343,7 +412,9 @@ const CancellationsPage = () => {
                   </DropdownMenu.SubMenuContent>
                 </DropdownMenu.SubMenu>
                 <DropdownMenu.SubMenu>
-                  <DropdownMenu.SubMenuTrigger>Offer type</DropdownMenu.SubMenuTrigger>
+                  <DropdownMenu.SubMenuTrigger>
+                    {t("cancellations.fields.offerType")}
+                  </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {offerTypeFilterOptions.map((option) => (
                       <DropdownMenu.CheckboxItem
@@ -382,7 +453,7 @@ const CancellationsPage = () => {
                   })
                 }
               >
-                Clear all
+                {t("common.filters.clearAll")}
               </button>
             ) : null}
           </div>
@@ -391,7 +462,7 @@ const CancellationsPage = () => {
             <div className="grid gap-3 md:grid-cols-2">
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Created from
+                  {t("cancellations.filters.createdFrom")}
                 </Text>
                 <Input
                   type="datetime-local"
@@ -410,7 +481,7 @@ const CancellationsPage = () => {
               </div>
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Created to
+                  {t("cancellations.filters.createdTo")}
                 </Text>
                 <Input
                   type="datetime-local"
@@ -430,7 +501,7 @@ const CancellationsPage = () => {
             </div>
             <div className="flex items-center gap-x-2 self-end">
               <div className="w-full md:w-auto">
-                <DataTable.Search placeholder="Search" />
+                <DataTable.Search placeholder={t("common.actions.search")} />
               </div>
               <DataTable.SortingMenu />
             </div>
@@ -507,10 +578,10 @@ const CancellationsPage = () => {
         ) : (
           <div className="flex min-h-[250px] w-full flex-col items-center justify-center border-y px-6 py-4 text-center">
             <Text size="base" weight="plus">
-              No cancellation cases
+              {t("cancellations.list.empty")}
             </Text>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              No cancellation and retention cases match the current filters.
+              {t("cancellations.list.emptyHint")}
             </Text>
           </div>
         )}
@@ -521,12 +592,13 @@ const CancellationsPage = () => {
 }
 
 export const config = defineRouteConfig({
-  label: "Cancellation & Retention",
+  label: "menuItems.cancellations",
+  translationNs: "reorder",
   rank: 4,
 })
 
 export const handle = {
-  breadcrumb: () => "Cancellation & Retention",
+  breadcrumb: () => translate("menuItems.cancellations"),
 }
 
 export default CancellationsPage
@@ -540,11 +612,13 @@ const FilterChip = ({
   value: string
   onRemove: () => void
 }) => {
+  const { t } = useTranslation("reorder")
+
   return (
     <div className="shadow-buttons-neutral txt-compact-small-plus bg-ui-button-neutral text-ui-fg-base inline-flex items-center overflow-hidden rounded-md">
       <span className="border-ui-border-base border-r px-3 py-1.5">{label}</span>
       <span className="border-ui-border-base border-r px-3 py-1.5 text-ui-fg-subtle">
-        is
+        {t("common.filters.is")}
       </span>
       <span className="border-ui-border-base border-r px-3 py-1.5">{value}</span>
       <button
@@ -558,15 +632,15 @@ const FilterChip = ({
   )
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, emptyValue: string) {
   if (!value) {
-    return "-"
+    return emptyValue
   }
 
   const date = new Date(value)
 
   if (Number.isNaN(date.getTime())) {
-    return "-"
+    return emptyValue
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -605,78 +679,44 @@ function removeFilter(current: DataTableFilteringState, key: string) {
   return rest
 }
 
-function formatReasonCategory(value: string | null) {
+function formatReasonCategory(value: string | null, t: ReorderTranslate) {
   if (!value) {
-    return "Unclassified"
+    return t("cancellations.reasonCategory.unclassified")
   }
 
-  switch (value) {
-    case "product_fit":
-      return "Product fit"
-    case "temporary_pause":
-      return "Temporary pause"
-    case "switched_competitor":
-      return "Switched competitor"
-    default:
-      return value
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ")
-  }
+  return t(CANCELLATION_REASON_KEYS[value] ?? titleCaseIdentifier(value))
 }
 
-function formatFinalOutcomeFilter(value: CancellationFinalOutcomeAdmin) {
-  switch (value) {
-    case CancellationFinalOutcomeAdmin.RETAINED:
-      return "Retained"
-    case CancellationFinalOutcomeAdmin.PAUSED:
-      return "Paused"
-    case CancellationFinalOutcomeAdmin.CANCELED:
-      return "Canceled"
-  }
+function titleCaseIdentifier(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+function formatFinalOutcomeFilter(
+  value: CancellationFinalOutcomeAdmin,
+  t: ReorderTranslate
+) {
+  return t(CANCELLATION_OUTCOME_KEYS[value] ?? value)
 }
 
 function formatOfferTypeFilter(
-  value: "pause_offer" | "discount_offer" | "bonus_offer"
+  value: "pause_offer" | "discount_offer" | "bonus_offer",
+  t: ReorderTranslate
 ) {
-  switch (value) {
-    case "pause_offer":
-      return "Pause offer"
-    case "discount_offer":
-      return "Discount offer"
-    case "bonus_offer":
-      return "Bonus offer"
-  }
+  return t(CANCELLATION_OFFER_TYPE_KEYS[value] ?? value)
 }
 
-function formatOutcome(item: CancellationCaseAdminListItem) {
+function formatOutcome(
+  item: CancellationCaseAdminListItem,
+  t: ReorderTranslate
+) {
   if (item.final_outcome) {
-    switch (item.final_outcome) {
-      case CancellationFinalOutcomeAdmin.RETAINED:
-        return "Retained"
-      case CancellationFinalOutcomeAdmin.PAUSED:
-        return "Paused"
-      case CancellationFinalOutcomeAdmin.CANCELED:
-        return "Canceled"
-    }
+    return t(CANCELLATION_OUTCOME_KEYS[item.final_outcome] ?? item.final_outcome)
   }
 
-  switch (item.status) {
-    case "requested":
-      return "Requested"
-    case "evaluating_retention":
-      return "Evaluating"
-    case "retention_offered":
-      return "Retention offered"
-    case "retained":
-      return "Retained"
-    case "paused":
-      return "Paused"
-    case "canceled":
-      return "Canceled"
-    default:
-      return item.status
-  }
+  return t(CANCELLATION_CASE_STATUS_KEYS[item.status] ?? item.status)
 }
 
 function getOutcomeColor(item: CancellationCaseAdminListItem) {

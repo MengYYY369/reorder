@@ -1,0 +1,1082 @@
+{
+  "menuItems": {
+    "subscriptions": "订阅",
+    "planOffers": "计划与优惠",
+    "renewals": "续订",
+    "dunning": "催收",
+    "cancellations": "取消与挽留",
+    "analytics": "数据分析",
+    "activityLog": "操作日志",
+    "settings": "订阅设置"
+  },
+  "common": {
+    "actions": {
+      "cancel": "取消",
+      "apply": "应用",
+      "save": "保存",
+      "search": "搜索",
+      "close": "关闭"
+    },
+    "fields": {
+      "id": "ID",
+      "product": "商品",
+      "variant": "变体",
+      "status": "状态",
+      "frequency": "频率",
+      "discount": "折扣",
+      "nextRenewal": "下次续订",
+      "subscription": "订阅",
+      "reference": "订阅编号",
+      "customer": "客户",
+      "order": "订单",
+      "sku": "SKU",
+      "reason": "原因",
+      "email": "邮箱",
+      "createdAt": "创建时间"
+    },
+    "filters": {
+      "yes": "是",
+      "no": "否",
+      "is": "：",
+      "clearAll": "全部清除",
+      "clearAllFilters": "清除所有筛选",
+      "addFilter": "添加筛选",
+      "removeFilter": "移除{{label}}筛选"
+    },
+    "placeholders": {
+      "searchProducts": "搜索商品……"
+    },
+    "empty": { "noValue": "-" },
+    "intervals": {
+      "week": "每周",
+      "month": "每月",
+      "year": "每年"
+    }
+  },
+  "planOffers": {
+    "pickers": {
+      "selectProduct": "选择商品",
+      "selectProductHint": "搜索并选择此配置所属的商品。",
+      "selectVariant": "选择变体",
+      "selectVariantHint": "从 {{productTitle}} 中选择一个变体。",
+      "selectProductFirst": "请先选择商品。"
+    },
+    "list": {
+      "title": "计划与优惠",
+      "description": "配置商品级和变体级订阅优惠。",
+      "loadError": "加载计划优惠失败。",
+      "backToSubscriptions": "返回订阅",
+      "emptyFiltered": "没有匹配的计划优惠",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无计划优惠",
+      "emptyHint": "创建一个商品级或变体级订阅优惠即可开始。"
+    },
+    "columns": {
+      "name": "名称",
+      "target": "目标",
+      "status": "状态",
+      "frequencies": "频率",
+      "effectiveSource": "生效来源",
+      "updated": "更新时间",
+      "allVariants": "所有变体",
+      "moreCount": "还有 {{count}} 项"
+    },
+    "filters": {
+      "status": "状态",
+      "scope": "范围",
+      "frequency": "频率",
+      "discountRange": "折扣范围",
+      "discountRangeUpTo": "最高 {{max}}"
+    },
+    "status": {
+      "enabled": "启用",
+      "disabled": "停用",
+      "inactive": "未生效"
+    },
+    "scope": {
+      "product": "商品",
+      "variant": "变体"
+    },
+    "actions": {
+      "create": "创建",
+      "edit": "编辑",
+      "enable": "启用",
+      "enabling": "启用中……",
+      "disable": "停用",
+      "disabling": "停用中……"
+    },
+    "toast": {
+      "enabled": "计划优惠已启用",
+      "disabled": "计划优惠已停用",
+      "created": "计划优惠已创建",
+      "updated": "计划优惠已更新"
+    },
+    "errors": {
+      "updateFailed": "更新计划优惠失败",
+      "createFailed": "创建计划优惠失败",
+      "loadFailed": "加载计划优惠失败。"
+    },
+    "prompt": {
+      "enableTitle": "启用计划优惠？",
+      "enableDescription": "您即将启用此计划优惠。是否继续？",
+      "disableTitle": "停用计划优惠？",
+      "disableDescription": "您即将停用此计划优惠。是否继续？",
+      "removeFrequencyTitle": "移除该频率？",
+      "removeFrequencyDescription": "此频率行及其折扣配置将被移除。",
+      "remove": "移除"
+    },
+    "form": {
+      "createTitle": "创建计划优惠",
+      "createDescription": "创建商品级或变体级订阅优惠。",
+      "editTitle": "编辑计划优惠",
+      "loading": "正在加载计划优惠……",
+      "name": "名称",
+      "scope": "范围",
+      "target": "目标",
+      "productLevelConfig": "商品级配置",
+      "variantLevelConfig": "变体级配置",
+      "noProductSelected": "未选择商品",
+      "noVariantSelected": "未选择变体",
+      "change": "更改",
+      "select": "选择",
+      "offerEnabled": "启用优惠",
+      "offerEnabledHint": "创建后立即启用此优惠。",
+      "offerEnabledEditHint": "启用或停用此配置。",
+      "offerRules": "优惠规则",
+      "offerRulesHint": "定义可选的优惠约束，例如最短周期、试用行为和叠加策略。",
+      "offerRulesEditHint": "更新最短周期、试用行为和叠加策略。",
+      "minimumCycles": "最短周期数",
+      "minimumCyclesHint": "如果没有最短订阅周期，请留空。",
+      "stackingPolicy": "叠加策略",
+      "stackingPolicyHint": "控制此优惠是否可以与其他折扣叠加。",
+      "stackingAllowed": "允许叠加",
+      "stackingDisallowAll": "全部禁止",
+      "stackingDisallowSubscriptionDiscounts": "禁止订阅折扣叠加",
+      "trialEnabled": "启用试用",
+      "trialEnabledHint": "允许此优惠包含试用期。",
+      "trialDays": "试用天数",
+      "frequencies": "频率",
+      "frequenciesHint": "定义允许的频率与可选折扣。",
+      "frequenciesEditHint": "更新允许的频率及其折扣。",
+      "addFrequency": "添加频率",
+      "interval": "周期",
+      "value": "频率值",
+      "discountForFrequency": "此频率的折扣",
+      "discountForFrequencyHint": "仅在此频率需要折扣时启用。",
+      "discountType": "折扣类型",
+      "percentage": "按百分比",
+      "fixed": "固定金额",
+      "discountValue": "折扣值"
+    },
+    "validation": {
+      "selectVariant": "请选择变体",
+      "frequencyUnique": "频率不能重复",
+      "discountValueRequired": "请填写折扣值",
+      "trialDaysRequired": "启用试用时必须填写试用天数",
+      "trialDaysPositive": "试用天数必须大于 0"
+    }
+  },
+  "subscriptions": {
+    "breadcrumb": "订阅",
+    "status": {
+      "active": "生效中",
+      "paused": "已暂停",
+      "cancelled": "已取消",
+      "pastDue": "已逾期"
+    },
+    "orderWidget": {
+      "title": "订阅",
+      "badge": "订阅订单",
+      "loading": "正在加载订阅摘要……",
+      "loadError": "加载订阅摘要失败",
+      "oneTimeOrder": "一次性订单",
+      "noDiscount": "无折扣"
+    },
+    "list": {
+      "title": "订阅",
+      "description": "监控订阅状态、周期与即将进行的续订。",
+      "loadError": "加载订阅失败。",
+      "emptyFiltered": "没有匹配的订阅",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无订阅",
+      "emptyHint": "当客户开始定期下单后，订阅将显示在这里。"
+    },
+    "columns": {
+      "reference": "订阅编号",
+      "projectedAfterSkip": "跳过周期后预计续订",
+      "scheduled": "已排期"
+    },
+    "filters": {
+      "trial": "试用",
+      "skipNextCycle": "跳过下一周期",
+      "overdue": "已逾期",
+      "next7Days": "未来 7 天",
+      "next30Days": "未来 30 天",
+      "next90Days": "未来 90 天"
+    },
+    "actions": {
+      "pause": "暂停",
+      "pausing": "暂停中……",
+      "resume": "恢复",
+      "resuming": "恢复中……",
+      "cancelling": "取消中……",
+      "cancelSubscription": "取消订阅",
+      "keepSubscription": "保留订阅"
+    },
+    "prompt": {
+      "pauseTitle": "暂停订阅？",
+      "pauseDescription": "您即将暂停此订阅。是否继续？",
+      "resumeTitle": "恢复订阅？",
+      "resumeDescription": "您即将恢复此订阅。是否继续？",
+      "cancelTitle": "取消订阅？",
+      "cancelDescription": "您即将取消此订阅。此操作无法撤销。"
+    },
+    "toast": {
+      "paused": "订阅已暂停",
+      "resumed": "订阅已恢复",
+      "cancelled": "订阅已取消"
+    },
+    "errors": {
+      "pauseFailed": "暂停订阅失败",
+      "resumeFailed": "恢复订阅失败",
+      "cancelFailed": "取消订阅失败",
+      "planChange": "计划变更已排期",
+      "planChangeFailed": "安排计划变更失败",
+      "addressUpdated": "收货地址已更新",
+      "addressFailed": "更新收货地址失败"
+    },
+    "detail": {
+      "title": "订阅",
+      "description": "订阅详情与即将进行的计划变更。",
+      "loading": "正在加载订阅详情……",
+      "loadError": "加载订阅详情失败。",
+      "unavailable": "订阅详情不可用。",
+      "editShippingAddress": "编辑收货地址",
+      "noPendingChange": "此订阅没有待安排的计划变更。",
+      "noLinkedOrders": "暂无关联订单",
+      "latestRenewal": "最近一次续订",
+      "initialOrder": "初始订单",
+      "renewalNumbered": "第 {{index}} 次续订",
+      "sections": {
+        "overview": "概览",
+        "subscription": "订阅",
+        "shippingAddress": "收货地址",
+        "customer": "客户",
+        "product": "商品",
+        "orders": "订单",
+        "pendingPlanChange": "待处理计划变更",
+        "activityLog": "操作日志",
+        "subscriptionSnapshot": "订阅快照",
+        "changedFields": "变更字段",
+        "previousState": "变更前状态",
+        "newState": "变更后状态",
+        "metadata": "元数据"
+      },
+      "errors": {
+        "addressRequired": "请填写所有必填地址字段",
+        "postalCodeInvalid": "请输入有效的邮政编码和两位字母国家代码"
+      },
+      "fields": {
+        "startedAt": "开始时间",
+        "lastRenewal": "上次续订",
+        "effectiveAt": "生效时间",
+        "variantId": "变体 ID",
+        "customerId": "客户 ID",
+        "event": "事件",
+        "actor": "操作者",
+        "created": "创建时间",
+        "createdFrom": "创建时间从",
+        "createdTo": "创建时间到",
+        "summary": "摘要",
+        "domain": "领域",
+        "recipient": "收件人",
+        "address": "地址",
+        "addressLine1": "地址第 1 行",
+        "addressLine2": "地址第 2 行",
+        "city": "城市",
+        "postalCode": "邮政编码",
+        "province": "省 / 州",
+        "countryCode": "国家代码",
+        "country": "国家",
+        "phone": "电话",
+        "company": "公司",
+        "firstName": "名",
+        "lastName": "姓"
+      }
+    },
+    "addressHints": {
+      "effectiveAtOptional": "留空则由后端使用默认生效日期。",
+      "countryCodeIso": "请使用两位字母的 ISO 国家代码，例如 PL 或 US。"
+    },
+    "planChange": {
+      "title": "安排计划变更",
+      "frequencyInterval": "周期单位",
+      "frequencyValue": "频率值",
+      "selectVariant": "选择变体",
+      "selectInterval": "选择周期",
+      "loadingVariants": "正在加载变体……",
+      "variantLoadError": "加载商品变体失败。",
+      "noVariants": "此商品没有可用变体。",
+      "errors": {
+        "variantRequired": "请选择变体",
+        "frequencyValueInvalid": "频率值必须是正整数"
+      }
+    },
+    "timeline": {
+      "loading": "正在加载操作日志……",
+      "loadError": "加载操作日志失败。",
+      "empty": "未找到操作日志事件。",
+      "eventTitle": "操作日志事件",
+      "eventLoading": "正在加载日志事件……",
+      "eventLoadError": "加载日志事件详情失败。",
+      "noSummary": "无摘要",
+      "noChangedFields": "未捕获变更字段",
+      "noData": "无数据",
+      "actors": {
+        "admin": "管理员",
+        "customer": "客户",
+        "system": "系统",
+        "scheduler": "计划任务"
+      },
+      "domains": {
+        "subscriptions": "订阅",
+        "renewals": "续订",
+        "dunning": "催收",
+        "cancellations": "取消"
+      },
+      "summaryFields": {
+        "subscriptionCreated": "订阅已创建",
+        "pendingUpdateData": "已安排计划变更",
+        "status": "状态已变更",
+        "recipient": "收件人已更新",
+        "address": "地址",
+        "addressLinesChanged": "地址已更新",
+        "postalCodeChanged": "邮政编码已更新",
+        "phoneChanged": "电话已更新",
+        "countryCode": "国家已更新",
+        "province": "省份已更新",
+        "city": "城市已更新"
+      }
+    }
+  },
+  "renewals": {
+    "breadcrumb": "续订",
+    "list": {
+      "title": "续订",
+      "description": "监控已排期的订阅续订周期及其最新执行状态。",
+      "loadError": "加载续订失败。",
+      "emptyFiltered": "没有匹配的续订周期",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无续订周期",
+      "emptyHint": "订阅排期进入处理后，续订周期将显示在这里。"
+    },
+    "columns": {
+      "scheduled": "排期时间",
+      "subscription": "订阅",
+      "status": "状态",
+      "approval": "审批",
+      "lastAttempt": "最近一次尝试",
+      "operationalCycle": "实际周期：{{value}}",
+      "noAttemptsYet": "暂无尝试记录"
+    },
+    "filters": {
+      "status": "状态",
+      "approvalStatus": "审批状态",
+      "lastAttemptResult": "最近一次尝试结果",
+      "scheduledFrom": "排期时间起",
+      "scheduledTo": "排期时间至"
+    },
+    "status": {
+      "scheduled": "已排期",
+      "processing": "正在处理",
+      "succeeded": "已成功",
+      "failed": "已失败"
+    },
+    "attemptStatus": {
+      "processing": "进行中",
+      "succeeded": "已成功",
+      "failed": "已失败"
+    },
+    "approval": {
+      "notRequired": "无需审批",
+      "pending": "待审批",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "pendingApproval": "待审批"
+    },
+    "relativeStatus": {
+      "awaitingProcessing": "等待处理",
+      "currentlyProcessing": "正在处理",
+      "processed": "已处理",
+      "needsReview": "需要复核"
+    },
+    "detail": {
+      "title": "续订",
+      "loading": "正在加载续订详情……",
+      "loadError": "加载续订详情失败。",
+      "unavailable": "续订详情不可用。",
+      "header": "续订周期",
+      "description": "查看执行状态、审批状态、关联记录与尝试历史。",
+      "actions": {
+        "forceRenewal": "立即续订",
+        "forcing": "续订中……",
+        "approveChanges": "批准变更",
+        "rejectChanges": "拒绝变更",
+        "approve": "批准",
+        "reject": "拒绝"
+      },
+      "prompt": {
+        "forceTitle": "立即续订？",
+        "forceDescription": "您即将手动触发此续订周期。是否继续？",
+        "approveTitle": "批准变更？",
+        "approveDescription": "您即将批准此续订周期的待处理变更。",
+        "rejectTitle": "拒绝变更？",
+        "rejectDescription": "您即将拒绝此续订周期的待处理变更。"
+      },
+      "toast": {
+        "forced": "续订已触发",
+        "approved": "待处理变更已批准",
+        "rejected": "待处理变更已拒绝"
+      },
+      "errors": {
+        "forceFailed": "触发续订失败",
+        "approveFailed": "批准变更失败",
+        "rejectFailed": "拒绝变更失败",
+        "reasonRequired": "请填写原因"
+      },
+      "sections": {
+        "cycleOverview": "周期概览",
+        "approvalSummary": "审批摘要",
+        "pendingChanges": "待处理变更",
+        "attemptHistory": "尝试历史",
+        "technicalMetadata": "技术元数据",
+        "subscriptionSummary": "订阅摘要",
+        "generatedOrderSummary": "生成的订单摘要"
+      },
+      "fields": {
+        "projectedDelivery": "预计交付时间",
+        "operationalCycle": "实际周期",
+        "processedAt": "处理时间",
+        "createdAt": "创建时间",
+        "lastError": "最近错误",
+        "noErrorRecorded": "无错误记录",
+        "required": "是否必需",
+        "decidedAt": "审批时间",
+        "decidedBy": "审批人",
+        "effectiveAt": "生效时间",
+        "variantId": "变体 ID",
+        "noPendingChanges": "此续订周期没有关联的待处理变更。",
+        "attempt": "尝试",
+        "started": "开始时间",
+        "finished": "结束时间",
+        "error": "错误",
+        "order": "订单",
+        "noErrorMessage": "无错误信息",
+        "noAttempts": "此续订周期尚未记录任何尝试。",
+        "noMetadata": "此续订周期未存储元数据。",
+        "noOrderGenerated": "未生成订单",
+        "orderStatus": "订单状态",
+        "orderId": "订单 ID"
+      },
+      "drawer": {
+        "approveTitle": "批准变更",
+        "rejectTitle": "拒绝变更",
+        "reasonRequired": "原因 *",
+        "optionalNote": "可选的审核备注",
+        "requiredRejectionReason": "必填的拒绝原因"
+      }
+    }
+  },
+  "dunning": {
+    "breadcrumb": "催收",
+    "list": {
+      "title": "催收",
+      "description": "监控逾期订阅、重试时机与回收状态。",
+      "loadError": "加载催收案件失败。",
+      "emptyFiltered": "没有匹配的催收案件",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无催收案件",
+      "emptyHint": "续订扣款失败进入回收流程后，催收案件将显示在这里。"
+    },
+    "columns": {
+      "subscription": "订阅",
+      "status": "状态",
+      "nextRetry": "下次重试",
+      "attempts": "尝试次数",
+      "lastError": "最近错误",
+      "lastAttemptAt": "上次尝试 {{value}}",
+      "noRetryAttemptsYet": "暂无重试尝试",
+      "noPaymentErrorCode": "无支付错误代码",
+      "unknownProvider": "未知支付渠道"
+    },
+    "filters": {
+      "status": "状态",
+      "providerId": "支付渠道 ID",
+      "errorCode": "错误代码",
+      "attemptRange": "尝试次数范围",
+      "min": "最小值",
+      "max": "最大值",
+      "nextRetryFrom": "下次重试起",
+      "nextRetryTo": "下次重试至",
+      "provider": "支付渠道",
+      "attemptCount": "尝试次数",
+      "upTo": "最多 {{max}}"
+    },
+    "status": {
+      "open": "待处理",
+      "retryScheduled": "已安排重试",
+      "retrying": "重试中",
+      "awaitingManualResolution": "等待人工处理",
+      "recovered": "已回收",
+      "unrecovered": "未回收"
+    },
+    "attemptStatus": {
+      "processing": "进行中",
+      "succeeded": "已成功",
+      "failed": "已失败"
+    },
+    "retryWindow": {
+      "recovered": "已回收",
+      "closedUnrecovered": "已按未回收关闭",
+      "waitingManualResolution": "等待人工处理",
+      "noRetryScheduled": "未安排重试",
+      "queuedForRetry": "已排队等待重试"
+    },
+    "dateRange": {
+      "fromTo": "{{from}} 至 {{to}}",
+      "from": "自 {{value}} 起",
+      "until": "截至 {{value}}"
+    },
+    "intervals": {
+      "minuteUnit": "{{value}} 分钟"
+    },
+    "detail": {
+      "title": "催收案件",
+      "loading": "正在加载催收案件详情……",
+      "loadError": "加载催收案件详情失败。",
+      "unavailable": "催收案件详情不可用。",
+      "header": "催收案件",
+      "description": "查看回收状态、关联记录、重试时机与尝试历史。",
+      "actions": {
+        "retryNow": "立即重试",
+        "retrying": "重试中……",
+        "markRecovered": "标记为已回收",
+        "markUnrecovered": "标记为未回收",
+        "markingRecovered": "正在标记为已回收……",
+        "markingUnrecovered": "正在标记为未回收……",
+        "editRetrySchedule": "编辑重试计划",
+        "saveSchedule": "保存重试计划",
+        "savingSchedule": "正在保存重试计划……"
+      },
+      "prompt": {
+        "retryNowTitle": "立即重试扣款？",
+        "retryNowDescription": "您即将为此催收案件触发一次立即扣款重试。",
+        "overrideTitle": "覆盖重试计划？",
+        "overrideDescription": "您即将替换此催收案件当前的重试计划。",
+        "markRecoveredTitle": "标记为已回收？",
+        "markRecoveredDescription": "您即将关闭此案件并标记为已回收。",
+        "markUnrecoveredTitle": "标记为未回收？",
+        "markUnrecoveredDescription": "您即将关闭此案件并标记为未回收。"
+      },
+      "toast": {
+        "retryStarted": "重试已开始",
+        "markedRecovered": "案件已标记为已回收",
+        "markedUnrecovered": "案件已标记为未回收",
+        "retryScheduleUpdated": "重试计划已更新"
+      },
+      "errors": {
+        "retryNowFailed": "立即重试失败",
+        "markRecoveredFailed": "标记为已回收失败",
+        "markUnrecoveredFailed": "标记为未回收失败",
+        "retryScheduleFailed": "更新重试计划失败",
+        "reasonRequired": "请填写原因",
+        "intervalsRequired": "至少需要填写一个重试间隔",
+        "maxAttemptsPositive": "最大尝试次数必须是正整数",
+        "maxAttemptsMismatch": "最大尝试次数必须等于重试间隔数量"
+      },
+      "sections": {
+        "overview": "案件概览",
+        "payment": "支付摘要",
+        "retrySchedule": "重试计划",
+        "attempts": "尝试时间线",
+        "metadata": "技术元数据",
+        "subscription": "订阅摘要",
+        "renewal": "续订摘要",
+        "order": "订单 / 支付摘要"
+      },
+      "fields": {
+        "attemptCount": "尝试次数",
+        "nextRetry": "下次重试",
+        "lastAttempt": "上次尝试",
+        "recoveredAt": "回收时间",
+        "closedAt": "关闭时间",
+        "createdAt": "创建时间",
+        "updatedAt": "更新时间",
+        "lastErrorCode": "最近错误代码",
+        "provider": "支付渠道",
+        "lastErrorMessage": "最近错误信息",
+        "noPaymentErrorMessage": "无支付错误信息",
+        "latestPaymentReference": "最近支付凭据",
+        "recoveryReason": "回收原因",
+        "strategy": "策略",
+        "timezone": "时区",
+        "intervals": "重试间隔",
+        "source": "来源",
+        "attempt": "尝试",
+        "started": "开始时间",
+        "finished": "结束时间",
+        "error": "错误",
+        "paymentReference": "支付凭据",
+        "renewalStatus": "续订状态",
+        "scheduledFor": "排期时间",
+        "generatedOrderId": "生成的订单 ID",
+        "orderStatus": "订单状态",
+        "orderId": "订单 ID"
+      },
+      "empty": {
+        "noAttempts": "此催收案件尚未记录任何尝试。",
+        "noMetadata": "此催收案件未存储元数据。",
+        "noError": "无错误信息",
+        "noLinkedRenewal": "无关联续订",
+        "noLinkedOrder": "无关联订单"
+      },
+      "drawer": {
+        "warning": "覆盖重试计划将更新此案件未来的重试时机。",
+        "intervals": "重试间隔（分钟）",
+        "intervalsPlaceholder": "1440, 4320, 10080",
+        "maxAttempts": "最大尝试次数",
+        "reasonRequired": "原因 *",
+        "retryScheduleNote": "关于此次重试策略覆盖的可选备注",
+        "recoveredNote": "可选的回收备注",
+        "unrecoveredReason": "必填原因"
+      }
+    }
+  },
+  "cancellations": {
+    "breadcrumb": "取消",
+    "list": {
+      "title": "取消与挽留",
+      "description": "查看取消案件、流失原因与挽留结果。",
+      "loadError": "加载取消案件失败。",
+      "empty": "暂无取消案件",
+      "emptyHint": "没有符合当前筛选条件的取消与挽留案件。"
+    },
+    "columns": {
+      "subscription": "订阅",
+      "reasonCategory": "原因分类",
+      "outcome": "结果",
+      "created": "创建时间"
+    },
+    "filters": {
+      "createdFrom": "创建时间从",
+      "createdTo": "创建时间到"
+    },
+    "caseStatus": {
+      "requested": "已申请",
+      "evaluating": "评估中",
+      "evaluatingRetention": "挽留评估中",
+      "retentionOffered": "已提供挽留优惠",
+      "retained": "已挽留",
+      "paused": "已暂停",
+      "canceled": "已取消"
+    },
+    "outcome": {
+      "retained": "已挽留",
+      "paused": "已暂停",
+      "canceled": "已取消"
+    },
+    "offerType": {
+      "pauseOffer": "暂停优惠",
+      "discountOffer": "折扣优惠",
+      "bonusOffer": "赠额优惠"
+    },
+    "decisionStatus": {
+      "proposed": "已提议",
+      "accepted": "已接受",
+      "rejected": "已拒绝",
+      "applied": "已应用",
+      "expired": "已过期"
+    },
+    "reasonCategory": {
+      "price": "价格",
+      "productFit": "商品不合适",
+      "delivery": "配送",
+      "billing": "账单",
+      "temporaryPause": "临时暂停",
+      "switchedCompetitor": "转向竞争对手",
+      "other": "其他",
+      "unclassified": "未分类"
+    },
+    "fields": {
+      "offerType": "优惠类型",
+      "finalizedBy": "最终处理人",
+      "finalizedAt": "最终处理时间",
+      "cancellationEffectiveAt": "取消生效时间",
+      "cancelledAt": "取消时间"
+    },
+    "actions": {
+      "applyOffer": "应用挽留优惠",
+      "applyPauseOffer": "应用暂停优惠",
+      "finalize": "最终取消",
+      "editReason": "编辑原因"
+    },
+    "toast": {
+      "offerApplied": "挽留优惠已应用",
+      "finalized": "取消已最终处理",
+      "reasonUpdated": "原因已更新"
+    },
+    "errors": {
+      "applyOfferFailed": "应用挽留优惠失败",
+      "finalizeFailed": "最终取消失败",
+      "reasonUpdateFailed": "更新原因失败",
+      "reasonRequired": "请填写原因",
+      "offerNotAllowed": "所选挽留优惠不适用于此案件",
+      "pauseOfferRequiresCyclesOrResume": "暂停优惠需要填写暂停周期数或恢复时间",
+      "discountValuePositive": "折扣值必须大于 0",
+      "bonusValueRequired": "免费周期或抵扣额度的赠额必须填写数值"
+    },
+    "prompt": {
+      "applyPauseTitle": "应用暂停优惠？",
+      "applyPauseDescription": "您即将暂停此订阅作为挽留结果，并将此案件关闭为已暂停。",
+      "applyDiscountTitle": "应用折扣优惠？",
+      "applyDiscountDescription": "您即将应用一项挽留折扣，并将此案件关闭为已挽留。",
+      "applyBonusTitle": "应用赠额优惠？",
+      "applyBonusDescription": "您即将应用一项挽留赠额，并将此案件关闭为已挽留。",
+      "finalizeTitle": "最终取消？",
+      "finalizeDescription": "您即将把此案件最终处理为已取消，并更新订阅生命周期。"
+    },
+    "drawer": {
+      "updateReason": "更新原因",
+      "loadingLatest": "正在加载此操作所需的最新案件数据……",
+      "selectOfferType": "选择优惠类型",
+      "noOffersAvailable": "当前订阅状态下没有可用的挽留优惠。",
+      "pauseCycles": "暂停周期数",
+      "resumeAt": "恢复时间",
+      "discountType": "折扣类型",
+      "percentage": "按百分比",
+      "fixed": "固定金额",
+      "discountValue": "折扣值",
+      "durationCycles": "生效周期数",
+      "bonusType": "赠额类型",
+      "freeCycle": "免费周期",
+      "gift": "礼品",
+      "credit": "抵扣额度",
+      "bonusValue": "数值",
+      "label": "标签",
+      "optionalLabel": "可选标签",
+      "offerNote": "优惠备注",
+      "offerNotePlaceholder": "附加到优惠负载的可选备注",
+      "decisionReason": "决策原因",
+      "decisionReasonPlaceholder": "可选原因或客户反馈",
+      "reasonRequiredHint": "最终取消前必须填写原因",
+      "notes": "备注",
+      "optionalOperatorNotes": "操作员可选备注",
+      "optionalFinalNotes": "最终取消的可选备注",
+      "selectCategory": "选择分类",
+      "changeReason": "变更原因",
+      "optionalUpdateExplanation": "此次更新的可选说明",
+      "captureChurnReason": "请填写流失原因",
+      "effectiveAt": "生效时间",
+      "immediately": "立即",
+      "endOfCycle": "本周期结束时",
+      "applyOfferFooter": "应用优惠",
+      "continueFooter": "继续"
+    },
+    "detail": {
+      "title": "取消案件",
+      "header": "取消案件",
+      "description": "查看取消背景、挽留操作、关联模块摘要与最终结果。",
+      "loading": "正在加载取消案件详情……",
+      "loadError": "加载取消案件详情失败。",
+      "unavailable": "取消案件详情不可用。",
+      "sections": {
+        "caseOverview": "案件概览",
+        "timeline": "决策时间线",
+        "offerHistory": "优惠历史",
+        "metadata": "技术元数据",
+        "subscriptionSummary": "订阅摘要",
+        "linkedDunning": "关联催收摘要",
+        "linkedRenewal": "关联续订摘要"
+      },
+      "fields": {
+        "offer": "优惠",
+        "decided": "决策时间",
+        "applied": "应用时间",
+        "scheduledFor": "排期时间",
+        "approval": "审批",
+        "generatedOrder": "生成的订单",
+        "attemptCount": "尝试次数",
+        "nextRetry": "下次重试",
+        "lastError": "最近错误"
+      },
+      "timeline": {
+        "offerEventRecorded": "已记录挽留优惠事件",
+        "finalOutcome": "最终结果",
+        "terminalOutcome": "案件已到达最终状态",
+        "effectiveAt": "生效于 {{date}}"
+      },
+      "empty": {
+        "noOutcome": "暂无最终结果",
+        "noReason": "未记录原因",
+        "noTimelineEntries": "尚未记录任何挽留优惠或最终结果条目。",
+        "noOffers": "此案件尚未记录任何挽留优惠。",
+        "noPayloadSummary": "无负载摘要",
+        "noMetadata": "此案件未存储元数据。",
+        "noLinkedDunning": "无活跃催收案例",
+        "noLinkedRenewal": "无关联续订周期"
+      }
+    }
+  },
+  "activityLog": {
+    "list": {
+      "title": "操作日志",
+      "description": "查看续订、催收与取消工作流中的订阅生命周期事件。",
+      "loadError": "加载操作日志条目失败。",
+      "emptyFiltered": "没有符合当前筛选条件的日志条目",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无操作日志条目",
+      "emptyHint": "订阅工作流运行后，操作日志条目将显示在这里。"
+    },
+    "columns": {
+      "subscription": "订阅",
+      "created": "创建时间",
+      "actor": "操作者",
+      "event": "事件",
+      "reason": "原因"
+    },
+    "filters": {
+      "addFilter": "添加筛选",
+      "quickPresets": "快速预设",
+      "eventType": "事件类型",
+      "preset": "预设",
+      "createdFrom": "创建时间从",
+      "createdTo": "创建时间到"
+    },
+    "actor": {
+      "admin": "管理员",
+      "customer": "客户",
+      "system": "系统",
+      "scheduler": "计划任务"
+    },
+    "domains": {
+      "subscriptions": "订阅",
+      "renewals": "续订",
+      "dunning": "催收",
+      "cancellation": "取消",
+      "cancellationFull": "取消与挽留",
+      "unknown": "活动"
+    },
+    "summaryFields": {
+      "subscriptionCreated": "订阅已创建",
+      "pendingUpdateData": "已安排计划变更",
+      "status": "状态已变更",
+      "recipient": "收件人已更新",
+      "address": "地址",
+      "addressLinesChanged": "地址已更新",
+      "postalCodeChanged": "邮政编码已更新",
+      "phoneChanged": "电话已更新",
+      "countryCode": "国家已更新",
+      "province": "省份已更新",
+      "city": "城市已更新"
+    },
+    "eventDetail": {
+      "title": "操作日志事件",
+      "loading": "正在加载事件详情……",
+      "loadError": "加载操作日志详情失败。",
+      "close": "关闭",
+      "overview": "概览",
+      "event": "事件",
+      "domain": "领域",
+      "actor": "操作者",
+      "created": "创建时间",
+      "reason": "原因",
+      "summary": "摘要",
+      "subscriptionSnapshot": "订阅快照",
+      "reference": "订阅编号",
+      "customer": "客户",
+      "product": "商品",
+      "variant": "变体",
+      "changedFields": "变更字段",
+      "changedFieldsLabel": "变更字段",
+      "noChangedFields": "未捕获变更字段",
+      "previousState": "变更前状态",
+      "newState": "变更后状态",
+      "metadata": "元数据",
+      "noData": "无数据",
+      "noSummary": "无摘要"
+    }
+  },
+  "analytics": {
+    "list": {
+      "title": "数据分析",
+      "description": "从分析读取模型中查看经常性收入、流失、LTV 与订阅创建趋势。",
+      "loadError": "加载数据分析失败。",
+      "exportError": "导出数据分析失败",
+      "trendOverview": "趋势概览",
+      "noDataRange": "该时间范围内没有分析数据",
+      "noDataRangeHint": "请尝试扩大日期范围或移除筛选条件，以查看更大范围的订阅活动。",
+      "noBuckets": "当前时间范围内没有返回任何分桶数据。",
+      "noComparisonWindow": "暂无可用的对比窗口。",
+      "noTrendPoints": "暂无趋势数据点",
+      "noTrendPointsHint": "当前筛选条件下该指标的快照数据不足。",
+      "noDailyBuckets": "暂无按日分桶数据",
+      "noDailyBucketsHint": "请选择有效的日期范围以查看每日订阅创建情况。"
+    },
+    "filters": {
+      "addFilter": "添加筛选",
+      "dateFrom": "开始日期",
+      "dateTo": "结束日期",
+      "groupBy": "分组方式",
+      "status": "状态",
+      "frequency": "频率",
+      "product": "商品",
+      "allProducts": "全部商品"
+    },
+    "metricTabs": {
+      "mrr": "MRR",
+      "churn": "流失",
+      "ltv": "LTV",
+      "created": "新增"
+    },
+    "status": {
+      "active": "生效中",
+      "paused": "已暂停",
+      "pastDue": "已逾期",
+      "cancelled": "已取消"
+    },
+    "groupBy": {
+      "day": "按日",
+      "week": "按周",
+      "month": "按月"
+    },
+    "frequency": {
+      "weekly": "每周",
+      "every2Weeks": "每 2 周",
+      "monthly": "每月",
+      "quarterly": "每季度",
+      "yearly": "每年",
+      "everyNWeeks": "每 {{value}} 周",
+      "everyNMonths": "每 {{value}} 个月",
+      "everyNYears": "每 {{value}} 年"
+    },
+    "units": {
+      "currency": "货币",
+      "percent": "百分比",
+      "count": "订阅数",
+      "unavailable": "不可用"
+    },
+    "trend": {
+      "rangeSummary": "{{from}} 至 {{to}}",
+      "rangeEmpty": "当前时间范围内没有返回任何分桶数据。",
+      "max": "最高",
+      "min": "最低",
+      "dailyBars": "按日柱状图",
+      "bucketsDay": "按日分桶",
+      "bucketsWeek": "按周分桶",
+      "bucketsMonth": "按月分桶",
+      "createdUtcNote": "创建指标始终按 UTC 每天渲染一根柱形。",
+      "createdRangeNote": "创建指标按 UTC 每天渲染一根柱形，且仅跟随所选日期范围。",
+      "trendUtcNote": "趋势按 UTC 分桶，并使用与 KPI 卡片相同的筛选条件。",
+      "ariaTrendChart": "{{label}} 趋势图",
+      "ariaBarChart": "{{label}} 柱状图",
+      "flat": "与上一窗口持平 · {{delta}}",
+      "up": "较上一窗口上升 · {{delta}}",
+      "down": "较上一窗口下降 · {{delta}}",
+      "createdBarTitle": "{{bucket}}：创建了 {{value}} 个订阅"
+    },
+    "export": {
+      "button": "导出",
+      "csv": "导出 CSV",
+      "json": "导出 JSON"
+    },
+    "toast": {
+      "exported": "数据分析 {{format}} 导出已下载"
+    }
+  },
+  "settings": {
+    "list": {
+      "title": "订阅设置",
+      "description": "管理试用、催收、续订与取消流程的运行时默认值。",
+      "loading": "正在加载当前运行时配置……",
+      "loadError": "加载订阅设置失败"
+    },
+    "intro": {
+      "futureOperations": "更改仅影响后续操作和新建的流程状态。",
+      "existingCases": "现有的催收、取消与续订流程会保留其已持久化的配置。"
+    },
+    "status": {
+      "fallbackDefaults": "首次保存前使用回退默认值",
+      "noRecord": "尚不存在已持久化的设置记录。",
+      "persistedVersion": "已持久化版本 {{version}}",
+      "lastUpdatedAt": "最后更新于 {{date}}",
+      "updatedBy": "由 {{actor}} 更新",
+      "bootstrapNoActor": "由系统引导更新，或未记录操作人。"
+    },
+    "alerts": {
+      "resetUnsupported": "管理界面暂不支持恢复默认值。",
+      "unsavedChanges": "未保存的更改位于：{{sections}}",
+      "narrowImpact": "这些更改将更新后续订阅操作的全局默认值。",
+      "wideImpact": "这些更改会影响后续续订、催收或取消操作的默认值。现有的进行中案件会保留其已持久化的流程状态。",
+      "applyAfterSave": "更改将在本次保存完成后生效。",
+      "noUnsavedChanges": "没有未保存的更改。",
+      "saving": "正在保存更新的默认值……"
+    },
+    "sections": {
+      "trial": "试用",
+      "dunning": "催收",
+      "renewals": "续订",
+      "cancellation": "取消默认设置",
+      "trialDescription": "配置应用于后续订阅操作的默认试用天数。",
+      "dunningDescription": "定义新建催收案件时使用的重试计划。",
+      "renewalsDescription": "选择新建续订周期时使用的默认行为。",
+      "cancellationDescription": "定义新建取消案件的启动方式。"
+    },
+    "changedSections": {
+      "trial": "试用",
+      "dunning": "催收",
+      "renewals": "续订",
+      "cancellation": "取消"
+    },
+    "fields": {
+      "defaultTrialDays": "默认试用天数",
+      "retryIntervals": "重试间隔",
+      "retryIntervalsHint": "值以分钟存储，且必须严格递增。",
+      "addInterval": "添加间隔",
+      "maxDunningAttempts": "最大催收尝试次数",
+      "defaultRenewalBehavior": "默认续订行为",
+      "defaultCancellationBehavior": "默认取消行为"
+    },
+    "behaviorOptions": {
+      "renewal": {
+        "process_immediately": {
+          "label": "立即处理",
+          "hint": "没有待审核更改时，新建续订周期默认立即处理。"
+        },
+        "require_review_for_pending_changes": {
+          "label": "审核待处理的更改",
+          "hint": "当待处理的订阅更新生效时，新建续订周期需要审核。"
+        }
+      },
+      "cancellation": {
+        "recommend_retention_first": {
+          "label": "优先推荐挽留",
+          "hint": "新建取消案件默认先采取挽留优先策略，再进入直接取消。"
+        },
+        "allow_direct_cancellation": {
+          "label": "允许直接取消",
+          "hint": "新建取消案件可以不采用挽留优先默认策略，直接进入取消。"
+        }
+      }
+    },
+    "validation": {
+      "retryIntervalPositive": "重试间隔必须是正整数",
+      "retryIntervalsStrictlyIncreasing": "重试间隔必须严格递增",
+      "maxAttemptsMatchIntervals": "最大催收尝试次数必须与重试间隔数量一致"
+    },
+    "toast": {
+      "updated": "订阅设置已更新",
+      "updateFailed": "更新订阅设置失败",
+      "versionConflict": "设置已在另一个会话中更改。请刷新页面后重试保存。"
+    }
+  }
+}

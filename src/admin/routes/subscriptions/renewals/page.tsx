@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate, type ReorderTranslate } from "../../../i18n/translate";
+import { useTranslation } from "react-i18next";
 import { XMarkMini } from "@medusajs/icons";
 import {
   Alert,
@@ -33,117 +35,35 @@ const PAGE_SIZE = 20;
 
 const columnHelper = createDataTableColumnHelper<RenewalCycleAdminListItem>();
 
-const statusFilterOptions = [
-  { label: "Scheduled", value: RenewalCycleAdminStatus.SCHEDULED },
-  { label: "Processing", value: RenewalCycleAdminStatus.PROCESSING },
-  { label: "Succeeded", value: RenewalCycleAdminStatus.SUCCEEDED },
-  { label: "Failed", value: RenewalCycleAdminStatus.FAILED },
-] as const;
+const RENEWAL_CYCLE_STATUS_KEYS = {
+  [RenewalCycleAdminStatus.SCHEDULED]: "renewals.status.scheduled",
+  [RenewalCycleAdminStatus.PROCESSING]: "renewals.status.processing",
+  [RenewalCycleAdminStatus.SUCCEEDED]: "renewals.status.succeeded",
+  [RenewalCycleAdminStatus.FAILED]: "renewals.status.failed",
+} as const;
 
-const approvalFilterOptions = [
-  { label: "Pending", value: RenewalApprovalStatus.PENDING },
-  { label: "Approved", value: RenewalApprovalStatus.APPROVED },
-  { label: "Rejected", value: RenewalApprovalStatus.REJECTED },
-] as const;
+const RENEWAL_ATTEMPT_STATUS_KEYS = {
+  [RenewalAttemptAdminStatus.PROCESSING]: "renewals.attemptStatus.processing",
+  [RenewalAttemptAdminStatus.SUCCEEDED]: "renewals.attemptStatus.succeeded",
+  [RenewalAttemptAdminStatus.FAILED]: "renewals.attemptStatus.failed",
+} as const;
 
-const attemptFilterOptions = [
-  { label: "Processing", value: RenewalAttemptAdminStatus.PROCESSING },
-  { label: "Succeeded", value: RenewalAttemptAdminStatus.SUCCEEDED },
-  { label: "Failed", value: RenewalAttemptAdminStatus.FAILED },
-] as const;
+const RENEWAL_APPROVAL_FILTER_KEYS = {
+  [RenewalApprovalStatus.PENDING]: "renewals.approval.pending",
+  [RenewalApprovalStatus.APPROVED]: "renewals.approval.approved",
+  [RenewalApprovalStatus.REJECTED]: "renewals.approval.rejected",
+} as const;
 
-const baseColumns = [
-  columnHelper.accessor("scheduled_for", {
-    header: "Scheduled",
-    enableSorting: true,
-    sortLabel: "Scheduled",
-    cell: ({ getValue, row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {formatDateTime(row.original.effective_scheduled_for)}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.effective_scheduled_for !== getValue()
-            ? `Operational cycle: ${formatDateTime(getValue())}`
-            : formatRelativeCycleStatus(row.original.status)}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("subscription.reference", {
-    id: "subscription_reference",
-    header: "Subscription",
-    enableSorting: true,
-    sortLabel: "Subscription",
-    cell: ({ row }) => (
-      <div className="flex flex-col gap-y-0.5">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.subscription.reference}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.subscription.customer_name}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {formatSubscriptionContext(row.original)}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("status", {
-    header: "Status",
-    enableSorting: true,
-    sortLabel: "Status",
-    cell: ({ getValue }) => (
-      <StatusBadge color={getCycleStatusColor(getValue())} className="text-nowrap">
-        {formatCycleStatus(getValue())}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("approval.status", {
-    id: "approval_status",
-    header: "Approval",
-    enableSorting: true,
-    sortLabel: "Approval",
-    cell: ({ row }) => (
-      <StatusBadge
-        color={getApprovalStatusColor(row.original.approval)}
-        className="text-nowrap"
-      >
-        {formatApprovalStatus(row.original.approval)}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("last_attempt_status", {
-    header: "Last attempt",
-    enableSorting: true,
-    sortLabel: "Last attempt",
-    cell: ({ row }) => {
-      if (!row.original.last_attempt_status) {
-        return (
-          <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            No attempts yet
-          </Text>
-        );
-      }
-
-      return (
-        <div className="flex flex-col">
-          <StatusBadge
-            color={getAttemptStatusColor(row.original.last_attempt_status)}
-            className="text-nowrap"
-          >
-            {formatAttemptStatus(row.original.last_attempt_status)}
-          </StatusBadge>
-          <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            {formatDateTime(row.original.last_attempt_at)}
-          </Text>
-        </div>
-      );
-    },
-  }),
-];
+const RENEWAL_RELATIVE_STATUS_KEYS = {
+  [RenewalCycleAdminStatus.SCHEDULED]: "renewals.relativeStatus.awaitingProcessing",
+  [RenewalCycleAdminStatus.PROCESSING]:
+    "renewals.relativeStatus.currentlyProcessing",
+  [RenewalCycleAdminStatus.SUCCEEDED]: "renewals.relativeStatus.processed",
+  [RenewalCycleAdminStatus.FAILED]: "renewals.relativeStatus.needsReview",
+} as const;
 
 const RenewalsPage = () => {
+  const { t } = useTranslation("reorder");
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [filtering, setFiltering] = useState<DataTableFilteringState>(() => ({
@@ -158,6 +78,165 @@ const RenewalsPage = () => {
     pageIndex: 0,
     pageSize: PAGE_SIZE,
   });
+
+  const statusFilterOptions = useMemo(() => {
+    return [
+      {
+        label: t(RENEWAL_CYCLE_STATUS_KEYS[RenewalCycleAdminStatus.SCHEDULED]),
+        value: RenewalCycleAdminStatus.SCHEDULED,
+      },
+      {
+        label: t(RENEWAL_CYCLE_STATUS_KEYS[RenewalCycleAdminStatus.PROCESSING]),
+        value: RenewalCycleAdminStatus.PROCESSING,
+      },
+      {
+        label: t(RENEWAL_CYCLE_STATUS_KEYS[RenewalCycleAdminStatus.SUCCEEDED]),
+        value: RenewalCycleAdminStatus.SUCCEEDED,
+      },
+      {
+        label: t(RENEWAL_CYCLE_STATUS_KEYS[RenewalCycleAdminStatus.FAILED]),
+        value: RenewalCycleAdminStatus.FAILED,
+      },
+    ] as const;
+  }, [t]);
+
+  const approvalFilterOptions = useMemo(() => {
+    return [
+      {
+        label: t(RENEWAL_APPROVAL_FILTER_KEYS[RenewalApprovalStatus.PENDING]),
+        value: RenewalApprovalStatus.PENDING,
+      },
+      {
+        label: t(RENEWAL_APPROVAL_FILTER_KEYS[RenewalApprovalStatus.APPROVED]),
+        value: RenewalApprovalStatus.APPROVED,
+      },
+      {
+        label: t(RENEWAL_APPROVAL_FILTER_KEYS[RenewalApprovalStatus.REJECTED]),
+        value: RenewalApprovalStatus.REJECTED,
+      },
+    ] as const;
+  }, [t]);
+
+  const attemptFilterOptions = useMemo(() => {
+    return [
+      {
+        label: t(RENEWAL_ATTEMPT_STATUS_KEYS[RenewalAttemptAdminStatus.PROCESSING]),
+        value: RenewalAttemptAdminStatus.PROCESSING,
+      },
+      {
+        label: t(RENEWAL_ATTEMPT_STATUS_KEYS[RenewalAttemptAdminStatus.SUCCEEDED]),
+        value: RenewalAttemptAdminStatus.SUCCEEDED,
+      },
+      {
+        label: t(RENEWAL_ATTEMPT_STATUS_KEYS[RenewalAttemptAdminStatus.FAILED]),
+        value: RenewalAttemptAdminStatus.FAILED,
+      },
+    ] as const;
+  }, [t]);
+
+  const columns = useMemo(() => {
+    return [
+      columnHelper.accessor("scheduled_for", {
+        header: t("renewals.columns.scheduled"),
+        enableSorting: true,
+        sortLabel: t("renewals.columns.scheduled"),
+        cell: ({ getValue, row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {formatDateTime(
+                row.original.effective_scheduled_for,
+                t("common.empty.noValue")
+              )}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.effective_scheduled_for !== getValue()
+                ? t("renewals.columns.operationalCycle", {
+                    value: formatDateTime(
+                      getValue(),
+                      t("common.empty.noValue")
+                    ),
+                  })
+                : t(RENEWAL_RELATIVE_STATUS_KEYS[row.original.status])}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("subscription.reference", {
+        id: "subscription_reference",
+        header: t("renewals.columns.subscription"),
+        enableSorting: true,
+        sortLabel: t("renewals.columns.subscription"),
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-y-0.5">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.subscription.reference}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.subscription.customer_name}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {formatSubscriptionContext(row.original)}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("status", {
+        header: t("renewals.columns.status"),
+        enableSorting: true,
+        sortLabel: t("renewals.columns.status"),
+        cell: ({ getValue }) => (
+          <StatusBadge color={getCycleStatusColor(getValue())} className="text-nowrap">
+            {t(RENEWAL_CYCLE_STATUS_KEYS[getValue()])}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("approval.status", {
+        id: "approval_status",
+        header: t("renewals.columns.approval"),
+        enableSorting: true,
+        sortLabel: t("renewals.columns.approval"),
+        cell: ({ row }) => (
+          <StatusBadge
+            color={getApprovalStatusColor(row.original.approval)}
+            className="text-nowrap"
+          >
+            {formatApprovalStatus(row.original.approval, t)}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("last_attempt_status", {
+        header: t("renewals.columns.lastAttempt"),
+        enableSorting: true,
+        sortLabel: t("renewals.columns.lastAttempt"),
+        cell: ({ row }) => {
+          if (!row.original.last_attempt_status) {
+            return (
+              <Text size="small" leading="compact" className="text-ui-fg-subtle">
+                {t("renewals.columns.noAttemptsYet")}
+              </Text>
+            );
+          }
+
+          return (
+            <div className="flex flex-col">
+              <StatusBadge
+                color={getAttemptStatusColor(row.original.last_attempt_status)}
+                className="text-nowrap"
+              >
+                {t(RENEWAL_ATTEMPT_STATUS_KEYS[row.original.last_attempt_status])}
+              </StatusBadge>
+              <Text size="small" leading="compact" className="text-ui-fg-subtle">
+                {formatDateTime(
+                  row.original.last_attempt_at,
+                  t("common.empty.noValue")
+                )}
+              </Text>
+            </div>
+          );
+        },
+      }),
+    ];
+  }, [t]);
 
   const statusFilterValue = useMemo(() => {
     return Array.isArray(filtering.status)
@@ -193,7 +272,7 @@ const RenewalsPage = () => {
   });
 
   const table = useDataTable({
-    columns: baseColumns,
+    columns,
     data: data?.renewals || [],
     getRowId: (row) => row.id,
     rowCount: data?.count || 0,
@@ -221,21 +300,22 @@ const RenewalsPage = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between gap-x-4">
             <div className="flex flex-col">
-              <Heading level="h1">Renewals</Heading>
+              <Heading level="h1">{t("renewals.list.title")}</Heading>
               <Text
                 size="small"
                 leading="compact"
                 className="text-ui-fg-subtle"
               >
-                Monitor scheduled subscription renewal cycles and their latest
-                execution state.
+                {t("renewals.list.description")}
               </Text>
             </div>
           </div>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
-            {error instanceof Error ? error.message : "Failed to load renewals."}
+            {error instanceof Error
+              ? error.message
+              : t("renewals.list.loadError")}
           </Alert>
         </div>
       </Container>
@@ -253,10 +333,9 @@ const RenewalsPage = () => {
     <Container className="divide-y p-0">
       <div className="flex items-center justify-between px-6 py-4">
         <div className="flex flex-col">
-          <Heading level="h1">Renewals</Heading>
+          <Heading level="h1">{t("renewals.list.title")}</Heading>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Monitor scheduled subscription renewal cycles and their latest
-            execution state.
+            {t("renewals.list.description")}
           </Text>
         </div>
       </div>
@@ -266,8 +345,8 @@ const RenewalsPage = () => {
             {statusFilterValue.map((status) => (
               <FilterChip
                 key={status}
-                label="Status"
-                value={formatCycleStatus(status)}
+                label={t("renewals.columns.status")}
+                value={t(RENEWAL_CYCLE_STATUS_KEYS[status])}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -279,8 +358,8 @@ const RenewalsPage = () => {
             {approvalFilterValue.map((status) => (
               <FilterChip
                 key={status}
-                label="Approval"
-                value={formatApprovalFilterStatus(status)}
+                label={t("renewals.columns.approval")}
+                value={t(RENEWAL_APPROVAL_FILTER_KEYS[status])}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -294,8 +373,8 @@ const RenewalsPage = () => {
             {lastAttemptFilterValue.map((status) => (
               <FilterChip
                 key={status}
-                label="Last attempt"
-                value={formatAttemptStatus(status)}
+                label={t("renewals.columns.lastAttempt")}
+                value={t(RENEWAL_ATTEMPT_STATUS_KEYS[status])}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -309,12 +388,14 @@ const RenewalsPage = () => {
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
                 <Button size="small" variant="secondary" type="button">
-                  Add filter
+                  {t("common.filters.addFilter")}
                 </Button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="start">
                 <DropdownMenu.SubMenu>
-                  <DropdownMenu.SubMenuTrigger>Status</DropdownMenu.SubMenuTrigger>
+                  <DropdownMenu.SubMenuTrigger>
+                    {t("renewals.filters.status")}
+                  </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {statusFilterOptions.map((option) => (
                       <DropdownMenu.CheckboxItem
@@ -341,7 +422,7 @@ const RenewalsPage = () => {
                 </DropdownMenu.SubMenu>
                 <DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenuTrigger>
-                    Approval status
+                    {t("renewals.filters.approvalStatus")}
                   </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {approvalFilterOptions.map((option) => (
@@ -369,7 +450,7 @@ const RenewalsPage = () => {
                 </DropdownMenu.SubMenu>
                 <DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenuTrigger>
-                    Last attempt result
+                    {t("renewals.filters.lastAttemptResult")}
                   </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {attemptFilterOptions.map((option) => (
@@ -405,7 +486,7 @@ const RenewalsPage = () => {
                   setFiltering({});
                 }}
               >
-                Clear all
+                {t("common.filters.clearAll")}
               </button>
             ) : null}
           </div>
@@ -413,7 +494,7 @@ const RenewalsPage = () => {
             <div className="grid gap-3 md:grid-cols-2">
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Scheduled from
+                  {t("renewals.filters.scheduledFrom")}
                 </Text>
                 <Input
                   type="datetime-local"
@@ -432,7 +513,7 @@ const RenewalsPage = () => {
               </div>
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Scheduled to
+                  {t("renewals.filters.scheduledTo")}
                 </Text>
                 <Input
                   type="datetime-local"
@@ -452,7 +533,7 @@ const RenewalsPage = () => {
             </div>
             <div className="flex items-center gap-x-2 self-end">
               <div className="w-full md:w-auto">
-                <DataTable.Search placeholder="Search" />
+                <DataTable.Search placeholder={t("common.actions.search")} />
               </div>
               <DataTable.SortingMenu />
             </div>
@@ -529,13 +610,13 @@ const RenewalsPage = () => {
           <div className="flex min-h-[250px] w-full flex-col items-center justify-center border-y px-6 py-4 text-center">
             <Text size="base" weight="plus">
               {hasActiveFilters || search
-                ? "No matching renewal cycles"
-                : "No renewal cycles yet"}
+                ? t("renewals.list.emptyFiltered")
+                : t("renewals.list.empty")}
             </Text>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
               {hasActiveFilters || search
-                ? "Try changing the search term or active filters."
-                : "Renewal cycles will appear here once subscriptions are scheduled for processing."}
+                ? t("renewals.list.emptyFilteredHint")
+                : t("renewals.list.emptyHint")}
             </Text>
           </div>
         )}
@@ -546,12 +627,13 @@ const RenewalsPage = () => {
 };
 
 export const config = defineRouteConfig({
-  label: "Renewals",
+  label: "menuItems.renewals",
+  translationNs: "reorder",
   rank: 2,
 });
 
 export const handle = {
-  breadcrumb: () => "Renewals",
+  breadcrumb: () => translate("menuItems.renewals"),
 };
 
 export default RenewalsPage;
@@ -565,11 +647,13 @@ const FilterChip = ({
   value: string;
   onRemove: () => void;
 }) => {
+  const { t } = useTranslation("reorder");
+
   return (
     <div className="shadow-buttons-neutral txt-compact-small-plus bg-ui-button-neutral text-ui-fg-base inline-flex items-center overflow-hidden rounded-md">
       <span className="border-ui-border-base border-r px-3 py-1.5">{label}</span>
       <span className="border-ui-border-base border-r px-3 py-1.5 text-ui-fg-subtle">
-        is
+        {t("common.filters.is")}
       </span>
       <span className="border-ui-border-base border-r px-3 py-1.5">{value}</span>
       <button
@@ -591,9 +675,9 @@ function removeFilter(
   return rest;
 }
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, emptyValue: string) {
   if (!value) {
-    return "-";
+    return emptyValue;
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -602,53 +686,21 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function formatCycleStatus(status: RenewalCycleAdminStatus) {
-  switch (status) {
-    case RenewalCycleAdminStatus.SCHEDULED:
-      return "Scheduled";
-    case RenewalCycleAdminStatus.PROCESSING:
-      return "Processing";
-    case RenewalCycleAdminStatus.SUCCEEDED:
-      return "Succeeded";
-    case RenewalCycleAdminStatus.FAILED:
-      return "Failed";
-  }
-}
-
-function formatAttemptStatus(status: RenewalAttemptAdminStatus) {
-  switch (status) {
-    case RenewalAttemptAdminStatus.PROCESSING:
-      return "Processing";
-    case RenewalAttemptAdminStatus.SUCCEEDED:
-      return "Succeeded";
-    case RenewalAttemptAdminStatus.FAILED:
-      return "Failed";
-  }
-}
-
-function formatApprovalFilterStatus(status: RenewalApprovalStatus) {
-  switch (status) {
-    case RenewalApprovalStatus.PENDING:
-      return "Pending";
-    case RenewalApprovalStatus.APPROVED:
-      return "Approved";
-    case RenewalApprovalStatus.REJECTED:
-      return "Rejected";
-  }
-}
-
-function formatApprovalStatus(approval: RenewalAdminApprovalSummary) {
+function formatApprovalStatus(
+  approval: RenewalAdminApprovalSummary,
+  t: ReorderTranslate
+) {
   if (!approval.required || !approval.status) {
-    return "Not required";
+    return t("renewals.approval.notRequired");
   }
 
   switch (approval.status) {
     case RenewalApprovalStatus.PENDING:
-      return "Pending approval";
+      return t("renewals.approval.pendingApproval");
     case RenewalApprovalStatus.APPROVED:
-      return "Approved";
+      return t("renewals.approval.approved");
     case RenewalApprovalStatus.REJECTED:
-      return "Rejected";
+      return t("renewals.approval.rejected");
   }
 }
 
@@ -660,19 +712,6 @@ function formatSubscriptionContext(renewal: RenewalCycleAdminListItem) {
   ].filter(Boolean);
 
   return parts.join(" · ");
-}
-
-function formatRelativeCycleStatus(status: RenewalCycleAdminStatus) {
-  switch (status) {
-    case RenewalCycleAdminStatus.SCHEDULED:
-      return "Awaiting processing";
-    case RenewalCycleAdminStatus.PROCESSING:
-      return "Currently processing";
-    case RenewalCycleAdminStatus.SUCCEEDED:
-      return "Processed";
-    case RenewalCycleAdminStatus.FAILED:
-      return "Needs review";
-  }
 }
 
 function getCycleStatusColor(status: RenewalCycleAdminStatus) {

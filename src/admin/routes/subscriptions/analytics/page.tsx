@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate, type ReorderTranslate } from "../../../i18n/translate"
+import { useTranslation } from "react-i18next"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -39,41 +41,21 @@ const DEFAULT_FILTERS: AdminAnalyticsFilters = {
   group_by: AnalyticsGroupBy.DAY,
 }
 
-const statusFilterOptions: Array<{
-  label: string
-  value: AnalyticsSubscriptionStatus
-}> = [
-  { label: "Active", value: "active" },
-  { label: "Paused", value: "paused" },
-  { label: "Past due", value: "past_due" },
-  { label: "Cancelled", value: "cancelled" },
-]
+const BUCKET_LABEL_KEYS: Record<AnalyticsGroupBy, string> = {
+  [AnalyticsGroupBy.DAY]: "analytics.trend.bucketsDay",
+  [AnalyticsGroupBy.WEEK]: "analytics.trend.bucketsWeek",
+  [AnalyticsGroupBy.MONTH]: "analytics.trend.bucketsMonth",
+}
 
-const frequencyFilterOptions: Array<{
-  label: string
-  value: AnalyticsFrequencyFilter
-}> = [
-  { label: "Weekly", value: { interval: "week", value: 1 } },
-  { label: "Every 2 weeks", value: { interval: "week", value: 2 } },
-  { label: "Monthly", value: { interval: "month", value: 1 } },
-  { label: "Quarterly", value: { interval: "month", value: 3 } },
-  { label: "Yearly", value: { interval: "year", value: 1 } },
-]
-
-const metricTabs: Array<{
-  key: AnalyticsMetricKey
-  label: string
-}> = [
-  { key: AnalyticsMetricKey.MRR, label: "MRR" },
-  { key: AnalyticsMetricKey.CHURN_RATE, label: "Churn" },
-  { key: AnalyticsMetricKey.LTV, label: "LTV" },
-  {
-    key: AnalyticsMetricKey.CREATED_SUBSCRIPTIONS_COUNT,
-    label: "Created",
-  },
-]
+const STATUS_FILTER_KEYS: Record<AnalyticsSubscriptionStatus, string> = {
+  active: "analytics.status.active",
+  paused: "analytics.status.paused",
+  past_due: "analytics.status.pastDue",
+  cancelled: "analytics.status.cancelled",
+}
 
 const AnalyticsPage = () => {
+  const { t } = useTranslation("reorder")
   const [filters, setFilters] = useState<AdminAnalyticsFilters>(DEFAULT_FILTERS)
   const [selectedMetric, setSelectedMetric] = useState<AnalyticsMetricKey>(
     AnalyticsMetricKey.MRR
@@ -83,15 +65,81 @@ const AnalyticsPage = () => {
       exportAdminAnalytics(filters, format),
     onSuccess: (_response, format) => {
       toast.success(
-        `Analytics ${format.toUpperCase()} export downloaded`
+        t("analytics.toast.exported", { format: format.toUpperCase() })
       )
     },
     onError: (error) => {
       toast.error(
-        error instanceof Error ? error.message : "Failed to export analytics"
+        error instanceof Error
+          ? error.message
+          : t("analytics.list.exportError")
       )
     },
   })
+
+  const statusFilterOptions = useMemo(
+    () =>
+      [
+        { label: t("analytics.status.active"), value: "active" },
+        { label: t("analytics.status.paused"), value: "paused" },
+        { label: t("analytics.status.pastDue"), value: "past_due" },
+        { label: t("analytics.status.cancelled"), value: "cancelled" },
+      ] as Array<{
+        label: string
+        value: AnalyticsSubscriptionStatus
+      }>,
+    [t]
+  )
+
+  const frequencyFilterOptions = useMemo(
+    () =>
+      [
+        {
+          label: t("analytics.frequency.weekly"),
+          value: { interval: "week", value: 1 },
+        },
+        {
+          label: t("analytics.frequency.every2Weeks"),
+          value: { interval: "week", value: 2 },
+        },
+        {
+          label: t("analytics.frequency.monthly"),
+          value: { interval: "month", value: 1 },
+        },
+        {
+          label: t("analytics.frequency.quarterly"),
+          value: { interval: "month", value: 3 },
+        },
+        {
+          label: t("analytics.frequency.yearly"),
+          value: { interval: "year", value: 1 },
+        },
+      ] as Array<{
+        label: string
+        value: AnalyticsFrequencyFilter
+      }>,
+    [t]
+  )
+
+  const metricTabs = useMemo(
+    () =>
+      [
+        { key: AnalyticsMetricKey.MRR, label: t("analytics.metricTabs.mrr") },
+        {
+          key: AnalyticsMetricKey.CHURN_RATE,
+          label: t("analytics.metricTabs.churn"),
+        },
+        { key: AnalyticsMetricKey.LTV, label: t("analytics.metricTabs.ltv") },
+        {
+          key: AnalyticsMetricKey.CREATED_SUBSCRIPTIONS_COUNT,
+          label: t("analytics.metricTabs.created"),
+        },
+      ] as Array<{
+        key: AnalyticsMetricKey
+        label: string
+      }>,
+    [t]
+  )
 
   const {
     data: kpisData,
@@ -160,10 +208,9 @@ const AnalyticsPage = () => {
     <Container className="divide-y p-0">
       <div className="flex items-center justify-between px-6 py-4">
         <div className="flex flex-col">
-          <Heading level="h1">Analytics</Heading>
+          <Heading level="h1">{t("analytics.list.title")}</Heading>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Review recurring revenue, churn, LTV, and subscription creation
-            trends from the analytics read model.
+            {t("analytics.list.description")}
           </Text>
         </div>
         <div className="flex items-center gap-2">
@@ -176,7 +223,7 @@ const AnalyticsPage = () => {
                 isLoading={exportMutation.isPending}
                 disabled={exportMutation.isPending}
               >
-                Export
+                {t("analytics.export.button")}
               </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="end">
@@ -186,7 +233,7 @@ const AnalyticsPage = () => {
                   exportMutation.mutate("csv")
                 }}
               >
-                Export CSV
+                {t("analytics.export.csv")}
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 disabled={exportMutation.isPending}
@@ -194,7 +241,7 @@ const AnalyticsPage = () => {
                   exportMutation.mutate("json")
                 }}
               >
-                Export JSON
+                {t("analytics.export.json")}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu>
@@ -206,8 +253,8 @@ const AnalyticsPage = () => {
           {filters.status.map((status) => (
             <FilterChip
               key={status}
-              label="Status"
-              value={formatStatus(status)}
+              label={t("analytics.filters.status")}
+              value={formatStatus(status, t)}
               onRemove={() => {
                 setFilters((current) => ({
                   ...current,
@@ -222,8 +269,8 @@ const AnalyticsPage = () => {
             return (
               <FilterChip
                 key={token}
-                label="Frequency"
-                value={formatFrequency(frequency)}
+                label={t("analytics.filters.frequency")}
+                value={formatFrequency(frequency, t)}
                 onRemove={() => {
                   setFilters((current) => ({
                     ...current,
@@ -241,7 +288,7 @@ const AnalyticsPage = () => {
             return (
               <FilterChip
                 key={productId}
-                label="Product"
+                label={t("analytics.filters.product")}
                 value={product?.title ?? productId}
                 onRemove={() => {
                   setFilters((current) => ({
@@ -254,8 +301,8 @@ const AnalyticsPage = () => {
           })}
           {filters.group_by !== AnalyticsGroupBy.DAY && !isCreatedMetric ? (
             <FilterChip
-              label="Group by"
-              value={formatGroupBy(filters.group_by)}
+              label={t("analytics.filters.groupBy")}
+              value={formatGroupBy(filters.group_by, t)}
               onRemove={() => {
                 setFilters((current) => ({
                   ...current,
@@ -267,12 +314,14 @@ const AnalyticsPage = () => {
           <DropdownMenu>
             <DropdownMenu.Trigger asChild>
               <Button size="small" variant="secondary" type="button">
-                Add filter
+                {t("analytics.filters.addFilter")}
               </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="start">
               <DropdownMenu.SubMenu>
-                <DropdownMenu.SubMenuTrigger>Status</DropdownMenu.SubMenuTrigger>
+                <DropdownMenu.SubMenuTrigger>
+                  {t("analytics.filters.status")}
+                </DropdownMenu.SubMenuTrigger>
                 <DropdownMenu.SubMenuContent>
                   {statusFilterOptions.map((option) => (
                     <DropdownMenu.CheckboxItem
@@ -296,7 +345,9 @@ const AnalyticsPage = () => {
                 </DropdownMenu.SubMenuContent>
               </DropdownMenu.SubMenu>
               <DropdownMenu.SubMenu>
-                <DropdownMenu.SubMenuTrigger>Frequency</DropdownMenu.SubMenuTrigger>
+                <DropdownMenu.SubMenuTrigger>
+                  {t("analytics.filters.frequency")}
+                </DropdownMenu.SubMenuTrigger>
                 <DropdownMenu.SubMenuContent>
                   {frequencyFilterOptions.map((option) => {
                     const token = toFrequencyToken(option.value)
@@ -338,21 +389,21 @@ const AnalyticsPage = () => {
                 setFilters(DEFAULT_FILTERS)
               }}
             >
-              Clear all
+              {t("common.filters.clearAll")}
             </button>
           ) : null}
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[repeat(4,minmax(0,1fr))]">
           <DateField
-            label="Date from"
+            label={t("analytics.filters.dateFrom")}
             value={filters.date_from ?? ""}
             onChange={(value) => {
               setFilters((current) => ({ ...current, date_from: value || null }))
             }}
           />
           <DateField
-            label="Date to"
+            label={t("analytics.filters.dateTo")}
             value={filters.date_to ?? ""}
             onChange={(value) => {
               setFilters((current) => ({ ...current, date_to: value || null }))
@@ -360,7 +411,7 @@ const AnalyticsPage = () => {
           />
           <div className="flex flex-col gap-y-1">
             <Text size="small" leading="compact" weight="plus">
-              Product
+              {t("analytics.filters.product")}
             </Text>
             <Select
               value={selectedProductId}
@@ -372,10 +423,12 @@ const AnalyticsPage = () => {
               }}
             >
               <Select.Trigger>
-                <Select.Value placeholder="All products" />
+                <Select.Value placeholder={t("analytics.filters.allProducts")} />
               </Select.Trigger>
               <Select.Content>
-                <Select.Item value="__all">All products</Select.Item>
+                <Select.Item value="__all">
+                  {t("analytics.filters.allProducts")}
+                </Select.Item>
                 {(productsData?.products ?? []).map((product) => (
                   <Select.Item key={product.id} value={product.id}>
                     {product.title}
@@ -386,7 +439,7 @@ const AnalyticsPage = () => {
           </div>
           <div className="flex flex-col gap-y-1">
             <Text size="small" leading="compact" weight="plus">
-              Group by
+              {t("analytics.filters.groupBy")}
             </Text>
             <Select
               value={filters.group_by}
@@ -402,14 +455,20 @@ const AnalyticsPage = () => {
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
-                <Select.Item value={AnalyticsGroupBy.DAY}>Day</Select.Item>
-                <Select.Item value={AnalyticsGroupBy.WEEK}>Week</Select.Item>
-                <Select.Item value={AnalyticsGroupBy.MONTH}>Month</Select.Item>
+                <Select.Item value={AnalyticsGroupBy.DAY}>
+                  {t("analytics.groupBy.day")}
+                </Select.Item>
+                <Select.Item value={AnalyticsGroupBy.WEEK}>
+                  {t("analytics.groupBy.week")}
+                </Select.Item>
+                <Select.Item value={AnalyticsGroupBy.MONTH}>
+                  {t("analytics.groupBy.month")}
+                </Select.Item>
               </Select.Content>
             </Select>
             {isCreatedMetric ? (
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                Created always renders one UTC bar per day.
+                {t("analytics.trend.createdUtcNote")}
               </Text>
             ) : null}
           </div>
@@ -421,7 +480,7 @@ const AnalyticsPage = () => {
           <Alert variant="error">
             {pageError instanceof Error
               ? pageError.message
-              : "Failed to load analytics."}
+              : t("analytics.list.loadError")}
           </Alert>
         ) : null}
 
@@ -437,21 +496,21 @@ const AnalyticsPage = () => {
           <div className="flex flex-col gap-4 px-6 py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex flex-col">
-                <Heading level="h2">Trend overview</Heading>
+                <Heading level="h2">{t("analytics.list.trendOverview")}</Heading>
                 <Text
                   size="small"
                   leading="compact"
                   className="text-ui-fg-subtle"
                 >
                   {isCreatedMetric
-                    ? "Created uses one UTC bar per day and only follows the selected date range."
-                    : "Trends are bucketed in UTC and follow the same filters as the KPI cards."}
+                    ? t("analytics.trend.createdRangeNote")
+                    : t("analytics.trend.trendUtcNote")}
                 </Text>
               </div>
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
                 {isCreatedMetric
-                  ? "Daily bars"
-                  : `${formatGroupBy(filters.group_by)} buckets`}
+                  ? t("analytics.trend.dailyBars")
+                  : t(BUCKET_LABEL_KEYS[filters.group_by])}
               </Text>
             </div>
 
@@ -475,8 +534,8 @@ const AnalyticsPage = () => {
               <TrendChartSkeleton />
             ) : !selectedSeries || !hasSelectedSeriesData || (!hasAnalyticsData && !isCreatedMetric) ? (
               <EmptyAnalyticsState
-                title="No analytics data for this range"
-                description="Try widening the date range or removing filters to inspect a broader slice of subscription activity."
+                title={t("analytics.list.noDataRange")}
+                description={t("analytics.list.noDataRangeHint")}
               />
             ) : (
               <>
@@ -495,12 +554,13 @@ const AnalyticsPage = () => {
 }
 
 export const config = defineRouteConfig({
-  label: "Analytics",
+  label: "menuItems.analytics",
+  translationNs: "reorder",
   rank: 5,
 })
 
 export const handle = {
-  breadcrumb: () => "Analytics",
+  breadcrumb: () => translate("menuItems.analytics"),
 }
 
 export default AnalyticsPage
@@ -532,6 +592,8 @@ const DateField = ({
 }
 
 const MetricCard = ({ metric }: { metric: AnalyticsKpiSummary }) => {
+  const { t } = useTranslation("reorder")
+
   return (
     <Container className="p-0">
       <div className="flex flex-col gap-3 px-5 py-4">
@@ -540,12 +602,14 @@ const MetricCard = ({ metric }: { metric: AnalyticsKpiSummary }) => {
             {metric.label}
           </Text>
           <Text size="small" leading="compact" className="text-ui-fg-muted">
-            {formatUnitLabel(metric)}
+            {formatUnitLabel(metric, t)}
           </Text>
         </div>
-        <Heading level="h2">{formatMetricValue(metric.value, metric)}</Heading>
+        <Heading level="h2">
+          {formatMetricValue(metric.value, metric, t)}
+        </Heading>
         <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {formatMetricDelta(metric)}
+          {formatMetricDelta(metric, t)}
         </Text>
       </div>
     </Container>
@@ -596,6 +660,7 @@ const TrendChartSkeleton = () => {
 }
 
 const TrendChart = ({ series }: { series: AnalyticsTrendSeries }) => {
+  const { t } = useTranslation("reorder")
   const [hoveredPoint, setHoveredPoint] = useState<{
     bucket_start: string
     value: number
@@ -620,8 +685,8 @@ const TrendChart = ({ series }: { series: AnalyticsTrendSeries }) => {
   if (!numericPoints.length) {
     return (
       <EmptyAnalyticsState
-        title="No trend points available"
-        description="This metric does not have enough snapshot data for the selected filters."
+        title={t("analytics.list.noTrendPoints")}
+        description={t("analytics.list.noTrendPointsHint")}
       />
     )
   }
@@ -678,15 +743,15 @@ const TrendChart = ({ series }: { series: AnalyticsTrendSeries }) => {
             {series.label}
           </Text>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            {formatSeriesRangeSummary(series)}
+            {formatSeriesRangeSummary(series, t)}
           </Text>
         </div>
         <div className="flex flex-col items-start gap-1 md:items-end">
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Max {formatTrendValue(max, series)}
+            {`${t("analytics.trend.max")} ${formatTrendValue(max, series, t)}`}
           </Text>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Min {formatTrendValue(min, series)}
+            {`${t("analytics.trend.min")} ${formatTrendValue(min, series, t)}`}
           </Text>
         </div>
       </div>
@@ -705,14 +770,14 @@ const TrendChart = ({ series }: { series: AnalyticsTrendSeries }) => {
                 {formatDateLabel(hoveredPoint.bucket_start)}
               </Text>
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                {formatTrendValue(hoveredPoint.value, series)}
+                {formatTrendValue(hoveredPoint.value, series, t)}
               </Text>
             </div>
           ) : null}
           <svg
             viewBox={`0 0 ${width} ${height}`}
             role="img"
-            aria-label={`${series.label} trend chart`}
+            aria-label={t("analytics.trend.ariaTrendChart", { label: series.label })}
             className="h-[280px] w-full"
           >
             <defs>
@@ -805,7 +870,7 @@ const TrendChart = ({ series }: { series: AnalyticsTrendSeries }) => {
               {formatDateLabel(point.bucket_start)}
             </Text>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              {formatTrendValue(point.value, series)}
+              {formatTrendValue(point.value, series, t)}
             </Text>
           </div>
         ))}
@@ -819,6 +884,7 @@ const CreatedSubscriptionsBarChart = ({
 }: {
   series: AnalyticsTrendSeries
 }) => {
+  const { t } = useTranslation("reorder")
   const [hoveredPoint, setHoveredPoint] = useState<{
     bucket_start: string
     value: number
@@ -835,8 +901,8 @@ const CreatedSubscriptionsBarChart = ({
   if (!numericPoints.length) {
     return (
       <EmptyAnalyticsState
-        title="No daily buckets available"
-        description="Pick a valid date range to inspect daily subscription creation."
+        title={t("analytics.list.noDailyBuckets")}
+        description={t("analytics.list.noDailyBucketsHint")}
       />
     )
   }
@@ -886,15 +952,15 @@ const CreatedSubscriptionsBarChart = ({
             {series.label}
           </Text>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            {formatSeriesRangeSummary(series)}
+            {formatSeriesRangeSummary(series, t)}
           </Text>
         </div>
         <div className="flex flex-col items-start gap-1 md:items-end">
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Max {formatTrendValue(max, series)}
+            {`${t("analytics.trend.max")} ${formatTrendValue(max, series, t)}`}
           </Text>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Min {formatTrendValue(min, series)}
+            {`${t("analytics.trend.min")} ${formatTrendValue(min, series, t)}`}
           </Text>
         </div>
       </div>
@@ -913,14 +979,14 @@ const CreatedSubscriptionsBarChart = ({
                 {formatDateLabel(hoveredPoint.bucket_start)}
               </Text>
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                {formatTrendValue(hoveredPoint.value, series)}
+                {formatTrendValue(hoveredPoint.value, series, t)}
               </Text>
             </div>
           ) : null}
           <svg
             viewBox={`0 0 ${width} ${height}`}
             role="img"
-            aria-label={`${series.label} bar chart`}
+            aria-label={t("analytics.trend.ariaBarChart", { label: series.label })}
             className="h-[280px] w-full"
           >
             <defs>
@@ -972,7 +1038,12 @@ const CreatedSubscriptionsBarChart = ({
                   )
                 }}
               >
-                <title>{`${formatDateLabel(point.bucket_start)}: ${point.value} subscriptions created`}</title>
+                <title>
+                  {t("analytics.trend.createdBarTitle", {
+                    bucket: formatDateLabel(point.bucket_start),
+                    value: point.value,
+                  })}
+                </title>
               </rect>
             ))}
           </svg>
@@ -988,7 +1059,7 @@ const CreatedSubscriptionsBarChart = ({
               {formatDateLabel(point.bucket_start)}
             </Text>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              {formatTrendValue(point.value, series)}
+              {formatTrendValue(point.value, series, t)}
             </Text>
           </div>
         ))}
@@ -1004,11 +1075,13 @@ type FilterChipProps = {
 }
 
 const FilterChip = ({ label, value, onRemove }: FilterChipProps) => {
+  const { t } = useTranslation("reorder")
+
   return (
     <div className="shadow-buttons-neutral txt-compact-small-plus bg-ui-button-neutral text-ui-fg-base inline-flex items-center overflow-hidden rounded-md">
       <span className="border-ui-border-base border-r px-3 py-1.5">{label}</span>
       <span className="border-ui-border-base border-r px-3 py-1.5 text-ui-fg-subtle">
-        is
+        {t("common.filters.is")}
       </span>
       <span className="border-ui-border-base border-r px-3 py-1.5">{value}</span>
       <button
@@ -1024,10 +1097,11 @@ const FilterChip = ({ label, value, onRemove }: FilterChipProps) => {
 
 function formatMetricValue(
   value: number | null,
-  metric: Pick<AnalyticsKpiSummary, "unit" | "currency_code" | "precision">
+  metric: Pick<AnalyticsKpiSummary, "unit" | "currency_code" | "precision">,
+  t: ReorderTranslate
 ) {
   if (value === null) {
-    return "Unavailable"
+    return t("analytics.units.unavailable")
   }
 
   switch (metric.unit) {
@@ -1050,9 +1124,9 @@ function formatMetricValue(
   }
 }
 
-function formatMetricDelta(metric: AnalyticsKpiSummary) {
+function formatMetricDelta(metric: AnalyticsKpiSummary, t: ReorderTranslate) {
   if (metric.previous_value === null || metric.delta_value === null) {
-    return "No comparison window available yet."
+    return t("analytics.list.noComparisonWindow")
   }
 
   const direction =
@@ -1064,42 +1138,62 @@ function formatMetricDelta(metric: AnalyticsKpiSummary) {
         }).format(Math.abs(metric.delta_value))
       : Math.abs(metric.delta_value).toFixed(metric.precision)
 
-  return `${direction === "flat" ? "Flat" : `Trending ${direction}`} vs previous window · ${delta}${
-    metric.unit === "percentage" ? "%" : ""
-  }`
+  return t(
+    direction === "flat"
+      ? "analytics.trend.flat"
+      : direction === "up"
+        ? "analytics.trend.up"
+        : "analytics.trend.down",
+    { delta: `${delta}${metric.unit === "percentage" ? "%" : ""}` }
+  )
 }
 
-function formatUnitLabel(metric: Pick<AnalyticsKpiSummary, "unit" | "currency_code">) {
+function formatUnitLabel(
+  metric: Pick<AnalyticsKpiSummary, "unit" | "currency_code">,
+  t: ReorderTranslate
+) {
   switch (metric.unit) {
     case "currency":
-      return metric.currency_code?.toUpperCase() ?? "Currency"
+      return metric.currency_code?.toUpperCase() ?? t("analytics.units.currency")
     case "percentage":
-      return "Percent"
+      return t("analytics.units.percent")
     case "count":
-      return "Subscriptions"
+      return t("analytics.units.count")
   }
 }
 
-function formatTrendValue(value: number | null, series: AnalyticsTrendSeries) {
+function formatTrendValue(
+  value: number | null,
+  series: AnalyticsTrendSeries,
+  t: ReorderTranslate
+) {
   if (value === null) {
-    return "Unavailable"
+    return t("analytics.units.unavailable")
   }
 
-  return formatMetricValue(value, {
-    unit: series.unit,
-    currency_code: series.currency_code,
-    precision: series.precision,
-  })
+  return formatMetricValue(
+    value,
+    {
+      unit: series.unit,
+      currency_code: series.currency_code,
+      precision: series.precision,
+    },
+    t
+  )
 }
 
-function formatSeriesRangeSummary(series: AnalyticsTrendSeries) {
+function formatSeriesRangeSummary(
+  series: AnalyticsTrendSeries,
+  t: ReorderTranslate
+) {
   if (!series.points.length) {
-    return "No buckets returned for the current range."
+    return t("analytics.trend.rangeEmpty")
   }
 
-  return `${formatDateLabel(series.points[0].bucket_start)} to ${formatDateLabel(
-    series.points[series.points.length - 1].bucket_end
-  )}`
+  return t("analytics.trend.rangeSummary", {
+    from: formatDateLabel(series.points[0].bucket_start),
+    to: formatDateLabel(series.points[series.points.length - 1].bucket_end),
+  })
 }
 
 function formatDateLabel(value: string) {
@@ -1114,38 +1208,41 @@ function formatDateLabel(value: string) {
   }).format(date)
 }
 
-function formatStatus(value: AnalyticsSubscriptionStatus) {
-  switch (value) {
-    case "active":
-      return "Active"
-    case "paused":
-      return "Paused"
-    case "cancelled":
-      return "Cancelled"
-    case "past_due":
-      return "Past due"
-  }
+function formatStatus(
+  value: AnalyticsSubscriptionStatus,
+  t: ReorderTranslate
+) {
+  return t(STATUS_FILTER_KEYS[value])
 }
 
-function formatGroupBy(value: AnalyticsGroupBy) {
+function formatGroupBy(value: AnalyticsGroupBy, t: ReorderTranslate) {
   switch (value) {
     case AnalyticsGroupBy.DAY:
-      return "Day"
+      return t("analytics.groupBy.day")
     case AnalyticsGroupBy.WEEK:
-      return "Week"
+      return t("analytics.groupBy.week")
     case AnalyticsGroupBy.MONTH:
-      return "Month"
+      return t("analytics.groupBy.month")
   }
 }
 
-function formatFrequency(value: AnalyticsFrequencyFilter) {
+function formatFrequency(
+  value: AnalyticsFrequencyFilter,
+  t: ReorderTranslate
+) {
   switch (value.interval) {
     case "week":
-      return value.value === 1 ? "Weekly" : `Every ${value.value} weeks`
+      return value.value === 1
+        ? t("analytics.frequency.weekly")
+        : t("analytics.frequency.everyNWeeks", { value: value.value })
     case "month":
-      return value.value === 1 ? "Monthly" : `Every ${value.value} months`
+      return value.value === 1
+        ? t("analytics.frequency.monthly")
+        : t("analytics.frequency.everyNMonths", { value: value.value })
     case "year":
-      return value.value === 1 ? "Yearly" : `Every ${value.value} years`
+      return value.value === 1
+        ? t("analytics.frequency.yearly")
+        : t("analytics.frequency.everyNYears", { value: value.value })
   }
 }
 

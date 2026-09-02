@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate, type ReorderTranslate } from "../../../../i18n/translate"
+import { useTranslation } from "react-i18next"
 import {
   Alert,
   Button,
@@ -64,22 +66,6 @@ const terminalStatuses = new Set<CancellationCaseAdminStatus>([
   CancellationCaseAdminStatus.CANCELED,
 ])
 
-const reasonCategoryOptions: Array<{ label: string; value: ReasonCategory }> = [
-  { label: "Price", value: "price" },
-  { label: "Product fit", value: "product_fit" },
-  { label: "Delivery", value: "delivery" },
-  { label: "Billing", value: "billing" },
-  { label: "Temporary pause", value: "temporary_pause" },
-  { label: "Switched competitor", value: "switched_competitor" },
-  { label: "Other", value: "other" },
-]
-
-const offerTypeOptions: Array<{ label: string; value: OfferType }> = [
-  { label: "Pause offer", value: "pause_offer" },
-  { label: "Discount offer", value: "discount_offer" },
-  { label: "Bonus offer", value: "bonus_offer" },
-]
-
 const activeDunningStatuses = new Set([
   "open",
   "retry_scheduled",
@@ -87,23 +73,76 @@ const activeDunningStatuses = new Set([
   "awaiting_manual_resolution",
 ])
 
-const effectiveAtOptions = [
-  { label: "Immediately", value: "immediately" },
-  { label: "End of cycle", value: "end_of_cycle" },
-] as const
+const CANCELLATION_CASE_STATUS_KEYS: Record<string, string> = {
+  requested: "cancellations.caseStatus.requested",
+  evaluating_retention: "cancellations.caseStatus.evaluatingRetention",
+  retention_offered: "cancellations.caseStatus.retentionOffered",
+  retained: "cancellations.caseStatus.retained",
+  paused: "cancellations.caseStatus.paused",
+  canceled: "cancellations.caseStatus.canceled",
+}
 
-const discountTypeOptions = [
-  { label: "Percentage", value: "percentage" },
-  { label: "Fixed", value: "fixed" },
-] as const
+const CANCELLATION_OUTCOME_KEYS: Record<string, string> = {
+  retained: "cancellations.outcome.retained",
+  paused: "cancellations.outcome.paused",
+  canceled: "cancellations.outcome.canceled",
+}
 
-const bonusTypeOptions = [
-  { label: "Free cycle", value: "free_cycle" },
-  { label: "Gift", value: "gift" },
-  { label: "Credit", value: "credit" },
-] as const
+const CANCELLATION_REASON_CATEGORY_KEYS: Record<string, string> = {
+  price: "cancellations.reasonCategory.price",
+  product_fit: "cancellations.reasonCategory.productFit",
+  delivery: "cancellations.reasonCategory.delivery",
+  billing: "cancellations.reasonCategory.billing",
+  temporary_pause: "cancellations.reasonCategory.temporaryPause",
+  switched_competitor: "cancellations.reasonCategory.switchedCompetitor",
+  other: "cancellations.reasonCategory.other",
+}
+
+const CANCELLATION_OFFER_TYPE_KEYS: Record<string, string> = {
+  pause_offer: "cancellations.offerType.pauseOffer",
+  discount_offer: "cancellations.offerType.discountOffer",
+  bonus_offer: "cancellations.offerType.bonusOffer",
+}
+
+const CANCELLATION_DECISION_STATUS_KEYS: Record<string, string> = {
+  proposed: "cancellations.decisionStatus.proposed",
+  accepted: "cancellations.decisionStatus.accepted",
+  rejected: "cancellations.decisionStatus.rejected",
+  applied: "cancellations.decisionStatus.applied",
+  expired: "cancellations.decisionStatus.expired",
+}
+
+const SUBSCRIPTION_STATUS_KEYS: Record<string, string> = {
+  active: "subscriptions.status.active",
+  paused: "subscriptions.status.paused",
+  cancelled: "subscriptions.status.cancelled",
+  past_due: "subscriptions.status.pastDue",
+}
+
+const DUNNING_STATUS_KEYS: Record<string, string> = {
+  open: "dunning.status.open",
+  retry_scheduled: "dunning.status.retryScheduled",
+  retrying: "dunning.status.retrying",
+  awaiting_manual_resolution: "dunning.status.awaitingManualResolution",
+  recovered: "dunning.status.recovered",
+  unrecovered: "dunning.status.unrecovered",
+}
+
+const RENEWAL_STATUS_KEYS: Record<string, string> = {
+  scheduled: "renewals.status.scheduled",
+  processing: "renewals.status.processing",
+  succeeded: "renewals.status.succeeded",
+  failed: "renewals.status.failed",
+}
+
+const RENEWAL_APPROVAL_KEYS: Record<string, string> = {
+  pending: "renewals.approval.pending",
+  approved: "renewals.approval.approved",
+  rejected: "renewals.approval.rejected",
+}
 
 const CancellationDetailPage = () => {
+  const { t } = useTranslation("reorder")
   const { id } = useParams()
   const queryClient = useQueryClient()
   const prompt = usePrompt()
@@ -162,13 +201,6 @@ const CancellationDetailPage = () => {
 
     return ["pause_offer", "discount_offer", "bonus_offer"] as OfferType[]
   }, [actionFormCancellation])
-  const visibleOfferTypeOptions = useMemo(
-    () =>
-      offerTypeOptions.filter((option) =>
-        eligibleOfferTypes.includes(option.value)
-      ),
-    [eligibleOfferTypes]
-  )
 
   const applyOfferMutation = useMutation({
     mutationFn: async (body: ApplyRetentionOfferAdminRequest) =>
@@ -185,13 +217,13 @@ const CancellationDetailPage = () => {
         id,
         cancellation?.subscription.subscription_id
       )
-      toast.success("Retention offer applied")
+      toast.success(t("cancellations.toast.offerApplied"))
       closeDrawer()
     },
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to apply retention offer"
+        t("cancellations.errors.applyOfferFailed")
       )
       setFormError(message)
       toast.error(message)
@@ -213,13 +245,13 @@ const CancellationDetailPage = () => {
         id,
         cancellation?.subscription.subscription_id
       )
-      toast.success("Cancellation finalized")
+      toast.success(t("cancellations.toast.finalized"))
       closeDrawer()
     },
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to finalize cancellation"
+        t("cancellations.errors.finalizeFailed")
       )
       setFormError(message)
       toast.error(message)
@@ -241,13 +273,13 @@ const CancellationDetailPage = () => {
         id,
         cancellation?.subscription.subscription_id
       )
-      toast.success("Reason updated")
+      toast.success(t("cancellations.toast.reasonUpdated"))
       closeDrawer()
     },
     onError: (mutationError) => {
       const message = getAdminErrorMessage(
         mutationError,
-        "Failed to update reason"
+        t("cancellations.errors.reasonUpdateFailed")
       )
       setFormError(message)
       toast.error(message)
@@ -290,28 +322,34 @@ const CancellationDetailPage = () => {
       description: string
     }> = cancellation.offers.map((offer) => ({
       id: offer.id,
-      title: formatOfferType(offer.offer_type),
+      title: formatOfferType(offer.offer_type, t),
       date: offer.applied_at ?? offer.decided_at ?? offer.created_at,
-      status: formatOfferDecisionStatus(offer.decision_status),
+      status: formatOfferDecisionStatus(offer.decision_status, t),
       color: getOfferDecisionColor(offer.decision_status),
       description:
         offer.decision_reason ||
-        describeOfferPayload(offer) ||
-        "Retention offer event recorded",
+        describeOfferPayload(offer, t) ||
+        t("cancellations.detail.timeline.offerEventRecorded"),
     }))
 
     if (cancellation.final_outcome) {
       items.push({
         id: `${cancellation.id}-final-outcome`,
-        title: "Final outcome",
+        title: t("cancellations.detail.timeline.finalOutcome"),
         date: cancellation.finalized_at,
-        status: formatFinalOutcome(cancellation.final_outcome),
+        status: formatFinalOutcome(cancellation.final_outcome, t),
         color: getFinalOutcomeColor(cancellation.final_outcome),
         description:
           cancellation.cancellation_effective_at &&
           cancellation.final_outcome === CancellationFinalOutcomeAdmin.CANCELED
-            ? `Effective at ${formatDateTime(cancellation.cancellation_effective_at)}`
-            : cancellation.notes || "Case reached a terminal outcome",
+            ? t("cancellations.detail.timeline.effectiveAt", {
+                date: formatDateTime(
+                  cancellation.cancellation_effective_at,
+                  t("common.empty.noValue")
+                ),
+              })
+            : cancellation.notes ||
+              t("cancellations.detail.timeline.terminalOutcome"),
       })
     }
 
@@ -320,7 +358,7 @@ const CancellationDetailPage = () => {
       const rightValue = right.date ? new Date(right.date).getTime() : 0
       return leftValue - rightValue
     })
-  }, [cancellation])
+  }, [cancellation, t])
 
   useEffect(() => {
     if (!actionDrawerOpen || !actionFormCancellation) {
@@ -388,8 +426,8 @@ const CancellationDetailPage = () => {
       const normalizedReason = normalizeRequiredString(reason)
 
       if (!normalizedReason) {
-        setFormError("Reason is required")
-        toast.error("Reason is required")
+        setFormError(t("cancellations.errors.reasonRequired"))
+        toast.error(t("cancellations.errors.reasonRequired"))
         return
       }
 
@@ -404,8 +442,8 @@ const CancellationDetailPage = () => {
 
     if (actionDrawerMode === "apply_offer") {
       if (!eligibleOfferTypes.includes(offerType)) {
-        setFormError("Selected retention offer is not allowed for this case")
-        toast.error("Selected retention offer is not allowed for this case")
+        setFormError(t("cancellations.errors.offerNotAllowed"))
+        toast.error(t("cancellations.errors.offerNotAllowed"))
         return
       }
 
@@ -416,17 +454,16 @@ const CancellationDetailPage = () => {
         const normalizedResumeAt = normalizeOptionalString(resumeAt)
 
         if (normalizedPauseCycles === null && !normalizedResumeAt) {
-          setFormError("Pause offer requires pause cycles or resume date")
-          toast.error("Pause offer requires pause cycles or resume date")
+          setFormError(t("cancellations.errors.pauseOfferRequiresCyclesOrResume"))
+          toast.error(t("cancellations.errors.pauseOfferRequiresCyclesOrResume"))
           return
         }
 
         const confirmed = await prompt({
-          title: "Apply pause offer?",
-          description:
-            "You are about to pause the subscription as a retention outcome and close this case as paused.",
-          confirmText: "Apply pause offer",
-          cancelText: "Cancel",
+          title: t("cancellations.prompt.applyPauseTitle"),
+          description: t("cancellations.prompt.applyPauseDescription"),
+          confirmText: t("cancellations.actions.applyPauseOffer"),
+          cancelText: t("common.actions.cancel"),
         })
 
         if (!confirmed) {
@@ -455,17 +492,16 @@ const CancellationDetailPage = () => {
           parseNullablePositiveInt(discountDurationCycles)
 
         if (!normalizedDiscountValue) {
-          setFormError("Discount value must be greater than 0")
-          toast.error("Discount value must be greater than 0")
+          setFormError(t("cancellations.errors.discountValuePositive"))
+          toast.error(t("cancellations.errors.discountValuePositive"))
           return
         }
 
         const confirmed = await prompt({
-          title: "Apply discount offer?",
-          description:
-            "You are about to apply a retention discount and close this case as retained.",
-          confirmText: "Apply offer",
-          cancelText: "Cancel",
+          title: t("cancellations.prompt.applyDiscountTitle"),
+          description: t("cancellations.prompt.applyDiscountDescription"),
+          confirmText: t("cancellations.drawer.applyOfferFooter"),
+          cancelText: t("common.actions.cancel"),
         })
 
         if (!confirmed) {
@@ -495,17 +531,16 @@ const CancellationDetailPage = () => {
         (bonusType === "free_cycle" || bonusType === "credit") &&
         normalizedBonusValue === null
       ) {
-        setFormError("Bonus value is required for free cycle or credit")
-        toast.error("Bonus value is required for free cycle or credit")
+        setFormError(t("cancellations.errors.bonusValueRequired"))
+        toast.error(t("cancellations.errors.bonusValueRequired"))
         return
       }
 
       const confirmed = await prompt({
-        title: "Apply bonus offer?",
-        description:
-          "You are about to apply a retention bonus and close this case as retained.",
-        confirmText: "Apply offer",
-        cancelText: "Cancel",
+        title: t("cancellations.prompt.applyBonusTitle"),
+        description: t("cancellations.prompt.applyBonusDescription"),
+        confirmText: t("cancellations.drawer.applyOfferFooter"),
+        cancelText: t("common.actions.cancel"),
       })
 
       if (!confirmed) {
@@ -531,17 +566,16 @@ const CancellationDetailPage = () => {
     const normalizedReason = normalizeRequiredString(reason)
 
     if (!normalizedReason) {
-      setFormError("Reason is required")
-      toast.error("Reason is required")
+      setFormError(t("cancellations.errors.reasonRequired"))
+      toast.error(t("cancellations.errors.reasonRequired"))
       return
     }
 
     const confirmed = await prompt({
-      title: "Finalize cancellation?",
-      description:
-        "You are about to finalize this case as canceled and update the subscription lifecycle.",
-      confirmText: "Finalize cancellation",
-      cancelText: "Cancel",
+      title: t("cancellations.prompt.finalizeTitle"),
+      description: t("cancellations.prompt.finalizeDescription"),
+      confirmText: t("cancellations.actions.finalize"),
+      cancelText: t("common.actions.cancel"),
     })
 
     if (!confirmed) {
@@ -560,12 +594,12 @@ const CancellationDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Cancellation case</Heading>
+          <Heading level="h1">{t("cancellations.detail.title")}</Heading>
         </div>
         <div className="flex items-center gap-x-2 px-6 py-6 text-ui-fg-subtle">
           <Spinner className="animate-spin" />
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Loading cancellation case details...
+            {t("cancellations.detail.loading")}
           </Text>
         </div>
       </Container>
@@ -576,13 +610,13 @@ const CancellationDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Cancellation case</Heading>
+          <Heading level="h1">{t("cancellations.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
             {error instanceof Error
               ? error.message
-              : "Failed to load cancellation case details."}
+              : t("cancellations.detail.loadError")}
           </Alert>
         </div>
       </Container>
@@ -593,10 +627,12 @@ const CancellationDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Cancellation case</Heading>
+          <Heading level="h1">{t("cancellations.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
-          <Alert variant="warning">Cancellation case details are unavailable.</Alert>
+          <Alert variant="warning">
+            {t("cancellations.detail.unavailable")}
+          </Alert>
         </div>
       </Container>
     )
@@ -608,17 +644,16 @@ const CancellationDetailPage = () => {
         <div className="flex items-start justify-between px-6 py-4">
           <div className="flex flex-col gap-y-1">
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Cancellation case
+              {t("cancellations.detail.header")}
             </Text>
             <Heading level="h1">{cancellation.id}</Heading>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Review cancellation context, retention actions, linked module summaries,
-              and final outcome.
+              {t("cancellations.detail.description")}
             </Text>
           </div>
           <div className="flex items-center gap-x-2">
             <StatusBadge color={getCaseStatusColor(cancellation.status)}>
-              {formatCaseStatus(cancellation.status)}
+              {formatCaseStatus(cancellation.status, t)}
             </StatusBadge>
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
@@ -634,7 +669,7 @@ const CancellationDetailPage = () => {
                     onClick={() => openDrawer("apply_offer")}
                   >
                     <CheckCircle className="text-ui-fg-subtle" />
-                    <span>Apply retention offer</span>
+                    <span>{t("cancellations.actions.applyOffer")}</span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canEditReason ? (
@@ -644,7 +679,7 @@ const CancellationDetailPage = () => {
                     onClick={() => openDrawer("reason")}
                   >
                     <PencilSquare className="text-ui-fg-subtle" />
-                    <span>Edit reason</span>
+                    <span>{t("cancellations.actions.editReason")}</span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canFinalize ? (
@@ -656,7 +691,7 @@ const CancellationDetailPage = () => {
                       onClick={() => openDrawer("finalize")}
                     >
                       <XCircle className="text-ui-fg-subtle" />
-                      <span>Finalize cancellation</span>
+                      <span>{t("cancellations.actions.finalize")}</span>
                     </DropdownMenu.Item>
                   </>
                 ) : null}
@@ -669,42 +704,57 @@ const CancellationDetailPage = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Case overview</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.caseOverview")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailRow
-                  label="Status"
+                  label={t("common.fields.status")}
                   value={(
                     <StatusBadge color={getCaseStatusColor(cancellation.status)}>
-                      {formatCaseStatus(cancellation.status)}
+                      {formatCaseStatus(cancellation.status, t)}
                     </StatusBadge>
                   )}
                 />
                 <DetailRow
-                  label="Outcome"
+                  label={t("cancellations.columns.outcome")}
                   value={
                     cancellation.final_outcome
-                      ? formatFinalOutcome(cancellation.final_outcome)
-                      : "No final outcome yet"
+                      ? formatFinalOutcome(cancellation.final_outcome, t)
+                      : t("cancellations.detail.empty.noOutcome")
                   }
                 />
                 <DetailRow
-                  label="Reason category"
-                  value={formatReasonCategory(cancellation.reason_category)}
+                  label={t("cancellations.columns.reasonCategory")}
+                  value={formatReasonCategory(cancellation.reason_category, t)}
                 />
                 <DetailRow
-                  label="Reason"
-                  value={cancellation.reason || "No reason recorded"}
-                />
-                <DetailRow label="Finalized by" value={cancellation.finalized_by || "-"} />
-                <DetailRow
-                  label="Finalized at"
-                  value={formatDateTime(cancellation.finalized_at)}
+                  label={t("common.fields.reason")}
+                  value={
+                    cancellation.reason || t("cancellations.detail.empty.noReason")
+                  }
                 />
                 <DetailRow
-                  label="Cancellation effective at"
-                  value={formatDateTime(cancellation.cancellation_effective_at)}
+                  label={t("cancellations.fields.finalizedBy")}
+                  value={
+                    cancellation.finalized_by || t("common.empty.noValue")
+                  }
+                />
+                <DetailRow
+                  label={t("cancellations.fields.finalizedAt")}
+                  value={formatDateTime(
+                    cancellation.finalized_at,
+                    t("common.empty.noValue")
+                  )}
+                />
+                <DetailRow
+                  label={t("cancellations.fields.cancellationEffectiveAt")}
+                  value={formatDateTime(
+                    cancellation.cancellation_effective_at,
+                    t("common.empty.noValue")
+                  )}
                 />
               </div>
             </div>
@@ -712,7 +762,9 @@ const CancellationDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Decision timeline</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.timeline")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               {timelineItems.length ? (
@@ -742,7 +794,7 @@ const CancellationDetailPage = () => {
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            {formatDateTime(item.date)}
+                            {formatDateTime(item.date, t("common.empty.noValue"))}
                           </Text>
                         </div>
                       </div>
@@ -752,7 +804,7 @@ const CancellationDetailPage = () => {
               ) : (
                 <Alert variant="info">
                   <Text size="small" leading="compact">
-                    No retention offers or final outcome entries have been recorded yet.
+                    {t("cancellations.detail.empty.noTimelineEntries")}
                   </Text>
                 </Alert>
               )}
@@ -761,18 +813,30 @@ const CancellationDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Offer history</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.offerHistory")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               {cancellation.offers.length ? (
                 <Table>
                   <Table.Header>
                     <Table.Row>
-                      <Table.HeaderCell>Offer</Table.HeaderCell>
-                      <Table.HeaderCell>Status</Table.HeaderCell>
-                      <Table.HeaderCell>Decided</Table.HeaderCell>
-                      <Table.HeaderCell>Applied</Table.HeaderCell>
-                      <Table.HeaderCell>Reason</Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("cancellations.detail.fields.offer")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("common.fields.status")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("cancellations.detail.fields.decided")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("cancellations.detail.fields.applied")}
+                      </Table.HeaderCell>
+                      <Table.HeaderCell>
+                        {t("common.fields.reason")}
+                      </Table.HeaderCell>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -781,25 +845,38 @@ const CancellationDetailPage = () => {
                         <Table.Cell>
                           <div className="flex flex-col gap-y-1">
                             <Text size="small" leading="compact" weight="plus">
-                              {formatOfferType(offer.offer_type)}
+                              {formatOfferType(offer.offer_type, t)}
                             </Text>
                             <Text
                               size="small"
                               leading="compact"
                               className="text-ui-fg-subtle"
                             >
-                              {describeOfferPayload(offer) || "No payload summary"}
+                              {describeOfferPayload(offer, t) ||
+                                t("cancellations.detail.empty.noPayloadSummary")}
                             </Text>
                           </div>
                         </Table.Cell>
                         <Table.Cell>
                           <StatusBadge color={getOfferDecisionColor(offer.decision_status)}>
-                            {formatOfferDecisionStatus(offer.decision_status)}
+                            {formatOfferDecisionStatus(offer.decision_status, t)}
                           </StatusBadge>
                         </Table.Cell>
-                        <Table.Cell>{formatDateTime(offer.decided_at)}</Table.Cell>
-                        <Table.Cell>{formatDateTime(offer.applied_at)}</Table.Cell>
-                        <Table.Cell>{offer.decision_reason || "-"}</Table.Cell>
+                        <Table.Cell>
+                          {formatDateTime(
+                            offer.decided_at,
+                            t("common.empty.noValue")
+                          )}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {formatDateTime(
+                            offer.applied_at,
+                            t("common.empty.noValue")
+                          )}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {offer.decision_reason || t("common.empty.noValue")}
+                        </Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>
@@ -807,7 +884,7 @@ const CancellationDetailPage = () => {
               ) : (
                 <Alert variant="info">
                   <Text size="small" leading="compact">
-                    No retention offers have been recorded for this case yet.
+                    {t("cancellations.detail.empty.noOffers")}
                   </Text>
                 </Alert>
               )}
@@ -816,7 +893,9 @@ const CancellationDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Technical metadata</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.metadata")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               {metadataRows.length ? (
@@ -827,7 +906,7 @@ const CancellationDetailPage = () => {
                 </div>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No metadata was stored for this case.
+                  {t("cancellations.detail.empty.noMetadata")}
                 </Text>
               )}
             </div>
@@ -837,7 +916,9 @@ const CancellationDetailPage = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Subscription summary</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.subscriptionSummary")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -871,23 +952,41 @@ const CancellationDetailPage = () => {
                   </div>
                 </Link>
                 <DetailRow
-                  label="Status"
-                  value={formatSubscriptionStatus(cancellation.subscription.status)}
+                  label={t("common.fields.status")}
+                  value={formatSubscriptionStatus(
+                    cancellation.subscription.status,
+                    t
+                  )}
                 />
                 <DetailRow
-                  label="Customer"
+                  label={t("common.fields.customer")}
                   value={cancellation.subscription.customer_name}
                 />
-                <DetailRow label="Product" value={cancellation.subscription.product_title} />
-                <DetailRow label="Variant" value={cancellation.subscription.variant_title} />
-                <DetailRow label="SKU" value={cancellation.subscription.sku || "-"} />
                 <DetailRow
-                  label="Next renewal"
-                  value={formatDateTime(cancellation.subscription.next_renewal_at)}
+                  label={t("common.fields.product")}
+                  value={cancellation.subscription.product_title}
                 />
                 <DetailRow
-                  label="Cancelled at"
-                  value={formatDateTime(cancellation.subscription.cancelled_at)}
+                  label={t("common.fields.variant")}
+                  value={cancellation.subscription.variant_title}
+                />
+                <DetailRow
+                  label={t("common.fields.sku")}
+                  value={cancellation.subscription.sku || t("common.empty.noValue")}
+                />
+                <DetailRow
+                  label={t("common.fields.nextRenewal")}
+                  value={formatDateTime(
+                    cancellation.subscription.next_renewal_at,
+                    t("common.empty.noValue")
+                  )}
+                />
+                <DetailRow
+                  label={t("cancellations.fields.cancelledAt")}
+                  value={formatDateTime(
+                    cancellation.subscription.cancelled_at,
+                    t("common.empty.noValue")
+                  )}
                 />
               </div>
             </div>
@@ -895,7 +994,9 @@ const CancellationDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Linked dunning summary</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.linkedDunning")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -920,7 +1021,7 @@ const CancellationDetailPage = () => {
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            {formatDunningStatus(cancellation.dunning.status)}
+                            {formatDunningStatus(cancellation.dunning.status, t)}
                           </Text>
                         </div>
                         <div className="size-7 flex items-center justify-center">
@@ -931,28 +1032,37 @@ const CancellationDetailPage = () => {
                   </Link>
                 ) : (
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    No active dunning case linked
+                    {t("cancellations.detail.empty.noLinkedDunning")}
                   </Text>
                 )}
                 <DetailRow
-                  label="Status"
+                  label={t("common.fields.status")}
                   value={
                     cancellation.dunning
-                      ? formatDunningStatus(cancellation.dunning.status)
-                      : "-"
+                      ? formatDunningStatus(cancellation.dunning.status, t)
+                      : t("common.empty.noValue")
                   }
                 />
                 <DetailRow
-                  label="Attempt count"
-                  value={cancellation.dunning?.attempt_count.toString() || "-"}
+                  label={t("cancellations.detail.fields.attemptCount")}
+                  value={
+                    cancellation.dunning?.attempt_count.toString() ||
+                    t("common.empty.noValue")
+                  }
                 />
                 <DetailRow
-                  label="Next retry"
-                  value={formatDateTime(cancellation.dunning?.next_retry_at ?? null)}
+                  label={t("cancellations.detail.fields.nextRetry")}
+                  value={formatDateTime(
+                    cancellation.dunning?.next_retry_at ?? null,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Last error"
-                  value={cancellation.dunning?.last_payment_error_message || "-"}
+                  label={t("cancellations.detail.fields.lastError")}
+                  value={
+                    cancellation.dunning?.last_payment_error_message ||
+                    t("common.empty.noValue")
+                  }
                 />
               </div>
             </div>
@@ -960,7 +1070,9 @@ const CancellationDetailPage = () => {
 
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Linked renewal summary</Heading>
+              <Heading level="h2">
+                {t("cancellations.detail.sections.linkedRenewal")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               <div className="grid gap-4">
@@ -985,7 +1097,7 @@ const CancellationDetailPage = () => {
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            {formatRenewalStatus(cancellation.renewal.status)}
+                            {formatRenewalStatus(cancellation.renewal.status, t)}
                           </Text>
                         </div>
                         <div className="size-7 flex items-center justify-center">
@@ -996,32 +1108,41 @@ const CancellationDetailPage = () => {
                   </Link>
                 ) : (
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    No linked renewal cycle
+                    {t("cancellations.detail.empty.noLinkedRenewal")}
                   </Text>
                 )}
                 <DetailRow
-                  label="Status"
+                  label={t("common.fields.status")}
                   value={
                     cancellation.renewal
-                      ? formatRenewalStatus(cancellation.renewal.status)
-                      : "-"
+                      ? formatRenewalStatus(cancellation.renewal.status, t)
+                      : t("common.empty.noValue")
                   }
                 />
                 <DetailRow
-                  label="Scheduled for"
-                  value={formatDateTime(cancellation.renewal?.scheduled_for ?? null)}
+                  label={t("cancellations.detail.fields.scheduledFor")}
+                  value={formatDateTime(
+                    cancellation.renewal?.scheduled_for ?? null,
+                    t("common.empty.noValue")
+                  )}
                 />
                 <DetailRow
-                  label="Approval"
+                  label={t("cancellations.detail.fields.approval")}
                   value={
                     cancellation.renewal?.approval_status
-                      ? formatApprovalStatus(cancellation.renewal.approval_status)
-                      : "-"
+                      ? formatApprovalStatus(
+                          cancellation.renewal.approval_status,
+                          t
+                        )
+                      : t("common.empty.noValue")
                   }
                 />
                 <DetailRow
-                  label="Generated order"
-                  value={cancellation.renewal?.generated_order_id || "-"}
+                  label={t("cancellations.detail.fields.generatedOrder")}
+                  value={
+                    cancellation.renewal?.generated_order_id ||
+                    t("common.empty.noValue")
+                  }
                 />
               </div>
             </div>
@@ -1032,305 +1153,73 @@ const CancellationDetailPage = () => {
       <Drawer open={actionDrawerOpen} onOpenChange={setActionDrawerOpen}>
         <Drawer.Content>
           <Drawer.Header>
-            <Drawer.Title>{getDrawerTitle(actionDrawerMode)}</Drawer.Title>
+            <Drawer.Title>{getDrawerTitle(actionDrawerMode, t)}</Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-4 p-4">
             {isActionFormLoading ? (
               <div className="flex items-center gap-x-2 text-ui-fg-subtle">
                 <Spinner className="animate-spin" />
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  Loading latest case data for this action...
+                  {t("cancellations.drawer.loadingLatest")}
                 </Text>
               </div>
             ) : null}
             {formError ? <Alert variant="error">{formError}</Alert> : null}
 
             {!isActionFormLoading && actionDrawerMode === "reason" ? (
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="cancellation-reason">Reason</Label>
-                  <Textarea
-                    id="cancellation-reason"
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    placeholder="Capture the churn reason"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cancellation-reason-category">Reason category</Label>
-                  <Select
-                    value={reasonCategory}
-                    onValueChange={(value) => setReasonCategory(value as ReasonCategory)}
-                  >
-                    <Select.Trigger id="cancellation-reason-category">
-                      <Select.Value placeholder="Select a category" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {reasonCategoryOptions.map((option) => (
-                        <Select.Item key={option.value} value={option.value}>
-                          {option.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cancellation-notes">Notes</Label>
-                  <Textarea
-                    id="cancellation-notes"
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                    placeholder="Optional operator notes"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="reason-update-explanation">Change reason</Label>
-                  <Input
-                    id="reason-update-explanation"
-                    value={updateReasonExplanation}
-                    onChange={(event) => setUpdateReasonExplanation(event.target.value)}
-                    placeholder="Optional explanation for the update"
-                  />
-                </div>
-              </div>
+              <ReasonDrawerBody
+                reason={reason}
+                onReasonChange={setReason}
+                reasonCategory={reasonCategory}
+                onReasonCategoryChange={setReasonCategory}
+                notes={notes}
+                onNotesChange={setNotes}
+                updateReasonExplanation={updateReasonExplanation}
+                onUpdateReasonExplanationChange={setUpdateReasonExplanation}
+              />
             ) : null}
 
             {!isActionFormLoading && actionDrawerMode === "apply_offer" ? (
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="offer-type">Offer type</Label>
-                  <Select
-                    value={offerType}
-                    onValueChange={(value) => setOfferType(value as OfferType)}
-                  >
-                    <Select.Trigger id="offer-type">
-                      <Select.Value placeholder="Select offer type" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {visibleOfferTypeOptions.map((option) => (
-                        <Select.Item key={option.value} value={option.value}>
-                          {option.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                  {!visibleOfferTypeOptions.length ? (
-                    <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                      No retention offers are available for the current subscription state.
-                    </Text>
-                  ) : null}
-                </div>
-
-                {offerType === "pause_offer" ? (
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="pause-cycles">Pause cycles</Label>
-                      <Input
-                        id="pause-cycles"
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={pauseCycles}
-                        onChange={(event) => setPauseCycles(event.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="resume-at">Resume at</Label>
-                      <Input
-                        id="resume-at"
-                        type="datetime-local"
-                        value={resumeAt}
-                        onChange={(event) => setResumeAt(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-
-                {offerType === "discount_offer" ? (
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="discount-type">Discount type</Label>
-                      <Select
-                        value={discountType}
-                        onValueChange={(value) =>
-                          setDiscountType(value as "percentage" | "fixed")
-                        }
-                      >
-                        <Select.Trigger id="discount-type">
-                          <Select.Value />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {discountTypeOptions.map((option) => (
-                            <Select.Item key={option.value} value={option.value}>
-                              {option.label}
-                            </Select.Item>
-                          ))}
-                        </Select.Content>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="discount-value">Discount value</Label>
-                      <Input
-                        id="discount-value"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={discountValue}
-                        onChange={(event) => setDiscountValue(event.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="discount-duration-cycles">Duration cycles</Label>
-                      <Input
-                        id="discount-duration-cycles"
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={discountDurationCycles}
-                        onChange={(event) =>
-                          setDiscountDurationCycles(event.target.value)
-                        }
-                      />
-                    </div>
-                  </div>
-                ) : null}
-
-                {offerType === "bonus_offer" ? (
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="bonus-type">Bonus type</Label>
-                      <Select
-                        value={bonusType}
-                        onValueChange={(value) =>
-                          setBonusType(value as "free_cycle" | "gift" | "credit")
-                        }
-                      >
-                        <Select.Trigger id="bonus-type">
-                          <Select.Value />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {bonusTypeOptions.map((option) => (
-                            <Select.Item key={option.value} value={option.value}>
-                              {option.label}
-                            </Select.Item>
-                          ))}
-                        </Select.Content>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="bonus-value">Value</Label>
-                      <Input
-                        id="bonus-value"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={bonusValue}
-                        onChange={(event) => setBonusValue(event.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="bonus-label">Label</Label>
-                      <Input
-                        id="bonus-label"
-                        value={bonusLabel}
-                        onChange={(event) => setBonusLabel(event.target.value)}
-                        placeholder="Optional label"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="bonus-duration-cycles">Duration cycles</Label>
-                      <Input
-                        id="bonus-duration-cycles"
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={bonusDurationCycles}
-                        onChange={(event) => setBonusDurationCycles(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="grid gap-2">
-                  <Label htmlFor="offer-note">Offer note</Label>
-                  <Textarea
-                    id="offer-note"
-                    value={offerNote}
-                    onChange={(event) => setOfferNote(event.target.value)}
-                    placeholder="Optional note attached to the offer payload"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="decision-reason">Decision reason</Label>
-                  <Textarea
-                    id="decision-reason"
-                    value={decisionReason}
-                    onChange={(event) => setDecisionReason(event.target.value)}
-                    placeholder="Optional reason or customer response"
-                  />
-                </div>
-              </div>
+              <ApplyOfferDrawerBody
+                offerType={offerType}
+                onOfferTypeChange={setOfferType}
+                eligibleOfferTypes={eligibleOfferTypes}
+                pauseCycles={pauseCycles}
+                onPauseCyclesChange={setPauseCycles}
+                resumeAt={resumeAt}
+                onResumeAtChange={setResumeAt}
+                discountType={discountType}
+                onDiscountTypeChange={setDiscountType}
+                discountValue={discountValue}
+                onDiscountValueChange={setDiscountValue}
+                discountDurationCycles={discountDurationCycles}
+                onDiscountDurationCyclesChange={setDiscountDurationCycles}
+                bonusType={bonusType}
+                onBonusTypeChange={setBonusType}
+                bonusValue={bonusValue}
+                onBonusValueChange={setBonusValue}
+                bonusLabel={bonusLabel}
+                onBonusLabelChange={setBonusLabel}
+                bonusDurationCycles={bonusDurationCycles}
+                onBonusDurationCyclesChange={setBonusDurationCycles}
+                offerNote={offerNote}
+                onOfferNoteChange={setOfferNote}
+                decisionReason={decisionReason}
+                onDecisionReasonChange={setDecisionReason}
+              />
             ) : null}
 
             {!isActionFormLoading && actionDrawerMode === "finalize" ? (
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="finalize-reason">Reason</Label>
-                  <Textarea
-                    id="finalize-reason"
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    placeholder="Reason is required before final cancel"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="finalize-reason-category">Reason category</Label>
-                  <Select
-                    value={reasonCategory}
-                    onValueChange={(value) => setReasonCategory(value as ReasonCategory)}
-                  >
-                    <Select.Trigger id="finalize-reason-category">
-                      <Select.Value placeholder="Select a category" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {reasonCategoryOptions.map((option) => (
-                        <Select.Item key={option.value} value={option.value}>
-                          {option.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="finalize-notes">Notes</Label>
-                  <Textarea
-                    id="finalize-notes"
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                    placeholder="Optional final cancellation notes"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="effective-at">Effective at</Label>
-                  <Select
-                    value={effectiveAt}
-                    onValueChange={(value) =>
-                      setEffectiveAt(value as "immediately" | "end_of_cycle")
-                    }
-                  >
-                    <Select.Trigger id="effective-at">
-                      <Select.Value />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {effectiveAtOptions.map((option) => (
-                        <Select.Item key={option.value} value={option.value}>
-                          {option.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </div>
-              </div>
+              <FinalizeDrawerBody
+                reason={reason}
+                onReasonChange={setReason}
+                reasonCategory={reasonCategory}
+                onReasonCategoryChange={setReasonCategory}
+                notes={notes}
+                onNotesChange={setNotes}
+                effectiveAt={effectiveAt}
+                onEffectiveAtChange={setEffectiveAt}
+              />
             ) : null}
           </Drawer.Body>
           <Drawer.Footer>
@@ -1347,7 +1236,7 @@ const CancellationDetailPage = () => {
                     updateReasonMutation.isPending
                   }
                 >
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </Drawer.Close>
               <Button
@@ -1371,10 +1260,10 @@ const CancellationDetailPage = () => {
                 }
               >
                 {actionDrawerMode === "apply_offer"
-                  ? "Apply offer"
+                  ? t("cancellations.drawer.applyOfferFooter")
                   : actionDrawerMode === "finalize"
-                    ? "Continue"
-                    : "Save"}
+                    ? t("cancellations.drawer.continueFooter")
+                    : t("common.actions.save")}
               </Button>
             </div>
           </Drawer.Footer>
@@ -1388,7 +1277,7 @@ export default CancellationDetailPage
 
 export const handle = {
   breadcrumb: ({ params, data }: UIMatch<CancellationCaseAdminDetailResponse>) =>
-    params?.id || data?.cancellation?.id || "Cancellation",
+    params?.id || data?.cancellation?.id || translate("cancellations.breadcrumb"),
 }
 
 const DetailRow = ({
@@ -1416,15 +1305,454 @@ const DetailRow = ({
   )
 }
 
-function getDrawerTitle(mode: ActionDrawerMode) {
-  switch (mode) {
-    case "apply_offer":
-      return "Apply retention offer"
-    case "finalize":
-      return "Finalize cancellation"
-    case "reason":
-      return "Update reason"
-  }
+const ReasonDrawerBody = ({
+  reason,
+  onReasonChange,
+  reasonCategory,
+  onReasonCategoryChange,
+  notes,
+  onNotesChange,
+  updateReasonExplanation,
+  onUpdateReasonExplanationChange,
+}: {
+  reason: string
+  onReasonChange: (value: string) => void
+  reasonCategory: ReasonCategory | ""
+  onReasonCategoryChange: (value: ReasonCategory) => void
+  notes: string
+  onNotesChange: (value: string) => void
+  updateReasonExplanation: string
+  onUpdateReasonExplanationChange: (value: string) => void
+}) => {
+  const { t } = useTranslation("reorder")
+  const reasonCategoryOptions = buildReasonCategoryOptions(t)
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="cancellation-reason">{t("common.fields.reason")}</Label>
+        <Textarea
+          id="cancellation-reason"
+          value={reason}
+          onChange={(event) => onReasonChange(event.target.value)}
+          placeholder={t("cancellations.drawer.captureChurnReason")}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="cancellation-reason-category">
+          {t("cancellations.columns.reasonCategory")}
+        </Label>
+        <Select
+          value={reasonCategory}
+          onValueChange={(value) => onReasonCategoryChange(value as ReasonCategory)}
+        >
+          <Select.Trigger id="cancellation-reason-category">
+            <Select.Value placeholder={t("cancellations.drawer.selectCategory")} />
+          </Select.Trigger>
+          <Select.Content>
+            {reasonCategoryOptions.map((option) => (
+              <Select.Item key={option.value} value={option.value}>
+                {option.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="cancellation-notes">
+          {t("cancellations.drawer.notes")}
+        </Label>
+        <Textarea
+          id="cancellation-notes"
+          value={notes}
+          onChange={(event) => onNotesChange(event.target.value)}
+          placeholder={t("cancellations.drawer.optionalOperatorNotes")}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="reason-update-explanation">
+          {t("cancellations.drawer.changeReason")}
+        </Label>
+        <Input
+          id="reason-update-explanation"
+          value={updateReasonExplanation}
+          onChange={(event) => onUpdateReasonExplanationChange(event.target.value)}
+          placeholder={t("cancellations.drawer.optionalUpdateExplanation")}
+        />
+      </div>
+    </div>
+  )
+}
+
+const ApplyOfferDrawerBody = ({
+  offerType,
+  onOfferTypeChange,
+  eligibleOfferTypes,
+  pauseCycles,
+  onPauseCyclesChange,
+  resumeAt,
+  onResumeAtChange,
+  discountType,
+  onDiscountTypeChange,
+  discountValue,
+  onDiscountValueChange,
+  discountDurationCycles,
+  onDiscountDurationCyclesChange,
+  bonusType,
+  onBonusTypeChange,
+  bonusValue,
+  onBonusValueChange,
+  bonusLabel,
+  onBonusLabelChange,
+  bonusDurationCycles,
+  onBonusDurationCyclesChange,
+  offerNote,
+  onOfferNoteChange,
+  decisionReason,
+  onDecisionReasonChange,
+}: {
+  offerType: OfferType
+  onOfferTypeChange: (value: OfferType) => void
+  eligibleOfferTypes: OfferType[]
+  pauseCycles: string
+  onPauseCyclesChange: (value: string) => void
+  resumeAt: string
+  onResumeAtChange: (value: string) => void
+  discountType: "percentage" | "fixed"
+  onDiscountTypeChange: (value: "percentage" | "fixed") => void
+  discountValue: string
+  onDiscountValueChange: (value: string) => void
+  discountDurationCycles: string
+  onDiscountDurationCyclesChange: (value: string) => void
+  bonusType: "free_cycle" | "gift" | "credit"
+  onBonusTypeChange: (value: "free_cycle" | "gift" | "credit") => void
+  bonusValue: string
+  onBonusValueChange: (value: string) => void
+  bonusLabel: string
+  onBonusLabelChange: (value: string) => void
+  bonusDurationCycles: string
+  onBonusDurationCyclesChange: (value: string) => void
+  offerNote: string
+  onOfferNoteChange: (value: string) => void
+  decisionReason: string
+  onDecisionReasonChange: (value: string) => void
+}) => {
+  const { t } = useTranslation("reorder")
+  const offerTypeOptions = buildOfferTypeOptions(t).filter((option) =>
+    eligibleOfferTypes.includes(option.value)
+  )
+  const discountTypeOptions = [
+    { label: t("cancellations.drawer.percentage"), value: "percentage" },
+    { label: t("cancellations.drawer.fixed"), value: "fixed" },
+  ] as const
+  const bonusTypeOptions = [
+    { label: t("cancellations.drawer.freeCycle"), value: "free_cycle" },
+    { label: t("cancellations.drawer.gift"), value: "gift" },
+    { label: t("cancellations.drawer.credit"), value: "credit" },
+  ] as const
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="offer-type">{t("cancellations.fields.offerType")}</Label>
+        <Select
+          value={offerType}
+          onValueChange={(value) => onOfferTypeChange(value as OfferType)}
+        >
+          <Select.Trigger id="offer-type">
+            <Select.Value placeholder={t("cancellations.drawer.selectOfferType")} />
+          </Select.Trigger>
+          <Select.Content>
+            {offerTypeOptions.map((option) => (
+              <Select.Item key={option.value} value={option.value}>
+                {option.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select>
+        {!offerTypeOptions.length ? (
+          <Text size="small" leading="compact" className="text-ui-fg-subtle">
+            {t("cancellations.drawer.noOffersAvailable")}
+          </Text>
+        ) : null}
+      </div>
+
+      {offerType === "pause_offer" ? (
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="pause-cycles">
+              {t("cancellations.drawer.pauseCycles")}
+            </Label>
+            <Input
+              id="pause-cycles"
+              type="number"
+              min={1}
+              step={1}
+              value={pauseCycles}
+              onChange={(event) => onPauseCyclesChange(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="resume-at">{t("cancellations.drawer.resumeAt")}</Label>
+            <Input
+              id="resume-at"
+              type="datetime-local"
+              value={resumeAt}
+              onChange={(event) => onResumeAtChange(event.target.value)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {offerType === "discount_offer" ? (
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="discount-type">
+              {t("cancellations.drawer.discountType")}
+            </Label>
+            <Select
+              value={discountType}
+              onValueChange={(value) =>
+                onDiscountTypeChange(value as "percentage" | "fixed")
+              }
+            >
+              <Select.Trigger id="discount-type">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {discountTypeOptions.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="discount-value">
+              {t("cancellations.drawer.discountValue")}
+            </Label>
+            <Input
+              id="discount-value"
+              type="number"
+              min={0}
+              step="0.01"
+              value={discountValue}
+              onChange={(event) => onDiscountValueChange(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="discount-duration-cycles">
+              {t("cancellations.drawer.durationCycles")}
+            </Label>
+            <Input
+              id="discount-duration-cycles"
+              type="number"
+              min={1}
+              step={1}
+              value={discountDurationCycles}
+              onChange={(event) =>
+                onDiscountDurationCyclesChange(event.target.value)
+              }
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {offerType === "bonus_offer" ? (
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="bonus-type">
+              {t("cancellations.drawer.bonusType")}
+            </Label>
+            <Select
+              value={bonusType}
+              onValueChange={(value) =>
+                onBonusTypeChange(value as "free_cycle" | "gift" | "credit")
+              }
+            >
+              <Select.Trigger id="bonus-type">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {bonusTypeOptions.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="bonus-value">
+              {t("cancellations.drawer.bonusValue")}
+            </Label>
+            <Input
+              id="bonus-value"
+              type="number"
+              min={0}
+              step="0.01"
+              value={bonusValue}
+              onChange={(event) => onBonusValueChange(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="bonus-label">{t("cancellations.drawer.label")}</Label>
+            <Input
+              id="bonus-label"
+              value={bonusLabel}
+              onChange={(event) => onBonusLabelChange(event.target.value)}
+              placeholder={t("cancellations.drawer.optionalLabel")}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="bonus-duration-cycles">
+              {t("cancellations.drawer.durationCycles")}
+            </Label>
+            <Input
+              id="bonus-duration-cycles"
+              type="number"
+              min={1}
+              step={1}
+              value={bonusDurationCycles}
+              onChange={(event) => onBonusDurationCyclesChange(event.target.value)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-2">
+        <Label htmlFor="offer-note">{t("cancellations.drawer.offerNote")}</Label>
+        <Textarea
+          id="offer-note"
+          value={offerNote}
+          onChange={(event) => onOfferNoteChange(event.target.value)}
+          placeholder={t("cancellations.drawer.offerNotePlaceholder")}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="decision-reason">
+          {t("cancellations.drawer.decisionReason")}
+        </Label>
+        <Textarea
+          id="decision-reason"
+          value={decisionReason}
+          onChange={(event) => onDecisionReasonChange(event.target.value)}
+          placeholder={t("cancellations.drawer.decisionReasonPlaceholder")}
+        />
+      </div>
+    </div>
+  )
+}
+
+const FinalizeDrawerBody = ({
+  reason,
+  onReasonChange,
+  reasonCategory,
+  onReasonCategoryChange,
+  notes,
+  onNotesChange,
+  effectiveAt,
+  onEffectiveAtChange,
+}: {
+  reason: string
+  onReasonChange: (value: string) => void
+  reasonCategory: ReasonCategory | ""
+  onReasonCategoryChange: (value: ReasonCategory) => void
+  notes: string
+  onNotesChange: (value: string) => void
+  effectiveAt: "immediately" | "end_of_cycle"
+  onEffectiveAtChange: (value: "immediately" | "end_of_cycle") => void
+}) => {
+  const { t } = useTranslation("reorder")
+  const reasonCategoryOptions = buildReasonCategoryOptions(t)
+  const effectiveAtOptions = [
+    { label: t("cancellations.drawer.immediately"), value: "immediately" },
+    { label: t("cancellations.drawer.endOfCycle"), value: "end_of_cycle" },
+  ] as const
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="finalize-reason">{t("common.fields.reason")}</Label>
+        <Textarea
+          id="finalize-reason"
+          value={reason}
+          onChange={(event) => onReasonChange(event.target.value)}
+          placeholder={t("cancellations.drawer.reasonRequiredHint")}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="finalize-reason-category">
+          {t("cancellations.columns.reasonCategory")}
+        </Label>
+        <Select
+          value={reasonCategory}
+          onValueChange={(value) => onReasonCategoryChange(value as ReasonCategory)}
+        >
+          <Select.Trigger id="finalize-reason-category">
+            <Select.Value placeholder={t("cancellations.drawer.selectCategory")} />
+          </Select.Trigger>
+          <Select.Content>
+            {reasonCategoryOptions.map((option) => (
+              <Select.Item key={option.value} value={option.value}>
+                {option.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="finalize-notes">
+          {t("cancellations.drawer.notes")}
+        </Label>
+        <Textarea
+          id="finalize-notes"
+          value={notes}
+          onChange={(event) => onNotesChange(event.target.value)}
+          placeholder={t("cancellations.drawer.optionalFinalNotes")}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="effective-at">
+          {t("cancellations.drawer.effectiveAt")}
+        </Label>
+        <Select
+          value={effectiveAt}
+          onValueChange={(value) =>
+            onEffectiveAtChange(value as "immediately" | "end_of_cycle")
+          }
+        >
+          <Select.Trigger id="effective-at">
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
+            {effectiveAtOptions.map((option) => (
+              <Select.Item key={option.value} value={option.value}>
+                {option.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+function buildReasonCategoryOptions(t: ReorderTranslate) {
+  return Object.entries(CANCELLATION_REASON_CATEGORY_KEYS).map(
+    ([value, key]) => ({
+      value: value as ReasonCategory,
+      label: t(key),
+    })
+  )
+}
+
+function buildOfferTypeOptions(t: ReorderTranslate) {
+  return Object.entries(CANCELLATION_OFFER_TYPE_KEYS).map(([value, key]) => ({
+    value: value as OfferType,
+    label: t(key),
+  }))
 }
 
 function normalizeOptionalString(value: string) {
@@ -1485,9 +1813,9 @@ function parseNullableNonNegativeNumber(value: string) {
   return parsed
 }
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, emptyValue: string) {
   if (!value) {
-    return "-"
+    return emptyValue
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -1496,21 +1824,22 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value))
 }
 
-function formatCaseStatus(status: CancellationCaseAdminStatus) {
-  switch (status) {
-    case "requested":
-      return "Requested"
-    case "evaluating_retention":
-      return "Evaluating retention"
-    case "retention_offered":
-      return "Retention offered"
-    case "retained":
-      return "Retained"
-    case "paused":
-      return "Paused"
-    case "canceled":
-      return "Canceled"
+function getDrawerTitle(mode: ActionDrawerMode, t: ReorderTranslate) {
+  switch (mode) {
+    case "apply_offer":
+      return t("cancellations.actions.applyOffer")
+    case "finalize":
+      return t("cancellations.actions.finalize")
+    case "reason":
+      return t("cancellations.drawer.updateReason")
   }
+}
+
+function formatCaseStatus(
+  status: CancellationCaseAdminStatus,
+  t: ReorderTranslate
+) {
+  return t(CANCELLATION_CASE_STATUS_KEYS[status] ?? status)
 }
 
 function getCaseStatusColor(status: CancellationCaseAdminStatus) {
@@ -1530,15 +1859,11 @@ function getCaseStatusColor(status: CancellationCaseAdminStatus) {
   }
 }
 
-function formatFinalOutcome(value: CancellationFinalOutcomeAdmin) {
-  switch (value) {
-    case "retained":
-      return "Retained"
-    case "paused":
-      return "Paused"
-    case "canceled":
-      return "Canceled"
-  }
+function formatFinalOutcome(
+  value: CancellationFinalOutcomeAdmin,
+  t: ReorderTranslate
+) {
+  return t(CANCELLATION_OUTCOME_KEYS[value] ?? value)
 }
 
 function getFinalOutcomeColor(value: CancellationFinalOutcomeAdmin) {
@@ -1552,114 +1877,61 @@ function getFinalOutcomeColor(value: CancellationFinalOutcomeAdmin) {
   }
 }
 
-function formatReasonCategory(value: string | null) {
+function formatReasonCategory(value: string | null, t: ReorderTranslate) {
   if (!value) {
-    return "Unclassified"
+    return t("cancellations.reasonCategory.unclassified")
   }
 
-  switch (value) {
-    case "product_fit":
-      return "Product fit"
-    case "temporary_pause":
-      return "Temporary pause"
-    case "switched_competitor":
-      return "Switched competitor"
-    default:
-      return value
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ")
-  }
+  return t(CANCELLATION_REASON_CATEGORY_KEYS[value] ?? titleCaseIdentifier(value))
+}
+
+function titleCaseIdentifier(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
 }
 
 function formatSubscriptionStatus(
-  status: CancellationCaseAdminDetail["subscription"]["status"]
+  status: CancellationCaseAdminDetail["subscription"]["status"],
+  t: ReorderTranslate
 ) {
-  switch (status) {
-    case "active":
-      return "Active"
-    case "paused":
-      return "Paused"
-    case "cancelled":
-      return "Cancelled"
-    case "past_due":
-      return "Past due"
-  }
+  return t(SUBSCRIPTION_STATUS_KEYS[status] ?? status)
 }
 
 function formatDunningStatus(
-  status: NonNullable<CancellationCaseAdminDetail["dunning"]>["status"]
+  status: NonNullable<CancellationCaseAdminDetail["dunning"]>["status"],
+  t: ReorderTranslate
 ) {
-  switch (status) {
-    case "open":
-      return "Open"
-    case "retry_scheduled":
-      return "Retry scheduled"
-    case "retrying":
-      return "Retrying"
-    case "awaiting_manual_resolution":
-      return "Awaiting manual resolution"
-    case "recovered":
-      return "Recovered"
-    case "unrecovered":
-      return "Unrecovered"
-  }
+  return t(DUNNING_STATUS_KEYS[status] ?? status)
 }
 
 function formatRenewalStatus(
-  status: NonNullable<CancellationCaseAdminDetail["renewal"]>["status"]
+  status: NonNullable<CancellationCaseAdminDetail["renewal"]>["status"],
+  t: ReorderTranslate
 ) {
-  switch (status) {
-    case "scheduled":
-      return "Scheduled"
-    case "processing":
-      return "Processing"
-    case "succeeded":
-      return "Succeeded"
-    case "failed":
-      return "Failed"
-  }
+  return t(RENEWAL_STATUS_KEYS[status] ?? status)
 }
 
 function formatApprovalStatus(
-  status: NonNullable<CancellationCaseAdminDetail["renewal"]>["approval_status"]
+  status: NonNullable<CancellationCaseAdminDetail["renewal"]>["approval_status"],
+  t: ReorderTranslate
 ) {
-  switch (status) {
-    case "pending":
-      return "Pending"
-    case "approved":
-      return "Approved"
-    case "rejected":
-      return "Rejected"
-  }
+  return t(RENEWAL_APPROVAL_KEYS[status] ?? status)
 }
 
-function formatOfferType(offerType: CancellationAdminOfferEventRecord["offer_type"]) {
-  switch (offerType) {
-    case "pause_offer":
-      return "Pause offer"
-    case "discount_offer":
-      return "Discount offer"
-    case "bonus_offer":
-      return "Bonus offer"
-  }
+function formatOfferType(
+  offerType: CancellationAdminOfferEventRecord["offer_type"],
+  t: ReorderTranslate
+) {
+  return t(CANCELLATION_OFFER_TYPE_KEYS[offerType] ?? offerType)
 }
 
 function formatOfferDecisionStatus(
-  status: CancellationAdminOfferEventRecord["decision_status"]
+  status: CancellationAdminOfferEventRecord["decision_status"],
+  t: ReorderTranslate
 ) {
-  switch (status) {
-    case "proposed":
-      return "Proposed"
-    case "accepted":
-      return "Accepted"
-    case "rejected":
-      return "Rejected"
-    case "applied":
-      return "Applied"
-    case "expired":
-      return "Expired"
-  }
+  return t(CANCELLATION_DECISION_STATUS_KEYS[status] ?? status)
 }
 
 function getOfferDecisionColor(
@@ -1679,7 +1951,13 @@ function getOfferDecisionColor(
   }
 }
 
-function describeOfferPayload(offer: CancellationAdminOfferEventRecord) {
+// Documented i18n exception: offer payload summary fragments intentionally
+// remain in English. Only the empty-value placeholder for the embedded
+// datetime formatting is localized via `t`.
+function describeOfferPayload(
+  offer: CancellationAdminOfferEventRecord,
+  t: ReorderTranslate
+) {
   const payload = offer.offer_payload
 
   if (!payload) {
@@ -1695,7 +1973,9 @@ function describeOfferPayload(offer: CancellationAdminOfferEventRecord) {
 
     return [
       value.pause_cycles ? `${value.pause_cycles} cycles` : null,
-      value.resume_at ? `resume ${formatDateTime(value.resume_at)}` : null,
+      value.resume_at
+        ? `resume ${formatDateTime(value.resume_at, t("common.empty.noValue"))}`
+        : null,
       value.note ?? null,
     ]
       .filter(Boolean)

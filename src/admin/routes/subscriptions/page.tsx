@@ -1,4 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate, type ReorderTranslate } from "../../i18n/translate";
+import { useTranslation } from "react-i18next";
 import {
   Calendar,
   Pause,
@@ -45,134 +47,10 @@ const PAGE_SIZE = 20;
 const columnHelper = createDataTableColumnHelper<SubscriptionAdminListItem>();
 const filterHelper = createDataTableFilterHelper<SubscriptionAdminListItem>();
 
-const statusFilterOptions = [
-  { label: "Active", value: SubscriptionAdminStatus.ACTIVE },
-  { label: "Paused", value: SubscriptionAdminStatus.PAUSED },
-  { label: "Cancelled", value: SubscriptionAdminStatus.CANCELLED },
-  { label: "Past due", value: SubscriptionAdminStatus.PAST_DUE },
-] as const;
-
-const booleanFilterOptions = [
-  { label: "Yes", value: true },
-  { label: "No", value: false },
-] as const;
-
-const nextRenewalFilterOptions = [
-  { label: "Overdue", value: "overdue" },
-  { label: "Next 7 days", value: "next_7_days" },
-  { label: "Next 30 days", value: "next_30_days" },
-  { label: "Next 90 days", value: "next_90_days" },
-] as const;
-
-const baseColumns = [
-  columnHelper.accessor("reference", {
-    header: "Reference",
-    cell: ({ getValue, row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {getValue()}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.id}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor((row) => row.product.product_title, {
-    id: "product_title",
-    header: "Product",
-    enableSorting: true,
-    sortLabel: "Product",
-    cell: ({ row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.product.product_title}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.product.variant_title}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("status", {
-    header: "Status",
-    enableSorting: true,
-    sortLabel: "Status",
-    cell: ({ getValue }) => (
-      <StatusBadge color={getStatusColor(getValue())} className="text-nowrap">
-        {formatStatus(getValue())}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("frequency.label", {
-    id: "frequency",
-    header: "Frequency",
-    cell: ({ getValue, row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {getValue()}
-        </Text>
-        {row.original.discount ? (
-          <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            {row.original.discount.label}
-          </Text>
-        ) : null}
-      </div>
-    ),
-  }),
-  columnHelper.accessor("next_renewal_at", {
-    header: "Next renewal",
-    enableSorting: true,
-    sortLabel: "Next renewal",
-    cell: ({ getValue, row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {formatDateTime(row.original.effective_next_renewal_at ?? getValue())}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.skip_next_cycle ? "Projected after skipped cycle" : "Scheduled"}
-        </Text>
-      </div>
-    ),
-  }),
-];
-
-const statusFilter = filterHelper.accessor("status", {
-  type: "multiselect",
-  label: "Status",
-  options: [...statusFilterOptions],
-});
-
-const trialFilter = filterHelper.accessor("trial.is_trial", {
-  id: "is_trial",
-  type: "radio",
-  label: "Trial",
-  options: [...booleanFilterOptions],
-});
-
-const skipNextCycleFilter = filterHelper.accessor("skip_next_cycle", {
-  type: "radio",
-  label: "Skip next cycle",
-  options: [...booleanFilterOptions],
-});
-
-const nextRenewalFilter = filterHelper.accessor("next_renewal_at", {
-  id: "next_renewal",
-  type: "radio",
-  label: "Next renewal",
-  options: [...nextRenewalFilterOptions],
-});
-
-const filters = [
-  statusFilter,
-  trialFilter,
-  skipNextCycleFilter,
-  nextRenewalFilter,
-];
-
 type SubscriptionActionType = "pause" | "resume" | "cancel";
 
 const SubscriptionsPage = () => {
+  const { t } = useTranslation("reorder");
   const [search, setSearch] = useState("");
   const [filtering, setFiltering] = useState<DataTableFilteringState>({});
   const [sorting, setSorting] = useState<DataTableSortingState | null>({
@@ -206,27 +84,94 @@ const SubscriptionsPage = () => {
       : undefined;
   }, [filtering]);
 
+  const statusFilterOptions = useMemo(() => {
+    return [
+      {
+        label: t("subscriptions.status.active"),
+        value: SubscriptionAdminStatus.ACTIVE,
+      },
+      {
+        label: t("subscriptions.status.paused"),
+        value: SubscriptionAdminStatus.PAUSED,
+      },
+      {
+        label: t("subscriptions.status.cancelled"),
+        value: SubscriptionAdminStatus.CANCELLED,
+      },
+      {
+        label: t("subscriptions.status.pastDue"),
+        value: SubscriptionAdminStatus.PAST_DUE,
+      },
+    ] as const;
+  }, [t]);
+
+  const booleanFilterOptions = useMemo(() => {
+    return [
+      { label: t("common.filters.yes"), value: true },
+      { label: t("common.filters.no"), value: false },
+    ] as const;
+  }, [t]);
+
+  const nextRenewalFilterOptions = useMemo(() => {
+    return [
+      { label: t("subscriptions.filters.overdue"), value: "overdue" },
+      { label: t("subscriptions.filters.next7Days"), value: "next_7_days" },
+      { label: t("subscriptions.filters.next30Days"), value: "next_30_days" },
+      { label: t("subscriptions.filters.next90Days"), value: "next_90_days" },
+    ] as const;
+  }, [t]);
+
+  const filters = useMemo(() => {
+    const statusFilter = filterHelper.accessor("status", {
+      type: "multiselect",
+      label: t("common.fields.status"),
+      options: [...statusFilterOptions],
+    });
+
+    const trialFilter = filterHelper.accessor("trial.is_trial", {
+      id: "is_trial",
+      type: "radio",
+      label: t("subscriptions.filters.trial"),
+      options: [...booleanFilterOptions],
+    });
+
+    const skipNextCycleFilter = filterHelper.accessor("skip_next_cycle", {
+      type: "radio",
+      label: t("subscriptions.filters.skipNextCycle"),
+      options: [...booleanFilterOptions],
+    });
+
+    const nextRenewalFilter = filterHelper.accessor("next_renewal_at", {
+      id: "next_renewal",
+      type: "radio",
+      label: t("common.fields.nextRenewal"),
+      options: [...nextRenewalFilterOptions],
+    });
+
+    return [statusFilter, trialFilter, skipNextCycleFilter, nextRenewalFilter];
+  }, [booleanFilterOptions, nextRenewalFilterOptions, statusFilterOptions, t]);
+
   const activeStatusLabels = useMemo(() => {
     return (
       statusFilterOptions
         .filter((option) => statusFilters.includes(option.value))
         .map((option) => option.label) ?? []
     );
-  }, [statusFilters]);
+  }, [statusFilterOptions, statusFilters]);
   const activeTrialLabel = useMemo(() => {
     return booleanFilterOptions.find((option) => option.value === trialFilterValue)
       ?.label;
-  }, [trialFilterValue]);
+  }, [booleanFilterOptions, trialFilterValue]);
   const activeSkipNextCycleLabel = useMemo(() => {
     return booleanFilterOptions.find(
       (option) => option.value === skipNextCycleFilterValue,
     )?.label;
-  }, [skipNextCycleFilterValue]);
+  }, [booleanFilterOptions, skipNextCycleFilterValue]);
   const activeNextRenewalLabel = useMemo(() => {
     return nextRenewalFilterOptions.find(
       (option) => option.value === nextRenewalFilterValue,
     )?.label;
-  }, [nextRenewalFilterValue]);
+  }, [nextRenewalFilterOptions, nextRenewalFilterValue]);
   const hasActiveFilters =
     statusFilters.length ||
     typeof trialFilterValue === "boolean" ||
@@ -252,11 +197,13 @@ const SubscriptionsPage = () => {
       ),
     onSuccess: async (_data, subscriptionId) => {
       await invalidateAdminSubscriptionsQueries(queryClient, subscriptionId);
-      toast.success("Subscription paused");
+      toast.success(t("subscriptions.toast.paused"));
     },
     onError: (error) => {
       toast.error(
-        error instanceof Error ? error.message : "Failed to pause subscription",
+        error instanceof Error
+          ? error.message
+          : t("subscriptions.errors.pauseFailed"),
       );
     },
   });
@@ -272,11 +219,13 @@ const SubscriptionsPage = () => {
       ),
     onSuccess: async (_data, subscriptionId) => {
       await invalidateAdminSubscriptionsQueries(queryClient, subscriptionId);
-      toast.success("Subscription resumed");
+      toast.success(t("subscriptions.toast.resumed"));
     },
     onError: (error) => {
       toast.error(
-        error instanceof Error ? error.message : "Failed to resume subscription",
+        error instanceof Error
+          ? error.message
+          : t("subscriptions.errors.resumeFailed"),
       );
     },
   });
@@ -292,11 +241,13 @@ const SubscriptionsPage = () => {
       ),
     onSuccess: async (_data, subscriptionId) => {
       await invalidateAdminSubscriptionsQueries(queryClient, subscriptionId);
-      toast.success("Subscription cancelled");
+      toast.success(t("subscriptions.toast.cancelled"));
     },
     onError: (error) => {
       toast.error(
-        error instanceof Error ? error.message : "Failed to cancel subscription",
+        error instanceof Error
+          ? error.message
+          : t("subscriptions.errors.cancelFailed"),
       );
     },
   });
@@ -326,31 +277,86 @@ const SubscriptionsPage = () => {
     resumeMutation.variables,
   ]);
 
-  const handleSubscriptionAction = async (
-    subscription: SubscriptionAdminListItem,
-    action: SubscriptionActionType,
-  ) => {
-    const confirmed = await prompt(getSubscriptionActionPromptConfig(action));
+  const columns = useMemo(() => {
+    const baseColumns = [
+      columnHelper.accessor("reference", {
+        header: t("subscriptions.columns.reference"),
+        cell: ({ getValue, row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {getValue()}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.id}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor((row) => row.product.product_title, {
+        id: "product_title",
+        header: t("common.fields.product"),
+        enableSorting: true,
+        sortLabel: t("common.fields.product"),
+        cell: ({ row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.product.product_title}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.product.variant_title}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("status", {
+        header: t("common.fields.status"),
+        enableSorting: true,
+        sortLabel: t("common.fields.status"),
+        cell: ({ getValue }) => (
+          <StatusBadge color={getStatusColor(getValue())} className="text-nowrap">
+            {t(SUBSCRIPTION_STATUS_KEYS[getValue()])}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("frequency.label", {
+        id: "frequency",
+        header: t("common.fields.frequency"),
+        cell: ({ getValue, row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {getValue()}
+            </Text>
+            {row.original.discount ? (
+              <Text size="small" leading="compact" className="text-ui-fg-subtle">
+                {row.original.discount.label}
+              </Text>
+            ) : null}
+          </div>
+        ),
+      }),
+      columnHelper.accessor("next_renewal_at", {
+        header: t("common.fields.nextRenewal"),
+        enableSorting: true,
+        sortLabel: t("common.fields.nextRenewal"),
+        cell: ({ getValue, row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {formatDateTime(
+                row.original.effective_next_renewal_at ?? getValue(),
+                t("common.empty.noValue"),
+              )}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.skip_next_cycle
+                ? t("subscriptions.columns.projectedAfterSkip")
+                : t("subscriptions.columns.scheduled")}
+            </Text>
+          </div>
+        ),
+      }),
+    ];
 
-    if (!confirmed) {
-      return;
-    }
-
-    switch (action) {
-      case "pause":
-        await pauseMutation.mutateAsync(subscription.id);
-        break;
-      case "resume":
-        await resumeMutation.mutateAsync(subscription.id);
-        break;
-      case "cancel":
-        await cancelMutation.mutateAsync(subscription.id);
-        break;
-    }
-  };
-
-  const columns = useMemo(
-    () => [
+    return [
       ...baseColumns,
       columnHelper.action({
         actions: ({ row }) => {
@@ -368,7 +374,9 @@ const SubscriptionsPage = () => {
             canPause
               ? [
                   {
-                    label: pendingAction === "pause" ? "Pausing..." : "Pause",
+                    label: pendingAction === "pause"
+                      ? t("subscriptions.actions.pausing")
+                      : t("subscriptions.actions.pause"),
                     icon: <Pause />,
                     onClick: () => {
                       void handleSubscriptionAction(subscription, "pause");
@@ -379,7 +387,9 @@ const SubscriptionsPage = () => {
             canResume
               ? [
                   {
-                    label: pendingAction === "resume" ? "Resuming..." : "Resume",
+                    label: pendingAction === "resume"
+                      ? t("subscriptions.actions.resuming")
+                      : t("subscriptions.actions.resume"),
                     icon: <TriangleRightMini />,
                     onClick: () => {
                       void handleSubscriptionAction(subscription, "resume");
@@ -390,8 +400,9 @@ const SubscriptionsPage = () => {
             canCancel
               ? [
                   {
-                    label:
-                      pendingAction === "cancel" ? "Cancelling..." : "Cancel",
+                    label: pendingAction === "cancel"
+                      ? t("subscriptions.actions.cancelling")
+                      : t("common.actions.cancel"),
                     icon: <Trash />,
                     onClick: () => {
                       void handleSubscriptionAction(subscription, "cancel");
@@ -420,9 +431,31 @@ const SubscriptionsPage = () => {
           );
         },
       }),
-    ],
-    [pendingActionBySubscriptionId],
-  );
+    ];
+  }, [pendingActionBySubscriptionId, t]);
+
+  const handleSubscriptionAction = async (
+    subscription: SubscriptionAdminListItem,
+    action: SubscriptionActionType,
+  ) => {
+    const confirmed = await prompt(getSubscriptionActionPromptConfig(action, t));
+
+    if (!confirmed) {
+      return;
+    }
+
+    switch (action) {
+      case "pause":
+        await pauseMutation.mutateAsync(subscription.id);
+        break;
+      case "resume":
+        await resumeMutation.mutateAsync(subscription.id);
+        break;
+      case "cancel":
+        await cancelMutation.mutateAsync(subscription.id);
+        break;
+    }
+  };
 
   const table = useDataTable({
     columns,
@@ -456,16 +489,16 @@ const SubscriptionsPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscriptions</Heading>
+          <Heading level="h1">{t("subscriptions.list.title")}</Heading>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Monitor subscription status, cadence, and upcoming renewals.
+            {t("subscriptions.list.description")}
           </Text>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
             {error instanceof Error
               ? error.message
-              : "Failed to load subscriptions."}
+              : t("subscriptions.list.loadError")}
           </Alert>
         </div>
       </Container>
@@ -476,9 +509,9 @@ const SubscriptionsPage = () => {
     <div className="flex flex-col gap-y-4">
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscriptions</Heading>
+          <Heading level="h1">{t("subscriptions.list.title")}</Heading>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Monitor subscription status, cadence, and upcoming renewals.
+            {t("subscriptions.list.description")}
           </Text>
         </div>
         <DataTable instance={table} className="min-h-0">
@@ -525,7 +558,7 @@ const SubscriptionsPage = () => {
               <DropdownMenu>
                 <DropdownMenu.Trigger asChild>
                   <Button size="small" variant="secondary" type="button">
-                    Add filter
+                    {t("common.filters.addFilter")}
                   </Button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content align="start">
@@ -694,13 +727,13 @@ const SubscriptionsPage = () => {
                     setFiltering({});
                   }}
                 >
-                  Clear all
+                  {t("common.filters.clearAll")}
                 </button>
               ) : null}
             </div>
             <div className="flex items-center gap-x-2 self-end md:self-auto">
               <div className="w-full md:w-auto">
-                <DataTable.Search placeholder="Search" />
+                <DataTable.Search placeholder={t("common.actions.search")} />
               </div>
               <DataTable.SortingMenu />
             </div>
@@ -776,13 +809,13 @@ const SubscriptionsPage = () => {
             <div className="flex min-h-[250px] w-full flex-col items-center justify-center border-y px-6 py-4 text-center">
               <Text size="base" weight="plus">
                 {hasActiveFilters || search
-                  ? "No matching subscriptions"
-                  : "No subscriptions yet"}
+                  ? t("subscriptions.list.emptyFiltered")
+                  : t("subscriptions.list.empty")}
               </Text>
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
                 {hasActiveFilters || search
-                  ? "Try changing the search term or active filters."
-                  : "Subscriptions will appear here once customers start recurring orders."}
+                  ? t("subscriptions.list.emptyFilteredHint")
+                  : t("subscriptions.list.emptyHint")}
               </Text>
             </div>
           )}
@@ -806,22 +839,16 @@ function getStatusColor(status: SubscriptionAdminStatus) {
   }
 }
 
-function formatStatus(status: SubscriptionAdminStatus) {
-  switch (status) {
-    case SubscriptionAdminStatus.ACTIVE:
-      return "Active";
-    case SubscriptionAdminStatus.PAUSED:
-      return "Paused";
-    case SubscriptionAdminStatus.CANCELLED:
-      return "Cancelled";
-    case SubscriptionAdminStatus.PAST_DUE:
-      return "Past due";
-  }
-}
+const SUBSCRIPTION_STATUS_KEYS = {
+  [SubscriptionAdminStatus.ACTIVE]: "subscriptions.status.active",
+  [SubscriptionAdminStatus.PAUSED]: "subscriptions.status.paused",
+  [SubscriptionAdminStatus.CANCELLED]: "subscriptions.status.cancelled",
+  [SubscriptionAdminStatus.PAST_DUE]: "subscriptions.status.pastDue",
+} as const;
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, emptyValue: string) {
   if (!value) {
-    return "-";
+    return emptyValue;
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -831,12 +858,13 @@ function formatDateTime(value: string | null) {
 }
 
 export const config = defineRouteConfig({
-  label: "Subscriptions",
+  label: "menuItems.subscriptions",
+  translationNs: "reorder",
   icon: Calendar,
 });
 
 export const handle = {
-  breadcrumb: () => "Subscriptions",
+  breadcrumb: () => translate("menuItems.subscriptions"),
 };
 
 export default SubscriptionsPage;
@@ -850,11 +878,13 @@ const FilterChip = ({
   value: string;
   onRemove: () => void;
 }) => {
+  const { t } = useTranslation("reorder");
+
   return (
     <div className="shadow-buttons-neutral txt-compact-small-plus bg-ui-button-neutral text-ui-fg-base inline-flex items-center overflow-hidden rounded-md">
       <span className="border-ui-border-base border-r px-3 py-1.5">{label}</span>
       <span className="border-ui-border-base border-r px-3 py-1.5 text-ui-fg-subtle">
-        is
+        {t("common.filters.is")}
       </span>
       <span className="border-ui-border-base border-r px-3 py-1.5">{value}</span>
       <button
@@ -868,33 +898,33 @@ const FilterChip = ({
   );
 };
 
-function getSubscriptionActionPromptConfig(action: SubscriptionActionType) {
+function getSubscriptionActionPromptConfig(
+  action: SubscriptionActionType,
+  t: ReorderTranslate,
+) {
   switch (action) {
     case "pause":
       return {
-        title: "Pause subscription?",
-        description:
-          "You are about to pause this subscription. Do you want to continue?",
-        confirmText: "Pause",
-        cancelText: "Cancel",
+        title: t("subscriptions.prompt.pauseTitle"),
+        description: t("subscriptions.prompt.pauseDescription"),
+        confirmText: t("subscriptions.actions.pause"),
+        cancelText: t("common.actions.cancel"),
         variant: "confirmation" as const,
       };
     case "resume":
       return {
-        title: "Resume subscription?",
-        description:
-          "You are about to resume this subscription. Do you want to continue?",
-        confirmText: "Resume",
-        cancelText: "Cancel",
+        title: t("subscriptions.prompt.resumeTitle"),
+        description: t("subscriptions.prompt.resumeDescription"),
+        confirmText: t("subscriptions.actions.resume"),
+        cancelText: t("common.actions.cancel"),
         variant: "confirmation" as const,
       };
     case "cancel":
       return {
-        title: "Cancel subscription?",
-        description:
-          "You are about to cancel this subscription. This action cannot be undone.",
-        confirmText: "Cancel subscription",
-        cancelText: "Keep subscription",
+        title: t("subscriptions.prompt.cancelTitle"),
+        description: t("subscriptions.prompt.cancelDescription"),
+        confirmText: t("subscriptions.actions.cancelSubscription"),
+        cancelText: t("subscriptions.actions.keepSubscription"),
         variant: "danger" as const,
       };
   }
