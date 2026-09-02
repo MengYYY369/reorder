@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate } from "../../../../i18n/translate"
 import {
   Alert,
   Button,
@@ -900,7 +901,7 @@ export default DunningDetailPage
 
 export const handle = {
   breadcrumb: ({ params, data }: UIMatch<DunningCaseAdminDetailResponse>) =>
-    params?.id || data?.dunning_case?.id || "Dunning",
+    params?.id || data?.dunning_case?.id || translate("dunning.breadcrumb"),
 }
 
 const DetailRow = ({

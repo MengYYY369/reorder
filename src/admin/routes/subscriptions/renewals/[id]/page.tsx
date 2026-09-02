@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate } from "../../../../i18n/translate";
 import {
   Alert,
   Button,
@@ -694,7 +695,7 @@ export default RenewalDetailPage;
 
 export const handle = {
   breadcrumb: ({ params, data }: UIMatch<RenewalCycleAdminDetailResponse>) =>
-    params?.id || data?.renewal?.id || "Renewal",
+    params?.id || data?.renewal?.id || translate("renewals.breadcrumb"),
 };
 
 const DetailRow = ({

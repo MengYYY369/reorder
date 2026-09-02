@@ -1,3 +1,4 @@
+import { translate } from "../../../i18n/translate";
 import {
   Alert,
   Container,
@@ -2250,7 +2251,7 @@ function formatUnknown(value: unknown) {
 
 export const handle = {
   breadcrumb: ({ data }: UIMatch<SubscriptionAdminDetailResponse>) =>
-    data?.subscription?.reference || "Subscription",
+    data?.subscription?.reference || translate("subscriptions.breadcrumb"),
 };
 
 export async function loader({ params }: LoaderFunctionArgs) {

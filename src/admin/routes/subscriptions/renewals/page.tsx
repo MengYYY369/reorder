@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate } from "../../../i18n/translate";
 import { XMarkMini } from "@medusajs/icons";
 import {
   Alert,
@@ -546,12 +547,13 @@ const RenewalsPage = () => {
 };
 
 export const config = defineRouteConfig({
-  label: "Renewals",
+  label: "menuItems.renewals",
+  translationNs: "reorder",
   rank: 2,
 });
 
 export const handle = {
-  breadcrumb: () => "Renewals",
+  breadcrumb: () => translate("menuItems.renewals"),
 };
 
 export default RenewalsPage;

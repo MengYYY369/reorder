@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate } from "../../i18n/translate";
 import {
   Calendar,
   Pause,
@@ -831,12 +832,13 @@ function formatDateTime(value: string | null) {
 }
 
 export const config = defineRouteConfig({
-  label: "Subscriptions",
+  label: "menuItems.subscriptions",
+  translationNs: "reorder",
   icon: Calendar,
 });
 
 export const handle = {
-  breadcrumb: () => "Subscriptions",
+  breadcrumb: () => translate("menuItems.subscriptions"),
 };
 
 export default SubscriptionsPage;

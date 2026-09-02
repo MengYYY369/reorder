@@ -11,6 +11,7 @@ import {
   useDataTable,
 } from "@medusajs/ui"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import {
   useAdminProductsSelectionQuery,
   useAdminProductVariantsSelectionQuery,
@@ -38,6 +39,7 @@ export const PlanOfferProductPickerModal = ({
   selectedProductId,
   onSelect,
 }: ProductPickerModalProps) => {
+  const { t } = useTranslation("reorder")
   const [search, setSearch] = useState("")
   const [pagination, setPagination] = useState<DataTablePaginationState>({
     pageIndex: 0,
@@ -69,10 +71,10 @@ export const PlanOfferProductPickerModal = ({
     columns: [
       columnHelper.select(),
       columnHelper.accessor("title", {
-        header: "Product",
+        header: t("common.fields.product"),
       }),
       columnHelper.accessor("id", {
-        header: "ID",
+        header: t("common.fields.id"),
         cell: ({ getValue }) => (
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
             {getValue()}
@@ -113,20 +115,19 @@ export const PlanOfferProductPickerModal = ({
             <div className="w-full max-w-4xl">
               <div className="flex flex-col gap-y-4">
                 <div className="flex flex-col gap-y-1">
-                  <Heading level="h2">Select product</Heading>
+                  <Heading level="h2">{t("planOffers.pickers.selectProduct")}</Heading>
                   <Text
                     size="small"
                     leading="compact"
                     className="text-ui-fg-subtle"
                   >
-                    Search and select the product that this configuration belongs
-                    to.
+                    {t("planOffers.pickers.selectProductHint")}
                   </Text>
                 </div>
                 <DataTable instance={table}>
                   <div className="flex items-center justify-end px-6 py-4">
                     <div className="w-full md:w-auto">
-                      <DataTable.Search placeholder="Search products..." />
+                      <DataTable.Search placeholder={t("common.placeholders.searchProducts")} />
                     </div>
                   </div>
                   <DataTable.Table />
@@ -139,7 +140,7 @@ export const PlanOfferProductPickerModal = ({
             <div className="flex items-center justify-end gap-x-2">
               <FocusModal.Close asChild>
                 <Button size="small" variant="secondary">
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </FocusModal.Close>
               <Button
@@ -154,7 +155,7 @@ export const PlanOfferProductPickerModal = ({
                   onOpenChange(false)
                 }}
               >
-                Apply
+                {t("common.actions.apply")}
               </Button>
             </div>
           </FocusModal.Footer>
@@ -172,6 +173,7 @@ export const PlanOfferVariantPickerModal = ({
   selectedVariantId,
   onSelect,
 }: VariantPickerModalProps) => {
+  const { t } = useTranslation("reorder")
   const [rowSelection, setRowSelection] = useState<DataTableRowSelectionState>(
     selectedVariantId ? { [selectedVariantId]: true } : {}
   )
@@ -198,14 +200,14 @@ export const PlanOfferVariantPickerModal = ({
     columns: [
       columnHelper.select(),
       columnHelper.accessor("title", {
-        header: "Variant",
+        header: t("common.fields.variant"),
         cell: ({ row }) => (
           <div className="flex flex-col">
             <Text size="small" leading="compact" weight="plus">
               {row.original.title}
             </Text>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              {row.original.sku || "-"}
+              {row.original.sku || t("common.empty.noValue")}
             </Text>
           </div>
         ),
@@ -236,15 +238,15 @@ export const PlanOfferVariantPickerModal = ({
             <div className="w-full max-w-3xl">
               <div className="flex flex-col gap-y-4">
                 <div className="flex flex-col gap-y-1">
-                  <Heading level="h2">Select variant</Heading>
+                  <Heading level="h2">{t("planOffers.pickers.selectVariant")}</Heading>
                   <Text
                     size="small"
                     leading="compact"
                     className="text-ui-fg-subtle"
                   >
                     {productTitle
-                      ? `Choose a variant from ${productTitle}.`
-                      : "Select a product first."}
+                      ? t("planOffers.pickers.selectVariantHint", { productTitle })
+                      : t("planOffers.pickers.selectProductFirst")}
                   </Text>
                 </div>
                 <DataTable instance={table}>
@@ -257,7 +259,7 @@ export const PlanOfferVariantPickerModal = ({
             <div className="flex items-center justify-end gap-x-2">
               <FocusModal.Close asChild>
                 <Button size="small" variant="secondary">
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </FocusModal.Close>
               <Button
@@ -272,7 +274,7 @@ export const PlanOfferVariantPickerModal = ({
                   onOpenChange(false)
                 }}
               >
-                Apply
+                {t("common.actions.apply")}
               </Button>
             </div>
           </FocusModal.Footer>

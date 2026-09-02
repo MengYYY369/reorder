@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate } from "../../../i18n/translate"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -495,12 +496,13 @@ const AnalyticsPage = () => {
 }
 
 export const config = defineRouteConfig({
-  label: "Analytics",
+  label: "menuItems.analytics",
+  translationNs: "reorder",
   rank: 5,
 })
 
 export const handle = {
-  breadcrumb: () => "Analytics",
+  breadcrumb: () => translate("menuItems.analytics"),
 }
 
 export default AnalyticsPage

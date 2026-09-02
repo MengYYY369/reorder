@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate } from "../../../i18n/translate"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -581,12 +582,13 @@ const DunningPage = () => {
 }
 
 export const config = defineRouteConfig({
-  label: "Dunning",
+  label: "menuItems.dunning",
+  translationNs: "reorder",
   rank: 3,
 })
 
 export const handle = {
-  breadcrumb: () => "Dunning",
+  breadcrumb: () => translate("menuItems.dunning"),
 }
 
 export default DunningPage

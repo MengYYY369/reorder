@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate } from "../../../i18n/translate"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -777,11 +778,12 @@ const JsonBlock = ({
 }
 
 export const config = defineRouteConfig({
-  label: "Activity Log",
+  label: "menuItems.activityLog",
+  translationNs: "reorder",
 })
 
 export const handle = {
-  breadcrumb: () => "Activity Log",
+  breadcrumb: () => translate("menuItems.activityLog"),
 }
 
 export default ActivityLogPage

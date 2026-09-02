@@ -1,0 +1,84 @@
+{
+  "menuItems": {
+    "subscriptions": "Subscriptions",
+    "planOffers": "Plans & Offers",
+    "renewals": "Renewals",
+    "dunning": "Dunning",
+    "cancellations": "Cancellation & Retention",
+    "analytics": "Analytics",
+    "activityLog": "Activity Log",
+    "settings": "Subscription Settings"
+  },
+  "common": {
+    "actions": {
+      "cancel": "Cancel",
+      "apply": "Apply",
+      "save": "Save",
+      "search": "Search"
+    },
+    "fields": {
+      "id": "ID",
+      "product": "Product",
+      "variant": "Variant",
+      "status": "Status",
+      "frequency": "Frequency",
+      "discount": "Discount",
+      "nextRenewal": "Next renewal",
+      "subscription": "Subscription",
+      "reference": "Reference",
+      "customer": "Customer",
+      "order": "Order",
+      "sku": "SKU",
+      "reason": "Reason",
+      "email": "Email",
+      "createdAt": "Created"
+    },
+    "filters": {
+      "yes": "Yes",
+      "no": "No",
+      "is": "is",
+      "clearAll": "Clear all",
+      "clearAllFilters": "Clear all filters"
+    },
+    "placeholders": {
+      "searchProducts": "Search products..."
+    },
+    "empty": {
+      "noValue": "-"
+    },
+    "intervals": {
+      "week": "Weekly",
+      "month": "Monthly",
+      "year": "Yearly"
+    }
+  },
+  "planOffers": {
+    "pickers": {
+      "selectProduct": "Select product",
+      "selectProductHint": "Search and select the product that this configuration belongs to.",
+      "selectVariant": "Select variant",
+      "selectVariantHint": "Choose a variant from {{productTitle}}.",
+      "selectProductFirst": "Select a product first."
+    }
+  },
+  "subscriptions": {
+    "breadcrumb": "Subscription",
+    "status": {
+      "active": "Active",
+      "paused": "Paused",
+      "cancelled": "Cancelled",
+      "pastDue": "Past due"
+    },
+    "orderWidget": {
+      "title": "Subscription",
+      "badge": "Subscription order",
+      "loading": "Loading subscription summary...",
+      "loadError": "Failed to load subscription summary",
+      "oneTimeOrder": "One-time order",
+      "noDiscount": "No discount"
+    }
+  },
+  "renewals": { "breadcrumb": "Renewal" },
+  "dunning": { "breadcrumb": "Dunning" },
+  "cancellations": { "breadcrumb": "Cancellation" }
+}

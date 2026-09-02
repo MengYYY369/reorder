@@ -649,7 +649,8 @@ const FieldError = ({ message }: { message?: string }) => {
 }
 
 export const config = defineRouteConfig({
-  label: "Subscription Settings",
+  label: "menuItems.settings",
+  translationNs: "reorder",
 })
 
 export default SubscriptionSettingsPage

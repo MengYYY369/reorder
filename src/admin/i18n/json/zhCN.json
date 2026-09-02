@@ -1,0 +1,82 @@
+{
+  "menuItems": {
+    "subscriptions": "订阅",
+    "planOffers": "计划与优惠",
+    "renewals": "续订",
+    "dunning": "催收",
+    "cancellations": "取消与挽留",
+    "analytics": "数据分析",
+    "activityLog": "操作日志",
+    "settings": "订阅设置"
+  },
+  "common": {
+    "actions": {
+      "cancel": "取消",
+      "apply": "应用",
+      "save": "保存",
+      "search": "搜索"
+    },
+    "fields": {
+      "id": "ID",
+      "product": "商品",
+      "variant": "变体",
+      "status": "状态",
+      "frequency": "频率",
+      "discount": "折扣",
+      "nextRenewal": "下次续订",
+      "subscription": "订阅",
+      "reference": "订阅编号",
+      "customer": "客户",
+      "order": "订单",
+      "sku": "SKU",
+      "reason": "原因",
+      "email": "邮箱",
+      "createdAt": "创建时间"
+    },
+    "filters": {
+      "yes": "是",
+      "no": "否",
+      "is": "：",
+      "clearAll": "全部清除",
+      "clearAllFilters": "清除所有筛选"
+    },
+    "placeholders": {
+      "searchProducts": "搜索商品……"
+    },
+    "empty": { "noValue": "-" },
+    "intervals": {
+      "week": "每周",
+      "month": "每月",
+      "year": "每年"
+    }
+  },
+  "planOffers": {
+    "pickers": {
+      "selectProduct": "选择商品",
+      "selectProductHint": "搜索并选择此配置所属的商品。",
+      "selectVariant": "选择变体",
+      "selectVariantHint": "从 {{productTitle}} 中选择一个变体。",
+      "selectProductFirst": "请先选择商品。"
+    }
+  },
+  "subscriptions": {
+    "breadcrumb": "订阅",
+    "status": {
+      "active": "生效中",
+      "paused": "已暂停",
+      "cancelled": "已取消",
+      "pastDue": "已逾期"
+    },
+    "orderWidget": {
+      "title": "订阅",
+      "badge": "订阅订单",
+      "loading": "正在加载订阅摘要……",
+      "loadError": "加载订阅摘要失败",
+      "oneTimeOrder": "一次性订单",
+      "noDiscount": "无折扣"
+    }
+  },
+  "renewals": { "breadcrumb": "续订" },
+  "dunning": { "breadcrumb": "催收" },
+  "cancellations": { "breadcrumb": "取消" }
+}

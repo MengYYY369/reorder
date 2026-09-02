@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk";
+import { translate } from "../../../i18n/translate";
 import {
   CheckCircle,
   Pause,
@@ -847,12 +848,13 @@ const PlansOffersPage = () => {
 };
 
 export const config = defineRouteConfig({
-  label: "Plans & Offers",
+  label: "menuItems.planOffers",
+  translationNs: "reorder",
   rank: 1,
 });
 
 export const handle = {
-  breadcrumb: () => "Plans & Offers",
+  breadcrumb: () => translate("menuItems.planOffers"),
 };
 
 export default PlansOffersPage;

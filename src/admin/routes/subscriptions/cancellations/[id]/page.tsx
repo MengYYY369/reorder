@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate } from "../../../../i18n/translate"
 import {
   Alert,
   Button,
@@ -1388,7 +1389,7 @@ export default CancellationDetailPage
 
 export const handle = {
   breadcrumb: ({ params, data }: UIMatch<CancellationCaseAdminDetailResponse>) =>
-    params?.id || data?.cancellation?.id || "Cancellation",
+    params?.id || data?.cancellation?.id || translate("cancellations.breadcrumb"),
 }
 
 const DetailRow = ({

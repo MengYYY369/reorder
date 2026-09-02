@@ -1,4 +1,5 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { translate } from "../../../i18n/translate"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -521,12 +522,13 @@ const CancellationsPage = () => {
 }
 
 export const config = defineRouteConfig({
-  label: "Cancellation & Retention",
+  label: "menuItems.cancellations",
+  translationNs: "reorder",
   rank: 4,
 })
 
 export const handle = {
-  breadcrumb: () => "Cancellation & Retention",
+  breadcrumb: () => translate("menuItems.cancellations"),
 }
 
 export default CancellationsPage
