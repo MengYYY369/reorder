@@ -14,7 +14,8 @@
       "cancel": "取消",
       "apply": "应用",
       "save": "保存",
-      "search": "搜索"
+      "search": "搜索",
+      "close": "关闭"
     },
     "fields": {
       "id": "ID",
@@ -38,7 +39,9 @@
       "no": "否",
       "is": "：",
       "clearAll": "全部清除",
-      "clearAllFilters": "清除所有筛选"
+      "clearAllFilters": "清除所有筛选",
+      "addFilter": "添加筛选",
+      "removeFilter": "移除{{label}}筛选"
     },
     "placeholders": {
       "searchProducts": "搜索商品……"
@@ -74,6 +77,172 @@
       "loadError": "加载订阅摘要失败",
       "oneTimeOrder": "一次性订单",
       "noDiscount": "无折扣"
+    },
+    "list": {
+      "title": "订阅",
+      "description": "监控订阅状态、周期与即将进行的续订。",
+      "loadError": "加载订阅失败。",
+      "emptyFiltered": "没有匹配的订阅",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无订阅",
+      "emptyHint": "当客户开始定期下单后，订阅将显示在这里。"
+    },
+    "columns": {
+      "reference": "订阅编号",
+      "projectedAfterSkip": "跳过周期后预计续订",
+      "scheduled": "已排期"
+    },
+    "filters": {
+      "trial": "试用",
+      "skipNextCycle": "跳过下一周期",
+      "overdue": "已逾期",
+      "next7Days": "未来 7 天",
+      "next30Days": "未来 30 天",
+      "next90Days": "未来 90 天"
+    },
+    "actions": {
+      "pause": "暂停",
+      "pausing": "暂停中……",
+      "resume": "恢复",
+      "resuming": "恢复中……",
+      "cancelling": "取消中……",
+      "cancelSubscription": "取消订阅",
+      "keepSubscription": "保留订阅"
+    },
+    "prompt": {
+      "pauseTitle": "暂停订阅？",
+      "pauseDescription": "您即将暂停此订阅。是否继续？",
+      "resumeTitle": "恢复订阅？",
+      "resumeDescription": "您即将恢复此订阅。是否继续？",
+      "cancelTitle": "取消订阅？",
+      "cancelDescription": "您即将取消此订阅。此操作无法撤销。"
+    },
+    "toast": {
+      "paused": "订阅已暂停",
+      "resumed": "订阅已恢复",
+      "cancelled": "订阅已取消"
+    },
+    "errors": {
+      "pauseFailed": "暂停订阅失败",
+      "resumeFailed": "恢复订阅失败",
+      "cancelFailed": "取消订阅失败",
+      "planChange": "计划变更已排期",
+      "planChangeFailed": "安排计划变更失败",
+      "addressUpdated": "收货地址已更新",
+      "addressFailed": "更新收货地址失败"
+    },
+    "detail": {
+      "title": "订阅",
+      "description": "订阅详情与即将进行的计划变更。",
+      "loading": "正在加载订阅详情……",
+      "loadError": "加载订阅详情失败。",
+      "unavailable": "订阅详情不可用。",
+      "editShippingAddress": "编辑收货地址",
+      "noPendingChange": "此订阅没有待安排的计划变更。",
+      "noLinkedOrders": "暂无关联订单",
+      "latestRenewal": "最近一次续订",
+      "initialOrder": "初始订单",
+      "renewalNumbered": "第 {{index}} 次续订",
+      "sections": {
+        "overview": "概览",
+        "subscription": "订阅",
+        "shippingAddress": "收货地址",
+        "customer": "客户",
+        "product": "商品",
+        "orders": "订单",
+        "pendingPlanChange": "待处理计划变更",
+        "activityLog": "操作日志",
+        "subscriptionSnapshot": "订阅快照",
+        "changedFields": "变更字段",
+        "previousState": "变更前状态",
+        "newState": "变更后状态",
+        "metadata": "元数据"
+      },
+      "errors": {
+        "addressRequired": "请填写所有必填地址字段",
+        "postalCodeInvalid": "请输入有效的邮政编码和两位字母国家代码"
+      },
+      "fields": {
+        "startedAt": "开始时间",
+        "lastRenewal": "上次续订",
+        "effectiveAt": "生效时间",
+        "variantId": "变体 ID",
+        "customerId": "客户 ID",
+        "event": "事件",
+        "actor": "操作者",
+        "created": "创建时间",
+        "createdFrom": "创建时间从",
+        "createdTo": "创建时间到",
+        "summary": "摘要",
+        "domain": "领域",
+        "recipient": "收件人",
+        "address": "地址",
+        "addressLine1": "地址第 1 行",
+        "addressLine2": "地址第 2 行",
+        "city": "城市",
+        "postalCode": "邮政编码",
+        "province": "省 / 州",
+        "countryCode": "国家代码",
+        "country": "国家",
+        "phone": "电话",
+        "company": "公司",
+        "firstName": "名",
+        "lastName": "姓"
+      }
+    },
+    "addressHints": {
+      "effectiveAtOptional": "留空则由后端使用默认生效日期。",
+      "countryCodeIso": "请使用两位字母的 ISO 国家代码，例如 PL 或 US。"
+    },
+    "planChange": {
+      "title": "安排计划变更",
+      "frequencyInterval": "周期单位",
+      "frequencyValue": "频率值",
+      "selectVariant": "选择变体",
+      "selectInterval": "选择周期",
+      "loadingVariants": "正在加载变体……",
+      "variantLoadError": "加载商品变体失败。",
+      "noVariants": "此商品没有可用变体。",
+      "errors": {
+        "variantRequired": "请选择变体",
+        "frequencyValueInvalid": "频率值必须是正整数"
+      }
+    },
+    "timeline": {
+      "loading": "正在加载操作日志……",
+      "loadError": "加载操作日志失败。",
+      "empty": "未找到操作日志事件。",
+      "eventTitle": "操作日志事件",
+      "eventLoading": "正在加载日志事件……",
+      "eventLoadError": "加载日志事件详情失败。",
+      "noSummary": "无摘要",
+      "noChangedFields": "未捕获变更字段",
+      "noData": "无数据",
+      "actors": {
+        "admin": "管理员",
+        "customer": "客户",
+        "system": "系统",
+        "scheduler": "计划任务"
+      },
+      "domains": {
+        "subscriptions": "订阅",
+        "renewals": "续订",
+        "dunning": "催收",
+        "cancellations": "取消"
+      },
+      "summaryFields": {
+        "subscriptionCreated": "订阅已创建",
+        "pendingUpdateData": "已安排计划变更",
+        "status": "状态已变更",
+        "recipient": "收件人已更新",
+        "address": "地址",
+        "addressLinesChanged": "地址已更新",
+        "postalCodeChanged": "邮政编码已更新",
+        "phoneChanged": "电话已更新",
+        "countryCode": "国家已更新",
+        "province": "省份已更新",
+        "city": "城市已更新"
+      }
     }
   },
   "renewals": { "breadcrumb": "续订" },

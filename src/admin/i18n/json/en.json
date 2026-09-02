@@ -14,7 +14,8 @@
       "cancel": "Cancel",
       "apply": "Apply",
       "save": "Save",
-      "search": "Search"
+      "search": "Search",
+      "close": "Close"
     },
     "fields": {
       "id": "ID",
@@ -38,7 +39,9 @@
       "no": "No",
       "is": "is",
       "clearAll": "Clear all",
-      "clearAllFilters": "Clear all filters"
+      "clearAllFilters": "Clear all filters",
+      "addFilter": "Add filter",
+      "removeFilter": "Remove {{label}} filter"
     },
     "placeholders": {
       "searchProducts": "Search products..."
@@ -76,6 +79,172 @@
       "loadError": "Failed to load subscription summary",
       "oneTimeOrder": "One-time order",
       "noDiscount": "No discount"
+    },
+    "list": {
+      "title": "Subscriptions",
+      "description": "Monitor subscription status, cadence, and upcoming renewals.",
+      "loadError": "Failed to load subscriptions.",
+      "emptyFiltered": "No matching subscriptions",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No subscriptions yet",
+      "emptyHint": "Subscriptions will appear here once customers start recurring orders."
+    },
+    "columns": {
+      "reference": "Reference",
+      "projectedAfterSkip": "Projected after skipped cycle",
+      "scheduled": "Scheduled"
+    },
+    "filters": {
+      "trial": "Trial",
+      "skipNextCycle": "Skip next cycle",
+      "overdue": "Overdue",
+      "next7Days": "Next 7 days",
+      "next30Days": "Next 30 days",
+      "next90Days": "Next 90 days"
+    },
+    "actions": {
+      "pause": "Pause",
+      "pausing": "Pausing...",
+      "resume": "Resume",
+      "resuming": "Resuming...",
+      "cancelling": "Cancelling...",
+      "cancelSubscription": "Cancel subscription",
+      "keepSubscription": "Keep subscription"
+    },
+    "prompt": {
+      "pauseTitle": "Pause subscription?",
+      "pauseDescription": "You are about to pause this subscription. Do you want to continue?",
+      "resumeTitle": "Resume subscription?",
+      "resumeDescription": "You are about to resume this subscription. Do you want to continue?",
+      "cancelTitle": "Cancel subscription?",
+      "cancelDescription": "You are about to cancel this subscription. This action cannot be undone."
+    },
+    "toast": {
+      "paused": "Subscription paused",
+      "resumed": "Subscription resumed",
+      "cancelled": "Subscription cancelled"
+    },
+    "errors": {
+      "pauseFailed": "Failed to pause subscription",
+      "resumeFailed": "Failed to resume subscription",
+      "cancelFailed": "Failed to cancel subscription",
+      "planChange": "Plan change scheduled",
+      "planChangeFailed": "Failed to schedule plan change",
+      "addressUpdated": "Shipping address updated",
+      "addressFailed": "Failed to update shipping address"
+    },
+    "detail": {
+      "title": "Subscription",
+      "description": "Subscription details and upcoming plan changes.",
+      "loading": "Loading subscription details...",
+      "loadError": "Failed to load subscription details.",
+      "unavailable": "Subscription details are unavailable.",
+      "editShippingAddress": "Edit shipping address",
+      "noPendingChange": "No pending plan change is scheduled for this subscription.",
+      "noLinkedOrders": "No linked orders yet",
+      "latestRenewal": "Latest renewal",
+      "initialOrder": "Initial order",
+      "renewalNumbered": "Renewal {{index}}",
+      "sections": {
+        "overview": "Overview",
+        "subscription": "Subscription",
+        "shippingAddress": "Shipping address",
+        "customer": "Customer",
+        "product": "Product",
+        "orders": "Orders",
+        "pendingPlanChange": "Pending plan change",
+        "activityLog": "Activity Log",
+        "subscriptionSnapshot": "Subscription snapshot",
+        "changedFields": "Changed fields",
+        "previousState": "Previous state",
+        "newState": "New state",
+        "metadata": "Metadata"
+      },
+      "errors": {
+        "addressRequired": "Fill in all required address fields",
+        "postalCodeInvalid": "Enter a valid postal code and 2-letter country code"
+      },
+      "fields": {
+        "startedAt": "Started at",
+        "lastRenewal": "Last renewal",
+        "effectiveAt": "Effective at",
+        "variantId": "Variant ID",
+        "customerId": "Customer ID",
+        "event": "Event",
+        "actor": "Actor",
+        "created": "Created",
+        "createdFrom": "Created from",
+        "createdTo": "Created to",
+        "summary": "Summary",
+        "domain": "Domain",
+        "recipient": "Recipient",
+        "address": "Address",
+        "addressLine1": "Address line 1",
+        "addressLine2": "Address line 2",
+        "city": "City",
+        "postalCode": "Postal code",
+        "province": "Province / State",
+        "countryCode": "Country code",
+        "country": "Country",
+        "phone": "Phone",
+        "company": "Company",
+        "firstName": "First name",
+        "lastName": "Last name"
+      }
+    },
+    "addressHints": {
+      "effectiveAtOptional": "Leave empty to let the backend use the default effective date.",
+      "countryCodeIso": "Use the two-letter ISO country code, for example PL or US."
+    },
+    "planChange": {
+      "title": "Schedule plan change",
+      "frequencyInterval": "Frequency interval",
+      "frequencyValue": "Frequency value",
+      "selectVariant": "Select a variant",
+      "selectInterval": "Select interval",
+      "loadingVariants": "Loading variants...",
+      "variantLoadError": "Failed to load product variants.",
+      "noVariants": "No variants are available for this product.",
+      "errors": {
+        "variantRequired": "Select a variant",
+        "frequencyValueInvalid": "Frequency value must be a positive integer"
+      }
+    },
+    "timeline": {
+      "loading": "Loading activity log...",
+      "loadError": "Failed to load activity log.",
+      "empty": "No activity log events found.",
+      "eventTitle": "Activity Log Event",
+      "eventLoading": "Loading activity event...",
+      "eventLoadError": "Failed to load activity event details.",
+      "noSummary": "No summary",
+      "noChangedFields": "No changed fields captured",
+      "noData": "No data",
+      "actors": {
+        "admin": "Admin",
+        "customer": "Customer",
+        "system": "System",
+        "scheduler": "Scheduler"
+      },
+      "domains": {
+        "subscriptions": "Subscriptions",
+        "renewals": "Renewals",
+        "dunning": "Dunning",
+        "cancellations": "Cancellation"
+      },
+      "summaryFields": {
+        "subscriptionCreated": "Subscription created",
+        "pendingUpdateData": "Scheduled plan change",
+        "status": "Status changed",
+        "recipient": "Recipient updated",
+        "address": "Address",
+        "addressLinesChanged": "Address updated",
+        "postalCodeChanged": "Postal code updated",
+        "phoneChanged": "Phone updated",
+        "countryCode": "Country updated",
+        "province": "Province updated",
+        "city": "City updated"
+      }
     }
   },
   "renewals": { "breadcrumb": "Renewal" },

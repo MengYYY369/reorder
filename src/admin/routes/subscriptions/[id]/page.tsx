@@ -1,4 +1,5 @@
-import { translate } from "../../../i18n/translate";
+import { translate, type ReorderTranslate } from "../../../i18n/translate";
+import { useTranslation } from "react-i18next";
 import {
   Alert,
   Container,
@@ -71,70 +72,43 @@ const scheduleableStatuses = new Set<SubscriptionAdminStatus>([
   SubscriptionAdminStatus.PAST_DUE,
 ]);
 
-const intervalOptions = [
-  { label: "Weekly", value: SubscriptionFrequencyInterval.WEEK },
-  { label: "Monthly", value: SubscriptionFrequencyInterval.MONTH },
-  { label: "Yearly", value: SubscriptionFrequencyInterval.YEAR },
-] as const;
+const SUBSCRIPTION_STATUS_KEYS = {
+  [SubscriptionAdminStatus.ACTIVE]: "subscriptions.status.active",
+  [SubscriptionAdminStatus.PAUSED]: "subscriptions.status.paused",
+  [SubscriptionAdminStatus.CANCELLED]: "subscriptions.status.cancelled",
+  [SubscriptionAdminStatus.PAST_DUE]: "subscriptions.status.pastDue",
+} as const;
+
+const ACTIVITY_ACTOR_KEYS = {
+  [ActivityLogAdminActorType.USER]: "subscriptions.timeline.actors.admin",
+  [ActivityLogAdminActorType.CUSTOMER]: "subscriptions.timeline.actors.customer",
+  [ActivityLogAdminActorType.SYSTEM]: "subscriptions.timeline.actors.system",
+  [ActivityLogAdminActorType.SCHEDULER]: "subscriptions.timeline.actors.scheduler",
+} as const;
+
+const ACTIVITY_SUMMARY_FIELD_KEYS = {
+  subscription_created: "subscriptions.timeline.summaryFields.subscriptionCreated",
+  pending_update_data: "subscriptions.timeline.summaryFields.pendingUpdateData",
+  status: "subscriptions.timeline.summaryFields.status",
+  recipient: "subscriptions.timeline.summaryFields.recipient",
+  address: "subscriptions.timeline.summaryFields.address",
+  address_lines_changed: "subscriptions.timeline.summaryFields.addressLinesChanged",
+  postal_code_changed: "subscriptions.timeline.summaryFields.postalCodeChanged",
+  phone_changed: "subscriptions.timeline.summaryFields.phoneChanged",
+  country_code: "subscriptions.timeline.summaryFields.countryCode",
+  province: "subscriptions.timeline.summaryFields.province",
+  city: "subscriptions.timeline.summaryFields.city",
+} as const;
+
+const INTERVAL_KEYS = {
+  [SubscriptionFrequencyInterval.WEEK]: "common.intervals.week",
+  [SubscriptionFrequencyInterval.MONTH]: "common.intervals.month",
+  [SubscriptionFrequencyInterval.YEAR]: "common.intervals.year",
+} as const;
 
 const activityLogColumnHelper =
   createDataTableColumnHelper<ActivityLogAdminListItem>();
 
-const activityLogActorFilterOptions = [
-  { label: "Admin", value: ActivityLogAdminActorType.USER },
-  { label: "Customer", value: ActivityLogAdminActorType.CUSTOMER },
-  { label: "System", value: ActivityLogAdminActorType.SYSTEM },
-  { label: "Scheduler", value: ActivityLogAdminActorType.SCHEDULER },
-] as const;
-
-const activityLogDomainFilterOptions = [
-  {
-    label: "Subscriptions",
-    value: "subscriptions",
-    eventTypes: [
-      "subscription.created",
-      "subscription.paused",
-      "subscription.resumed",
-      "subscription.canceled",
-      "subscription.plan_change_scheduled",
-      "subscription.shipping_address_updated",
-      "subscription.next_delivery_skipped",
-    ],
-  },
-  {
-    label: "Renewals",
-    value: "renewals",
-    eventTypes: [
-      "renewal.cycle_created",
-      "renewal.approval_approved",
-      "renewal.approval_rejected",
-      "renewal.force_requested",
-      "renewal.succeeded",
-      "renewal.failed",
-    ],
-  },
-  {
-    label: "Dunning",
-    value: "dunning",
-    eventTypes: [
-      "dunning.started",
-      "dunning.retry_executed",
-      "dunning.recovered",
-      "dunning.unrecovered",
-      "dunning.retry_schedule_updated",
-    ],
-  },
-  {
-    label: "Cancellation",
-    value: "cancellation",
-    eventTypes: [
-      "cancellation.case_started",
-      "cancellation.offer_applied",
-      "cancellation.reason_updated",
-      "cancellation.finalized",
-    ],
-  },
-] as const;
 type SubscriptionActionType = "pause" | "resume" | "cancel";
 type ShippingAddressFormState = {
   first_name: string;
@@ -150,6 +124,7 @@ type ShippingAddressFormState = {
 };
 
 const SubscriptionDetailPage = () => {
+  const { t } = useTranslation("reorder");
   const { id } = useParams();
   const loaderData = useLoaderData() as Awaited<ReturnType<typeof loader>>;
   const queryClient = useQueryClient();
@@ -177,6 +152,83 @@ const SubscriptionDetailPage = () => {
   const [effectiveAt, setEffectiveAt] = useState("");
   const [shippingAddressForm, setShippingAddressForm] =
     useState<ShippingAddressFormState>(getEmptyShippingAddressFormState());
+
+  const intervalOptions = useMemo(() => {
+    return [
+      { label: t("common.intervals.week"), value: SubscriptionFrequencyInterval.WEEK },
+      { label: t("common.intervals.month"), value: SubscriptionFrequencyInterval.MONTH },
+      { label: t("common.intervals.year"), value: SubscriptionFrequencyInterval.YEAR },
+    ] as const;
+  }, [t]);
+
+  const activityLogActorFilterOptions = useMemo(() => {
+    return [
+      { label: t("subscriptions.timeline.actors.admin"), value: ActivityLogAdminActorType.USER },
+      {
+        label: t("subscriptions.timeline.actors.customer"),
+        value: ActivityLogAdminActorType.CUSTOMER,
+      },
+      {
+        label: t("subscriptions.timeline.actors.system"),
+        value: ActivityLogAdminActorType.SYSTEM,
+      },
+      {
+        label: t("subscriptions.timeline.actors.scheduler"),
+        value: ActivityLogAdminActorType.SCHEDULER,
+      },
+    ] as const;
+  }, [t]);
+
+  const activityLogDomainFilterOptions = useMemo(() => {
+    return [
+      {
+        label: t("subscriptions.timeline.domains.subscriptions"),
+        value: "subscriptions",
+        eventTypes: [
+          "subscription.created",
+          "subscription.paused",
+          "subscription.resumed",
+          "subscription.canceled",
+          "subscription.plan_change_scheduled",
+          "subscription.shipping_address_updated",
+          "subscription.next_delivery_skipped",
+        ],
+      },
+      {
+        label: t("subscriptions.timeline.domains.renewals"),
+        value: "renewals",
+        eventTypes: [
+          "renewal.cycle_created",
+          "renewal.approval_approved",
+          "renewal.approval_rejected",
+          "renewal.force_requested",
+          "renewal.succeeded",
+          "renewal.failed",
+        ],
+      },
+      {
+        label: t("subscriptions.timeline.domains.dunning"),
+        value: "dunning",
+        eventTypes: [
+          "dunning.started",
+          "dunning.retry_executed",
+          "dunning.recovered",
+          "dunning.unrecovered",
+          "dunning.retry_schedule_updated",
+        ],
+      },
+      {
+        label: t("subscriptions.timeline.domains.cancellations"),
+        value: "cancellation",
+        eventTypes: [
+          "cancellation.case_started",
+          "cancellation.offer_applied",
+          "cancellation.reason_updated",
+          "cancellation.finalized",
+        ],
+      },
+    ] as const;
+  }, [t]);
 
   const { data, isLoading, isError, error } = useAdminSubscriptionDetailQuery(
     id,
@@ -239,14 +291,14 @@ const SubscriptionDetailPage = () => {
       ),
     onSuccess: async () => {
       await invalidateSubscriptionDetailQueries(queryClient, id, selectedLogId ?? undefined);
-      toast.success("Plan change scheduled");
+      toast.success(t("subscriptions.errors.planChange"));
       setPlanDrawerOpen(false);
     },
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error
           ? mutationError.message
-          : "Failed to schedule plan change",
+          : t("subscriptions.errors.planChangeFailed"),
       );
     },
   });
@@ -262,13 +314,13 @@ const SubscriptionDetailPage = () => {
       ),
     onSuccess: async () => {
       await invalidateSubscriptionDetailQueries(queryClient, id, selectedLogId ?? undefined);
-      toast.success("Subscription paused");
+      toast.success(t("subscriptions.toast.paused"));
     },
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error
           ? mutationError.message
-          : "Failed to pause subscription",
+          : t("subscriptions.errors.pauseFailed"),
       );
     },
   });
@@ -284,13 +336,13 @@ const SubscriptionDetailPage = () => {
       ),
     onSuccess: async () => {
       await invalidateSubscriptionDetailQueries(queryClient, id, selectedLogId ?? undefined);
-      toast.success("Subscription resumed");
+      toast.success(t("subscriptions.toast.resumed"));
     },
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error
           ? mutationError.message
-          : "Failed to resume subscription",
+          : t("subscriptions.errors.resumeFailed"),
       );
     },
   });
@@ -306,13 +358,13 @@ const SubscriptionDetailPage = () => {
       ),
     onSuccess: async () => {
       await invalidateSubscriptionDetailQueries(queryClient, id, selectedLogId ?? undefined);
-      toast.success("Subscription cancelled");
+      toast.success(t("subscriptions.toast.cancelled"));
     },
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error
           ? mutationError.message
-          : "Failed to cancel subscription",
+          : t("subscriptions.errors.cancelFailed"),
       );
     },
   });
@@ -328,14 +380,14 @@ const SubscriptionDetailPage = () => {
       ),
     onSuccess: async () => {
       await invalidateSubscriptionDetailQueries(queryClient, id, selectedLogId ?? undefined);
-      toast.success("Shipping address updated");
+      toast.success(t("subscriptions.errors.addressUpdated"));
       setShippingDrawerOpen(false);
     },
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error
           ? mutationError.message
-          : "Failed to update shipping address",
+          : t("subscriptions.errors.addressFailed"),
       );
     },
   });
@@ -433,14 +485,14 @@ const SubscriptionDetailPage = () => {
           ),
       ) ?? null
     );
-  }, [activityLogEventTypeFilters]);
+  }, [activityLogDomainFilterOptions, activityLogEventTypeFilters]);
 
   const activityLogActorLabels = useMemo(
     () =>
       activityLogActorFilterOptions
         .filter((option) => activityLogActorTypeFilters.includes(option.value))
         .map((option) => option.label),
-    [activityLogActorTypeFilters],
+    [activityLogActorFilterOptions, activityLogActorTypeFilters],
   );
 
   const hasActivityLogFilters =
@@ -452,19 +504,19 @@ const SubscriptionDetailPage = () => {
   const activityLogColumns = useMemo(
     () => [
       activityLogColumnHelper.accessor("created_at", {
-        header: "Created",
+        header: t("subscriptions.detail.fields.created"),
         enableSorting: true,
-        sortLabel: "Created",
+        sortLabel: t("subscriptions.detail.fields.created"),
         cell: ({ getValue }) => (
           <Text size="small" leading="compact">
-            {formatDateTime(getValue())}
+            {formatDateTime(getValue(), t("common.empty.noValue"))}
           </Text>
         ),
       }),
       activityLogColumnHelper.accessor("event_type", {
-        header: "Event",
+        header: t("subscriptions.detail.fields.event"),
         enableSorting: true,
-        sortLabel: "Event",
+        sortLabel: t("subscriptions.detail.fields.event"),
         cell: ({ row }) => (
           <StatusBadge
             color={getActivityEventColor(row.original.event_type)}
@@ -475,24 +527,24 @@ const SubscriptionDetailPage = () => {
         ),
       }),
       activityLogColumnHelper.accessor("actor_type", {
-        header: "Actor",
+        header: t("subscriptions.detail.fields.actor"),
         enableSorting: true,
-        sortLabel: "Actor",
+        sortLabel: t("subscriptions.detail.fields.actor"),
         cell: ({ row }) => (
           <Text size="small" leading="compact">
-            {getActivityActorDisplay(row.original)}
+            {getActivityActorDisplay(row.original, t)}
           </Text>
         ),
       }),
       activityLogColumnHelper.accessor("change_summary", {
         id: "reason",
-        header: "Summary",
+        header: t("subscriptions.detail.fields.summary"),
         enableSorting: true,
-        sortLabel: "Summary",
+        sortLabel: t("subscriptions.detail.fields.summary"),
         cell: ({ row }) => (
           <div className="flex flex-col gap-y-0.5">
             <Text size="small" leading="compact" weight="plus">
-              {formatActivitySummary(row.original)}
+              {formatActivitySummary(row.original, t)}
             </Text>
             {row.original.reason ? (
               <Text size="small" leading="compact" className="text-ui-fg-subtle">
@@ -503,7 +555,7 @@ const SubscriptionDetailPage = () => {
         ),
       }),
     ],
-    [],
+    [t],
   );
 
   const activityLogTable = useDataTable({
@@ -531,12 +583,12 @@ const SubscriptionDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscription</Heading>
+          <Heading level="h1">{t("subscriptions.detail.title")}</Heading>
         </div>
         <div className="flex items-center gap-x-2 px-6 py-6 text-ui-fg-subtle">
           <Spinner className="animate-spin" />
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Loading subscription details...
+            {t("subscriptions.detail.loading")}
           </Text>
         </div>
       </Container>
@@ -547,13 +599,13 @@ const SubscriptionDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscription</Heading>
+          <Heading level="h1">{t("subscriptions.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
             {error instanceof Error
               ? error.message
-              : "Failed to load subscription details."}
+              : t("subscriptions.detail.loadError")}
           </Alert>
         </div>
       </Container>
@@ -564,10 +616,12 @@ const SubscriptionDetailPage = () => {
     return (
       <Container className="divide-y p-0">
         <div className="px-6 py-4">
-          <Heading level="h1">Subscription</Heading>
+          <Heading level="h1">{t("subscriptions.detail.title")}</Heading>
         </div>
         <div className="px-6 py-6">
-          <Alert variant="warning">Subscription details are unavailable.</Alert>
+          <Alert variant="warning">
+            {t("subscriptions.detail.unavailable")}
+          </Alert>
         </div>
       </Container>
     );
@@ -585,7 +639,7 @@ const SubscriptionDetailPage = () => {
     updateShippingAddressMutation.isPending;
 
   const handleSubscriptionAction = async (action: SubscriptionActionType) => {
-    const confirmed = await prompt(getSubscriptionActionPromptConfig(action));
+    const confirmed = await prompt(getSubscriptionActionPromptConfig(action, t));
 
     if (!confirmed) {
       return;
@@ -608,12 +662,12 @@ const SubscriptionDetailPage = () => {
     const parsedFrequencyValue = Number(frequencyValue);
 
     if (!variantId) {
-      toast.error("Select a variant");
+      toast.error(t("subscriptions.planChange.errors.variantRequired"));
       return;
     }
 
     if (!Number.isInteger(parsedFrequencyValue) || parsedFrequencyValue <= 0) {
-      toast.error("Frequency value must be a positive integer");
+      toast.error(t("subscriptions.planChange.errors.frequencyValueInvalid"));
       return;
     }
 
@@ -652,12 +706,12 @@ const SubscriptionDetailPage = () => {
     };
 
     if (!body.first_name || !body.last_name || !body.address_1 || !body.city) {
-      toast.error("Fill in all required address fields");
+      toast.error(t("subscriptions.detail.errors.addressRequired"));
       return;
     }
 
     if (!body.postal_code || body.country_code.length !== 2) {
-      toast.error("Enter a valid postal code and 2-letter country code");
+      toast.error(t("subscriptions.detail.errors.postalCodeInvalid"));
       return;
     }
 
@@ -671,7 +725,7 @@ const SubscriptionDetailPage = () => {
           <div>
             <Heading level="h1">{subscription.reference}</Heading>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
-              Subscription details and upcoming plan changes.
+              {t("subscriptions.detail.description")}
             </Text>
           </div>
           <div className="flex items-center gap-x-2">
@@ -679,7 +733,7 @@ const SubscriptionDetailPage = () => {
               color={getStatusColor(subscription.status)}
               className="text-nowrap"
             >
-              {formatStatus(subscription.status)}
+              {t(SUBSCRIPTION_STATUS_KEYS[subscription.status])}
             </StatusBadge>
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
@@ -697,7 +751,11 @@ const SubscriptionDetailPage = () => {
                     }}
                   >
                     <Pause className="text-ui-fg-subtle" />
-                    <span>{pauseMutation.isPending ? "Pausing..." : "Pause"}</span>
+                    <span>
+                      {pauseMutation.isPending
+                        ? t("subscriptions.actions.pausing")
+                        : t("subscriptions.actions.pause")}
+                    </span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canResume ? (
@@ -709,7 +767,11 @@ const SubscriptionDetailPage = () => {
                     }}
                   >
                     <TriangleRightMini className="text-ui-fg-subtle" />
-                    <span>{resumeMutation.isPending ? "Resuming..." : "Resume"}</span>
+                    <span>
+                      {resumeMutation.isPending
+                        ? t("subscriptions.actions.resuming")
+                        : t("subscriptions.actions.resume")}
+                    </span>
                   </DropdownMenu.Item>
                 ) : null}
                 {canSchedulePlanChange ? (
@@ -719,7 +781,7 @@ const SubscriptionDetailPage = () => {
                     onClick={() => setPlanDrawerOpen(true)}
                   >
                     <TriangleRightMini className="text-ui-fg-subtle" />
-                    <span>Schedule plan change</span>
+                    <span>{t("subscriptions.planChange.title")}</span>
                   </DropdownMenu.Item>
                 ) : null}
                 <DropdownMenu.Item
@@ -728,7 +790,7 @@ const SubscriptionDetailPage = () => {
                   onClick={() => setShippingDrawerOpen(true)}
                 >
                   <PencilSquare className="text-ui-fg-subtle" />
-                  <span>Edit shipping address</span>
+                  <span>{t("subscriptions.detail.editShippingAddress")}</span>
                 </DropdownMenu.Item>
                 {canCancel ? (
                   <>
@@ -742,7 +804,9 @@ const SubscriptionDetailPage = () => {
                     >
                       <Trash className="text-ui-fg-subtle" />
                       <span>
-                        {cancelMutation.isPending ? "Cancelling..." : "Cancel"}
+                        {cancelMutation.isPending
+                          ? t("subscriptions.actions.cancelling")
+                          : t("common.actions.cancel")}
                       </span>
                     </DropdownMenu.Item>
                   </>
@@ -758,37 +822,44 @@ const SubscriptionDetailPage = () => {
           <Container className="divide-y p-0">
             <div className="px-4 py-4">
               <Text size="small" leading="compact" weight="plus">
-                Subscription
+                {t("subscriptions.detail.sections.subscription")}
               </Text>
             </div>
             <div className="px-4 py-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <DetailRow
-                  label="Status"
+                  label={t("common.fields.status")}
                   value={(
                     <StatusBadge
                       color={getStatusColor(subscription.status)}
                       className="text-nowrap"
                     >
-                      {formatStatus(subscription.status)}
+                      {t(SUBSCRIPTION_STATUS_KEYS[subscription.status])}
                     </StatusBadge>
                   )}
                 />
-                <DetailRow label="Frequency" value={subscription.frequency.label} />
+                <DetailRow label={t("common.fields.frequency")} value={subscription.frequency.label} />
                 <DetailRow
-                  label="Next renewal"
+                  label={t("common.fields.nextRenewal")}
                   value={formatDateTime(
                     subscription.effective_next_renewal_at ??
-                      subscription.next_renewal_at
+                      subscription.next_renewal_at,
+                    t("common.empty.noValue"),
                   )}
                 />
                 <DetailRow
-                  label="Started at"
-                  value={formatDateTime(subscription.started_at)}
+                  label={t("subscriptions.detail.fields.startedAt")}
+                  value={formatDateTime(
+                    subscription.started_at,
+                    t("common.empty.noValue"),
+                  )}
                 />
                 <DetailRow
-                  label="Last renewal"
-                  value={formatDateTime(subscription.last_renewal_at)}
+                  label={t("subscriptions.detail.fields.lastRenewal")}
+                  value={formatDateTime(
+                    subscription.last_renewal_at,
+                    t("common.empty.noValue"),
+                  )}
                 />
               </div>
             </div>
@@ -796,18 +867,18 @@ const SubscriptionDetailPage = () => {
           <Container className="divide-y p-0">
             <div className="px-4 py-4">
               <Text size="small" leading="compact" weight="plus">
-                Shipping address
+                {t("subscriptions.detail.sections.shippingAddress")}
               </Text>
             </div>
             <div className="px-4 py-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="flex flex-col gap-3">
                   <DetailRow
-                    label="Recipient"
+                    label={t("subscriptions.detail.fields.recipient")}
                     value={`${subscription.shipping_address.first_name} ${subscription.shipping_address.last_name}`}
                   />
                   <DetailRow
-                    label="Address"
+                    label={t("subscriptions.detail.fields.address")}
                     value={[
                       subscription.shipping_address.address_1,
                       subscription.shipping_address.address_2,
@@ -816,17 +887,17 @@ const SubscriptionDetailPage = () => {
                       .join(", ")}
                   />
                   <DetailRow
-                    label="City"
+                    label={t("subscriptions.detail.fields.city")}
                     value={`${subscription.shipping_address.postal_code} ${subscription.shipping_address.city}`}
                   />
                 </div>
                 <div className="flex flex-col gap-3">
                   <DetailRow
-                    label="Phone"
-                    value={subscription.shipping_address.phone || "-"}
+                    label={t("subscriptions.detail.fields.phone")}
+                    value={subscription.shipping_address.phone || t("common.empty.noValue")}
                   />
                   <DetailRow
-                    label="Country"
+                    label={t("subscriptions.detail.fields.country")}
                     value={subscription.shipping_address.country_code.toUpperCase()}
                   />
                 </div>
@@ -835,41 +906,45 @@ const SubscriptionDetailPage = () => {
           </Container>
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Pending plan change</Heading>
+              <Heading level="h2">
+                {t("subscriptions.detail.sections.pendingPlanChange")}
+              </Heading>
             </div>
             <div className="px-6 py-4">
               {subscription.pending_update_data ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <DetailRow
-                    label="Variant"
+                    label={t("common.fields.variant")}
                     value={subscription.pending_update_data.variant_title}
                   />
                   <DetailRow
-                    label="Frequency"
-                    value={formatFrequency(
-                      subscription.pending_update_data.frequency_interval,
-                      subscription.pending_update_data.frequency_value,
+                    label={t("common.fields.frequency")}
+                    value={`${t(INTERVAL_KEYS[subscription.pending_update_data.frequency_interval])} × ${subscription.pending_update_data.frequency_value}`}
+                  />
+                  <DetailRow
+                    label={t("subscriptions.detail.fields.effectiveAt")}
+                    value={formatDateTime(
+                      subscription.pending_update_data.effective_at,
+                      t("common.empty.noValue"),
                     )}
                   />
                   <DetailRow
-                    label="Effective at"
-                    value={formatDateTime(subscription.pending_update_data.effective_at)}
-                  />
-                  <DetailRow
-                    label="Variant ID"
+                    label={t("subscriptions.detail.fields.variantId")}
                     value={subscription.pending_update_data.variant_id}
                   />
                 </div>
               ) : (
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  No pending plan change is scheduled for this subscription.
+                  {t("subscriptions.detail.noPendingChange")}
                 </Text>
               )}
             </div>
           </Container>
           <Container className="divide-y p-0">
             <div className="px-6 py-4">
-              <Heading level="h2">Activity Log</Heading>
+              <Heading level="h2">
+                {t("subscriptions.detail.sections.activityLog")}
+              </Heading>
             </div>
             <DataTable instance={activityLogTable} className="min-h-0">
               <div className="flex flex-col gap-4 px-6 py-4">
@@ -877,7 +952,7 @@ const SubscriptionDetailPage = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     {activeActivityLogDomain ? (
                       <FilterChip
-                        label="Domain"
+                        label={t("subscriptions.detail.fields.domain")}
                         value={activeActivityLogDomain.label}
                         onRemove={() => {
                           setActivityLogFiltering((current) =>
@@ -888,7 +963,7 @@ const SubscriptionDetailPage = () => {
                     ) : null}
                     {activityLogActorTypeFilters.length ? (
                       <FilterChip
-                        label="Actor"
+                        label={t("subscriptions.detail.fields.actor")}
                         value={activityLogActorLabels.join(", ")}
                         onRemove={() => {
                           setActivityLogFiltering((current) =>
@@ -899,7 +974,7 @@ const SubscriptionDetailPage = () => {
                     ) : null}
                     {activityLogDateFrom ? (
                       <FilterChip
-                        label="Created from"
+                        label={t("subscriptions.detail.fields.createdFrom")}
                         value={formatDateTimeInputValue(activityLogDateFrom)}
                         onRemove={() => {
                           setActivityLogFiltering((current) =>
@@ -910,7 +985,7 @@ const SubscriptionDetailPage = () => {
                     ) : null}
                     {activityLogDateTo ? (
                       <FilterChip
-                        label="Created to"
+                        label={t("subscriptions.detail.fields.createdTo")}
                         value={formatDateTimeInputValue(activityLogDateTo)}
                         onRemove={() => {
                           setActivityLogFiltering((current) =>
@@ -922,13 +997,13 @@ const SubscriptionDetailPage = () => {
                     <DropdownMenu>
                       <DropdownMenu.Trigger asChild>
                         <Button size="small" variant="secondary" type="button">
-                          Add filter
+                          {t("common.filters.addFilter")}
                         </Button>
                       </DropdownMenu.Trigger>
                       <DropdownMenu.Content align="start">
                         <DropdownMenu.SubMenu>
                           <DropdownMenu.SubMenuTrigger>
-                            Domain
+                            {t("subscriptions.detail.fields.domain")}
                           </DropdownMenu.SubMenuTrigger>
                           <DropdownMenu.SubMenuContent>
                             {activityLogDomainFilterOptions.map((option) => (
@@ -958,7 +1033,7 @@ const SubscriptionDetailPage = () => {
                         </DropdownMenu.SubMenu>
                         <DropdownMenu.SubMenu>
                           <DropdownMenu.SubMenuTrigger>
-                            Actor
+                            {t("subscriptions.detail.fields.actor")}
                           </DropdownMenu.SubMenuTrigger>
                           <DropdownMenu.SubMenuContent>
                             {activityLogActorFilterOptions.map((option) => {
@@ -1019,7 +1094,7 @@ const SubscriptionDetailPage = () => {
                               }));
                             }}
                           >
-                            Created from
+                            {t("subscriptions.detail.fields.createdFrom")}
                           </DropdownMenu.Item>
                         ) : null}
                         {!hasActivityLogDateTo ? (
@@ -1031,12 +1106,12 @@ const SubscriptionDetailPage = () => {
                               }));
                             }}
                           >
-                            Created to
+                            {t("subscriptions.detail.fields.createdTo")}
                           </DropdownMenu.Item>
                         ) : null}
                       </DropdownMenu.Content>
                     </DropdownMenu>
-                    {hasActivityLogFilters ? (
+                      {hasActivityLogFilters ? (
                       <Button
                         size="small"
                         variant="transparent"
@@ -1049,7 +1124,7 @@ const SubscriptionDetailPage = () => {
                           }));
                         }}
                       >
-                        Clear all
+                        {t("common.filters.clearAll")}
                       </Button>
                     ) : null}
                   </div>
@@ -1067,9 +1142,18 @@ const SubscriptionDetailPage = () => {
                       }));
                     }}
                     fields={[
-                      { label: "Created", value: "created_at" },
-                      { label: "Event", value: "event_type" },
-                      { label: "Actor", value: "actor_display" },
+                      {
+                        label: t("subscriptions.detail.fields.created"),
+                        value: "created_at",
+                      },
+                      {
+                        label: t("subscriptions.detail.fields.event"),
+                        value: "event_type",
+                      },
+                      {
+                        label: t("subscriptions.detail.fields.actor"),
+                        value: "actor_display",
+                      },
                     ]}
                   />
                 </div>
@@ -1077,7 +1161,7 @@ const SubscriptionDetailPage = () => {
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {hasActivityLogDateFrom ? (
                       <div className="grid gap-2">
-                        <Label>Created from</Label>
+                        <Label>{t("subscriptions.detail.fields.createdFrom")}</Label>
                         <div className="relative">
                           <Input
                             type="datetime-local"
@@ -1111,7 +1195,7 @@ const SubscriptionDetailPage = () => {
                     ) : null}
                     {hasActivityLogDateTo ? (
                       <div className="grid gap-2">
-                        <Label>Created to</Label>
+                        <Label>{t("subscriptions.detail.fields.createdTo")}</Label>
                         <div className="relative">
                           <Input
                             type="datetime-local"
@@ -1149,14 +1233,14 @@ const SubscriptionDetailPage = () => {
                   <div className="flex items-center gap-x-2 text-ui-fg-subtle">
                     <Spinner className="animate-spin" />
                     <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                      Loading activity log...
+                      {t("subscriptions.timeline.loading")}
                     </Text>
                   </div>
                 ) : isLogsError ? (
                   <Alert variant="error">
                     {logsError instanceof Error
                       ? logsError.message
-                      : "Failed to load activity log."}
+                      : t("subscriptions.timeline.loadError")}
                   </Alert>
                 ) : (
                   <>
@@ -1204,7 +1288,7 @@ const SubscriptionDetailPage = () => {
                                   leading="compact"
                                   className="text-ui-fg-subtle"
                                 >
-                                  No activity log events found.
+                                  {t("subscriptions.timeline.empty")}
                                 </Text>
                               </Table.Cell>
                             </Table.Row>
@@ -1249,7 +1333,7 @@ const SubscriptionDetailPage = () => {
             <Container className="divide-y p-0">
               <div className="px-4 py-4">
                 <Text size="small" leading="compact" weight="plus">
-                  Customer
+                  {t("subscriptions.detail.sections.customer")}
                 </Text>
               </div>
               <div className="px-4 py-4">
@@ -1303,15 +1387,21 @@ const SubscriptionDetailPage = () => {
                       </div>
                     </div>
                   )}
-                  <DetailRow label="Email" value={subscription.customer.email || "-"} />
-                  <DetailRow label="Customer ID" value={subscription.customer.id} />
+                  <DetailRow
+                    label={t("common.fields.email")}
+                    value={subscription.customer.email || t("common.empty.noValue")}
+                  />
+                  <DetailRow
+                    label={t("subscriptions.detail.fields.customerId")}
+                    value={subscription.customer.id}
+                  />
                 </div>
               </div>
             </Container>
             <Container className="divide-y p-0">
               <div className="px-4 py-4">
                 <Text size="small" leading="compact" weight="plus">
-                  Product
+                  {t("subscriptions.detail.sections.product")}
                 </Text>
               </div>
               <div className="px-4 py-4">
@@ -1393,36 +1483,45 @@ const SubscriptionDetailPage = () => {
                       </div>
                     </div>
                   )}
-                  <DetailRow label="SKU" value={subscription.product.sku || "-"} />
+                  <DetailRow
+                    label={t("common.fields.sku")}
+                    value={subscription.product.sku || t("common.empty.noValue")}
+                  />
                 </div>
               </div>
             </Container>
             <Container className="divide-y p-0">
               <div className="px-4 py-4">
                 <Text size="small" leading="compact" weight="plus">
-                  Orders
+                  {t("subscriptions.detail.sections.orders")}
                 </Text>
               </div>
               <div className="px-4 py-4">
                 <div className="flex flex-col gap-3">
                   {subscription.initial_order ? (
                     <LinkedOrderCard
-                      label="Initial order"
+                      label={t("subscriptions.detail.initialOrder")}
                       orderId={subscription.initial_order.order_id}
                       title={formatOrderDisplayLabel(
                         subscription.initial_order.display_id,
                         subscription.initial_order.order_id
                       )}
-                      subtitle={`${subscription.initial_order.status} · ${formatDateTime(subscription.initial_order.created_at)}`}
+                      subtitle={`${subscription.initial_order.status} · ${formatDateTime(subscription.initial_order.created_at, t("common.empty.noValue"))}`}
                     />
                   ) : null}
                   {displayedRenewalOrders.map((order, index) => (
                     <LinkedOrderCard
                       key={order.order_id}
-                      label={index === 0 ? "Latest renewal" : `Renewal ${index + 1}`}
+                      label={
+                        index === 0
+                          ? t("subscriptions.detail.latestRenewal")
+                          : t("subscriptions.detail.renewalNumbered", {
+                              index: index + 1,
+                            })
+                      }
                       orderId={order.order_id}
                       title={formatOrderDisplayLabel(order.display_id, order.order_id)}
-                      subtitle={`${order.status} · ${formatDateTime(order.created_at)}`}
+                      subtitle={`${order.status} · ${formatDateTime(order.created_at, t("common.empty.noValue"))}`}
                     />
                   ))}
                   {!subscription.initial_order && !displayedRenewalOrders.length ? (
@@ -1431,7 +1530,7 @@ const SubscriptionDetailPage = () => {
                       leading="compact"
                       className="text-ui-fg-subtle"
                     >
-                      No linked orders yet
+                      {t("subscriptions.detail.noLinkedOrders")}
                     </Text>
                   ) : null}
                 </div>
@@ -1444,15 +1543,17 @@ const SubscriptionDetailPage = () => {
       <Drawer open={planDrawerOpen} onOpenChange={setPlanDrawerOpen}>
         <Drawer.Content>
           <Drawer.Header>
-            <Drawer.Title>Schedule plan change</Drawer.Title>
+            <Drawer.Title>{t("subscriptions.planChange.title")}</Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-4 p-4">
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="variant">Variant</Label>
+                <Label htmlFor="variant">{t("common.fields.variant")}</Label>
                 <Select value={variantId} onValueChange={setVariantId}>
                   <Select.Trigger id="variant">
-                    <Select.Value placeholder="Select a variant" />
+                    <Select.Value
+                      placeholder={t("subscriptions.planChange.selectVariant")}
+                    />
                   </Select.Trigger>
                   <Select.Content>
                     {variantOptions.map((option) => (
@@ -1466,7 +1567,7 @@ const SubscriptionDetailPage = () => {
                   <div className="flex items-center gap-x-2 text-ui-fg-subtle">
                     <Spinner className="animate-spin" />
                     <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                      Loading variants...
+                      {t("subscriptions.planChange.loadingVariants")}
                     </Text>
                   </div>
                 ) : null}
@@ -1474,17 +1575,19 @@ const SubscriptionDetailPage = () => {
                   <Alert variant="error">
                     {planOptionsError instanceof Error
                       ? planOptionsError.message
-                      : "Failed to load product variants."}
+                      : t("subscriptions.planChange.variantLoadError")}
                   </Alert>
                 ) : null}
                 {!isLoadingPlanOptions && !isPlanOptionsError && !variantOptions.length ? (
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    No variants are available for this product.
+                    {t("subscriptions.planChange.noVariants")}
                   </Text>
                 ) : null}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="frequency-interval">Frequency interval</Label>
+                <Label htmlFor="frequency-interval">
+                  {t("subscriptions.planChange.frequencyInterval")}
+                </Label>
                 <Select
                   value={frequencyInterval}
                   onValueChange={(value) =>
@@ -1492,7 +1595,9 @@ const SubscriptionDetailPage = () => {
                   }
                 >
                   <Select.Trigger id="frequency-interval">
-                    <Select.Value placeholder="Select interval" />
+                    <Select.Value
+                      placeholder={t("subscriptions.planChange.selectInterval")}
+                    />
                   </Select.Trigger>
                   <Select.Content>
                     {intervalOptions.map((option) => (
@@ -1504,7 +1609,9 @@ const SubscriptionDetailPage = () => {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="frequency-value">Frequency value</Label>
+                <Label htmlFor="frequency-value">
+                  {t("subscriptions.planChange.frequencyValue")}
+                </Label>
                 <Input
                   id="frequency-value"
                   type="number"
@@ -1515,7 +1622,9 @@ const SubscriptionDetailPage = () => {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="effective-at">Effective at</Label>
+                <Label htmlFor="effective-at">
+                  {t("subscriptions.detail.fields.effectiveAt")}
+                </Label>
                 <Input
                   id="effective-at"
                   type="datetime-local"
@@ -1523,7 +1632,7 @@ const SubscriptionDetailPage = () => {
                   onChange={(event) => setEffectiveAt(event.target.value)}
                 />
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  Leave empty to let the backend use the default effective date.
+                  {t("subscriptions.addressHints.effectiveAtOptional")}
                 </Text>
               </div>
             </div>
@@ -1532,7 +1641,7 @@ const SubscriptionDetailPage = () => {
             <div className="flex items-center justify-end gap-x-2">
               <Drawer.Close asChild>
                 <Button size="small" variant="secondary" disabled={planChangeMutation.isPending}>
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </Drawer.Close>
               <Button
@@ -1546,7 +1655,7 @@ const SubscriptionDetailPage = () => {
                   !variantOptions.length
                 }
               >
-                Save
+                {t("common.actions.save")}
               </Button>
             </div>
           </Drawer.Footer>
@@ -1556,13 +1665,15 @@ const SubscriptionDetailPage = () => {
       <Drawer open={shippingDrawerOpen} onOpenChange={setShippingDrawerOpen}>
         <Drawer.Content>
           <Drawer.Header>
-            <Drawer.Title>Edit shipping address</Drawer.Title>
+            <Drawer.Title>{t("subscriptions.detail.editShippingAddress")}</Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-4 p-4">
             <div className="grid gap-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="first-name">First name</Label>
+                  <Label htmlFor="first-name">
+                    {t("subscriptions.detail.fields.firstName")}
+                  </Label>
                   <Input
                     id="first-name"
                     value={shippingAddressForm.first_name}
@@ -1572,7 +1683,9 @@ const SubscriptionDetailPage = () => {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="last-name">Last name</Label>
+                  <Label htmlFor="last-name">
+                    {t("subscriptions.detail.fields.lastName")}
+                  </Label>
                   <Input
                     id="last-name"
                     value={shippingAddressForm.last_name}
@@ -1583,7 +1696,9 @@ const SubscriptionDetailPage = () => {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="company">Company</Label>
+                <Label htmlFor="company">
+                  {t("subscriptions.detail.fields.company")}
+                </Label>
                 <Input
                   id="company"
                   value={shippingAddressForm.company}
@@ -1593,7 +1708,9 @@ const SubscriptionDetailPage = () => {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="address-1">Address line 1</Label>
+                <Label htmlFor="address-1">
+                  {t("subscriptions.detail.fields.addressLine1")}
+                </Label>
                 <Input
                   id="address-1"
                   value={shippingAddressForm.address_1}
@@ -1603,7 +1720,9 @@ const SubscriptionDetailPage = () => {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="address-2">Address line 2</Label>
+                <Label htmlFor="address-2">
+                  {t("subscriptions.detail.fields.addressLine2")}
+                </Label>
                 <Input
                   id="address-2"
                   value={shippingAddressForm.address_2}
@@ -1614,7 +1733,7 @@ const SubscriptionDetailPage = () => {
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="city">City</Label>
+                  <Label htmlFor="city">{t("subscriptions.detail.fields.city")}</Label>
                   <Input
                     id="city"
                     value={shippingAddressForm.city}
@@ -1624,7 +1743,9 @@ const SubscriptionDetailPage = () => {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="postal-code">Postal code</Label>
+                  <Label htmlFor="postal-code">
+                    {t("subscriptions.detail.fields.postalCode")}
+                  </Label>
                   <Input
                     id="postal-code"
                     value={shippingAddressForm.postal_code}
@@ -1636,7 +1757,9 @@ const SubscriptionDetailPage = () => {
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="province">Province / State</Label>
+                  <Label htmlFor="province">
+                    {t("subscriptions.detail.fields.province")}
+                  </Label>
                   <Input
                     id="province"
                     value={shippingAddressForm.province}
@@ -1646,7 +1769,9 @@ const SubscriptionDetailPage = () => {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="country-code">Country code</Label>
+                  <Label htmlFor="country-code">
+                    {t("subscriptions.detail.fields.countryCode")}
+                  </Label>
                   <Input
                     id="country-code"
                     maxLength={2}
@@ -1656,12 +1781,12 @@ const SubscriptionDetailPage = () => {
                     }
                   />
                   <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                    Use the two-letter ISO country code, for example PL or US.
+                    {t("subscriptions.addressHints.countryCodeIso")}
                   </Text>
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="phone">Phone</Label>
+                <Label htmlFor="phone">{t("subscriptions.detail.fields.phone")}</Label>
                 <Input
                   id="phone"
                   value={shippingAddressForm.phone}
@@ -1680,7 +1805,7 @@ const SubscriptionDetailPage = () => {
                   variant="secondary"
                   disabled={updateShippingAddressMutation.isPending}
                 >
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </Drawer.Close>
               <Button
@@ -1689,7 +1814,7 @@ const SubscriptionDetailPage = () => {
                 isLoading={updateShippingAddressMutation.isPending}
                 disabled={updateShippingAddressMutation.isPending}
               >
-                Save
+                {t("common.actions.save")}
               </Button>
             </div>
           </Drawer.Footer>
@@ -1708,27 +1833,29 @@ const SubscriptionDetailPage = () => {
       >
         <Drawer.Content>
           <Drawer.Header>
-            <Drawer.Title>Activity Log Event</Drawer.Title>
+            <Drawer.Title>{t("subscriptions.timeline.eventTitle")}</Drawer.Title>
           </Drawer.Header>
           <Drawer.Body className="flex flex-1 flex-col gap-y-6 overflow-y-auto p-4">
             {isSelectedLogLoading ? (
               <div className="flex items-center gap-x-2 text-ui-fg-subtle">
                 <Spinner className="animate-spin" />
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  Loading activity event...
+                  {t("subscriptions.timeline.eventLoading")}
                 </Text>
               </div>
             ) : selectedLogData?.subscription_log ? (
               <ActivityLogDetailContent log={selectedLogData.subscription_log} />
             ) : (
-              <Alert variant="error">Failed to load activity event details.</Alert>
+              <Alert variant="error">
+                {t("subscriptions.timeline.eventLoadError")}
+              </Alert>
             )}
           </Drawer.Body>
           <Drawer.Footer>
             <div className="flex items-center justify-end gap-x-2">
               <Drawer.Close asChild>
                 <Button size="small" variant="secondary">
-                  Close
+                  {t("common.actions.close")}
                 </Button>
               </Drawer.Close>
             </div>
@@ -1780,6 +1907,8 @@ const DetailRow = ({
   value: ReactNode;
   className?: string;
 }) => {
+  const { t } = useTranslation("reorder");
+
   return (
     <div className={`grid gap-1 ${className ?? ""}`}>
       <Text size="small" leading="compact" className="text-ui-fg-subtle">
@@ -1787,7 +1916,7 @@ const DetailRow = ({
       </Text>
       {typeof value === "string" ? (
         <Text size="small" leading="compact" weight="plus">
-          {value || "-"}
+          {value || t("common.empty.noValue")}
         </Text>
       ) : (
         value
@@ -1852,13 +1981,15 @@ function formatOrderDisplayLabel(displayId: number | null, orderId: string) {
 }
 
 const ActivityLogDetailContent = ({ log }: { log: ActivityLogAdminDetail }) => {
+  const { t } = useTranslation("reorder");
+
   return (
     <div className="flex flex-col gap-y-6">
       <DetailBlock
-        title="Overview"
+        title={t("subscriptions.detail.sections.overview")}
         rows={[
           {
-            label: "Event",
+            label: t("subscriptions.detail.fields.event"),
             value: (
               <StatusBadge color={getActivityEventColor(log.event_type)}>
                 {formatActivityEventType(log.event_type)}
@@ -1866,39 +1997,75 @@ const ActivityLogDetailContent = ({ log }: { log: ActivityLogAdminDetail }) => {
             ),
           },
           {
-            label: "Actor",
-            value: getActivityActorDisplay(log),
+            label: t("subscriptions.detail.fields.actor"),
+            value: getActivityActorDisplay(log, t),
           },
-          { label: "Created", value: formatDateTime(log.created_at) },
-          { label: "Reason", value: log.reason || "-" },
-          { label: "Summary", value: formatActivitySummary(log) },
+          {
+            label: t("subscriptions.detail.fields.created"),
+            value: formatDateTime(log.created_at, t("common.empty.noValue")),
+          },
+          {
+            label: t("common.fields.reason"),
+            value: log.reason || t("common.empty.noValue"),
+          },
+          {
+            label: t("subscriptions.detail.fields.summary"),
+            value: formatActivitySummary(log, t),
+          },
         ]}
       />
       <DetailBlock
-        title="Subscription snapshot"
+        title={t("subscriptions.detail.sections.subscriptionSnapshot")}
         rows={[
-          { label: "Reference", value: log.subscription.reference },
-          { label: "Customer", value: log.subscription.customer_name },
-          { label: "Product", value: log.subscription.product_title },
-          { label: "Variant", value: log.subscription.variant_title },
+          {
+            label: t("common.fields.reference"),
+            value: log.subscription.reference,
+          },
+          {
+            label: t("common.fields.customer"),
+            value: log.subscription.customer_name,
+          },
+          {
+            label: t("common.fields.product"),
+            value: log.subscription.product_title,
+          },
+          {
+            label: t("common.fields.variant"),
+            value: log.subscription.variant_title,
+          },
         ]}
       />
       <DetailBlock
-        title="Changed fields"
+        title={t("subscriptions.detail.sections.changedFields")}
         rows={
           log.changed_fields.length
             ? log.changed_fields.map((field) => ({
-                label: formatActivitySummaryField(field.field),
-                value: `${formatUnknown(field.before)} → ${formatUnknown(
+                label: formatActivitySummaryField(field.field, t),
+                value: `${formatUnknown(field.before, t("common.empty.noValue"))} → ${formatUnknown(
                   field.after,
+                  t("common.empty.noValue"),
                 )}`,
               }))
-            : [{ label: "Changed fields", value: "No changed fields captured" }]
+            : [
+                {
+                  label: t("subscriptions.detail.sections.changedFields"),
+                  value: t("subscriptions.timeline.noChangedFields"),
+                },
+              ]
         }
       />
-      <JsonBlock title="Previous state" value={log.previous_state} />
-      <JsonBlock title="New state" value={log.new_state} />
-      <JsonBlock title="Metadata" value={log.metadata} />
+      <JsonBlock
+        title={t("subscriptions.detail.sections.previousState")}
+        value={log.previous_state}
+      />
+      <JsonBlock
+        title={t("subscriptions.detail.sections.newState")}
+        value={log.new_state}
+      />
+      <JsonBlock
+        title={t("subscriptions.detail.sections.metadata")}
+        value={log.metadata}
+      />
     </div>
   );
 };
@@ -1910,6 +2077,8 @@ const JsonBlock = ({
   title: string;
   value: Record<string, unknown> | null;
 }) => {
+  const { t } = useTranslation("reorder");
+
   return (
     <div className="rounded-lg border p-4">
       <Text size="small" leading="compact" weight="plus">
@@ -1917,7 +2086,9 @@ const JsonBlock = ({
       </Text>
       <div className="mt-4">
         <pre className="overflow-x-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-ui-fg-subtle">
-          {value ? JSON.stringify(value, null, 2) : "No data"}
+          {value
+            ? JSON.stringify(value, null, 2)
+            : t("subscriptions.timeline.noData")}
         </pre>
       </div>
     </div>
@@ -1933,6 +2104,8 @@ const FilterChip = ({
   value: string;
   onRemove: () => void;
 }) => {
+  const { t } = useTranslation("reorder");
+
   return (
     <div className="flex items-center overflow-hidden rounded-md border border-ui-border-base bg-ui-bg-component">
       <div className="border-r border-ui-border-base px-4 py-2">
@@ -1942,7 +2115,7 @@ const FilterChip = ({
       </div>
       <div className="border-r border-ui-border-base px-4 py-2">
         <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          is
+          {t("common.filters.is")}
         </Text>
       </div>
       <div className="px-4 py-2">
@@ -1954,7 +2127,7 @@ const FilterChip = ({
         type="button"
         className="border-l border-ui-border-base px-4 py-2 text-ui-fg-subtle transition-colors hover:text-ui-fg-base"
         onClick={onRemove}
-        aria-label={`Remove ${label} filter`}
+        aria-label={t("common.filters.removeFilter", { label })}
       >
         <XMarkMini />
       </button>
@@ -1985,33 +2158,9 @@ function getStatusColor(status: SubscriptionAdminStatus) {
   }
 }
 
-function formatStatus(status: SubscriptionAdminStatus) {
-  switch (status) {
-    case SubscriptionAdminStatus.ACTIVE:
-      return "Active";
-    case SubscriptionAdminStatus.PAUSED:
-      return "Paused";
-    case SubscriptionAdminStatus.CANCELLED:
-      return "Cancelled";
-    case SubscriptionAdminStatus.PAST_DUE:
-      return "Past due";
-  }
-}
-
-function formatFrequency(
-  interval: SubscriptionFrequencyInterval,
-  value: number,
-) {
-  if (value === 1) {
-    return `Every ${interval}`;
-  }
-
-  return `Every ${value} ${interval}s`;
-}
-
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, emptyValue: string) {
   if (!value) {
-    return "-";
+    return emptyValue;
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -2046,33 +2195,33 @@ function toDateTimeLocalValue(value: string | null) {
   )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function getSubscriptionActionPromptConfig(action: SubscriptionActionType) {
+function getSubscriptionActionPromptConfig(
+  action: SubscriptionActionType,
+  t: ReorderTranslate,
+) {
   switch (action) {
     case "pause":
       return {
-        title: "Pause subscription?",
-        description:
-          "You are about to pause this subscription. Do you want to continue?",
-        confirmText: "Pause",
-        cancelText: "Cancel",
+        title: t("subscriptions.prompt.pauseTitle"),
+        description: t("subscriptions.prompt.pauseDescription"),
+        confirmText: t("subscriptions.actions.pause"),
+        cancelText: t("common.actions.cancel"),
         variant: "confirmation" as const,
       };
     case "resume":
       return {
-        title: "Resume subscription?",
-        description:
-          "You are about to resume this subscription. Do you want to continue?",
-        confirmText: "Resume",
-        cancelText: "Cancel",
+        title: t("subscriptions.prompt.resumeTitle"),
+        description: t("subscriptions.prompt.resumeDescription"),
+        confirmText: t("subscriptions.actions.resume"),
+        cancelText: t("common.actions.cancel"),
         variant: "confirmation" as const,
       };
     case "cancel":
       return {
-        title: "Cancel subscription?",
-        description:
-          "You are about to cancel this subscription. This action cannot be undone.",
-        confirmText: "Cancel subscription",
-        cancelText: "Keep subscription",
+        title: t("subscriptions.prompt.cancelTitle"),
+        description: t("subscriptions.prompt.cancelDescription"),
+        confirmText: t("subscriptions.actions.cancelSubscription"),
+        cancelText: t("subscriptions.actions.keepSubscription"),
         variant: "danger" as const,
       };
   }
@@ -2151,73 +2300,53 @@ function formatActivityEventType(value: string) {
   );
 }
 
-function formatActivityActorType(value: ActivityLogAdminActorType) {
-  switch (value) {
-    case ActivityLogAdminActorType.USER:
-      return "Admin";
-    case ActivityLogAdminActorType.CUSTOMER:
-      return "Customer";
-    case ActivityLogAdminActorType.SYSTEM:
-      return "System";
-    case ActivityLogAdminActorType.SCHEDULER:
-      return "Scheduler";
-  }
+function formatActivityActorType(
+  value: ActivityLogAdminActorType,
+  t: ReorderTranslate,
+) {
+  return t(ACTIVITY_ACTOR_KEYS[value]);
 }
 
 function getActivityActorDisplay(
   log: Pick<ActivityLogAdminListItem, "actor" | "actor_id" | "actor_type">,
+  t: ReorderTranslate,
 ) {
-  return log.actor.display || log.actor_id || formatActivityActorType(log.actor_type);
+  return log.actor.display || log.actor_id || formatActivityActorType(log.actor_type, t);
 }
 
 function formatActivitySummary(
   log: Pick<ActivityLogAdminListItem, "change_summary" | "reason">,
+  t: ReorderTranslate,
 ) {
   if (log.reason) {
     return log.reason;
   }
 
   if (!log.change_summary) {
-    return "No summary";
+    return t("subscriptions.timeline.noSummary");
   }
 
   return log.change_summary
     .split(",")
-    .map((part) => formatActivitySummaryField(part.trim()))
+    .map((part) => formatActivitySummaryField(part.trim(), t))
     .filter(Boolean)
     .join(", ");
 }
 
-function formatActivitySummaryField(value: string) {
-  switch (value) {
-    case "subscription_created":
-      return "Subscription created";
-    case "pending_update_data":
-      return "Scheduled plan change";
-    case "status":
-      return "Status changed";
-    case "recipient":
-      return "Recipient updated";
-    case "address":
-      return "Address";
-    case "address_lines_changed":
-      return "Address updated";
-    case "postal_code_changed":
-      return "Postal code updated";
-    case "phone_changed":
-      return "Phone updated";
-    case "country_code":
-      return "Country updated";
-    case "province":
-      return "Province updated";
-    case "city":
-      return "City updated";
-    default:
-      return value
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ");
+function formatActivitySummaryField(value: string, t: ReorderTranslate) {
+  const key =
+    ACTIVITY_SUMMARY_FIELD_KEYS[
+      value as keyof typeof ACTIVITY_SUMMARY_FIELD_KEYS
+    ];
+
+  if (key) {
+    return t(key);
   }
+
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function getActivityActorColor(value: ActivityLogAdminActorType) {
@@ -2233,9 +2362,9 @@ function getActivityActorColor(value: ActivityLogAdminActorType) {
   }
 }
 
-function formatUnknown(value: unknown) {
+function formatUnknown(value: unknown, emptyValue: string) {
   if (value === null || value === undefined) {
-    return "-";
+    return emptyValue;
   }
 
   if (typeof value === "string") {
