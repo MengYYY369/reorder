@@ -36,13 +36,13 @@
     "test:integration:modules": "TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules jest --silent=false --runInBand --forceExit"
   },
   "devDependencies": {
-    "@medusajs/admin-sdk": "2.13.6",
-    "@medusajs/cli": "2.13.6",
-    "@medusajs/framework": "2.13.6",
-    "@medusajs/icons": "2.13.6",
-    "@medusajs/medusa": "2.13.6",
-    "@medusajs/test-utils": "2.13.6",
-    "@medusajs/ui": "4.0.25",
+    "@medusajs/admin-sdk": "2.19.0",
+    "@medusajs/cli": "2.19.0",
+    "@medusajs/framework": "2.19.0",
+    "@medusajs/icons": "2.19.0",
+    "@medusajs/medusa": "2.19.0",
+    "@medusajs/test-utils": "2.19.0",
+    "@medusajs/ui": "4.2.1",
     "@swc/core": "^1.7.28",
     "@swc/jest": "^0.2.39",
     "@types/jest": "^29.5.14",
@@ -59,13 +59,13 @@
     "yalc": "^1.0.0-pre.53"
   },
   "peerDependencies": {
-    "@medusajs/admin-sdk": "2.13.6",
-    "@medusajs/cli": "2.13.6",
-    "@medusajs/framework": "2.13.6",
-    "@medusajs/icons": "2.13.6",
-    "@medusajs/medusa": "2.13.6",
-    "@medusajs/test-utils": "2.13.6",
-    "@medusajs/ui": "4.0.25"
+    "@medusajs/admin-sdk": "2.19.0",
+    "@medusajs/cli": "2.19.0",
+    "@medusajs/framework": "2.19.0",
+    "@medusajs/icons": "2.19.0",
+    "@medusajs/medusa": "2.19.0",
+    "@medusajs/test-utils": "2.19.0",
+    "@medusajs/ui": "4.2.1"
   },
   "engines": {
     "node": ">=20"
