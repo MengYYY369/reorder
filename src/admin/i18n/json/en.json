@@ -828,5 +828,171 @@
         "noLinkedRenewal": "No linked renewal cycle"
       }
     }
+  },
+  "activityLog": {
+    "list": {
+      "title": "Activity Log",
+      "description": "Review subscription lifecycle events across renewals, dunning, and cancellation workflows.",
+      "loadError": "Failed to load activity log entries.",
+      "emptyFiltered": "No log entries match the current filters",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No activity log entries yet",
+      "emptyHint": "Activity log entries will appear here as subscription workflows run."
+    },
+    "columns": {
+      "subscription": "Subscription",
+      "created": "Created",
+      "actor": "Actor",
+      "event": "Event",
+      "reason": "Reason"
+    },
+    "filters": {
+      "addFilter": "Add filter",
+      "quickPresets": "Quick presets",
+      "eventType": "Event type",
+      "preset": "Preset",
+      "createdFrom": "Created from",
+      "createdTo": "Created to"
+    },
+    "actor": {
+      "admin": "Admin",
+      "customer": "Customer",
+      "system": "System",
+      "scheduler": "Scheduler"
+    },
+    "domains": {
+      "subscriptions": "Subscriptions",
+      "renewals": "Renewals",
+      "dunning": "Dunning",
+      "cancellation": "Cancellation",
+      "cancellationFull": "Cancellation & Retention",
+      "unknown": "Activity"
+    },
+    "summaryFields": {
+      "subscriptionCreated": "Subscription created",
+      "pendingUpdateData": "Scheduled plan change",
+      "status": "Status changed",
+      "recipient": "Recipient updated",
+      "address": "Address",
+      "addressLinesChanged": "Address updated",
+      "postalCodeChanged": "Postal code updated",
+      "phoneChanged": "Phone updated",
+      "countryCode": "Country updated",
+      "province": "Province updated",
+      "city": "City updated"
+    },
+    "eventDetail": {
+      "title": "Activity Log Event",
+      "loading": "Loading event details...",
+      "loadError": "Failed to load activity log detail.",
+      "close": "Close",
+      "overview": "Overview",
+      "event": "Event",
+      "domain": "Domain",
+      "actor": "Actor",
+      "created": "Created",
+      "reason": "Reason",
+      "summary": "Summary",
+      "subscriptionSnapshot": "Subscription Snapshot",
+      "reference": "Reference",
+      "customer": "Customer",
+      "product": "Product",
+      "variant": "Variant",
+      "changedFields": "Changed Fields",
+      "changedFieldsLabel": "Changed fields",
+      "noChangedFields": "No changed fields captured",
+      "previousState": "Previous State",
+      "newState": "New State",
+      "metadata": "Metadata",
+      "noData": "No data",
+      "noSummary": "No summary"
+    }
+  },
+  "analytics": {
+    "list": {
+      "title": "Analytics",
+      "description": "Review recurring revenue, churn, LTV, and subscription creation trends from the analytics read model.",
+      "loadError": "Failed to load analytics.",
+      "exportError": "Failed to export analytics",
+      "trendOverview": "Trend overview",
+      "noDataRange": "No analytics data for this range",
+      "noDataRangeHint": "Try widening the date range or removing filters to inspect a broader slice of subscription activity.",
+      "noBuckets": "No buckets returned for the current range.",
+      "noComparisonWindow": "No comparison window available yet.",
+      "noTrendPoints": "No trend points available",
+      "noTrendPointsHint": "This metric does not have enough snapshot data for the selected filters.",
+      "noDailyBuckets": "No daily buckets available",
+      "noDailyBucketsHint": "Pick a valid date range to inspect daily subscription creation."
+    },
+    "filters": {
+      "addFilter": "Add filter",
+      "dateFrom": "Date from",
+      "dateTo": "Date to",
+      "groupBy": "Group by",
+      "status": "Status",
+      "frequency": "Frequency",
+      "product": "Product",
+      "allProducts": "All products"
+    },
+    "metricTabs": {
+      "mrr": "MRR",
+      "churn": "Churn",
+      "ltv": "LTV",
+      "created": "Created"
+    },
+    "status": {
+      "active": "Active",
+      "paused": "Paused",
+      "pastDue": "Past due",
+      "cancelled": "Cancelled"
+    },
+    "groupBy": {
+      "day": "Day",
+      "week": "Week",
+      "month": "Month"
+    },
+    "frequency": {
+      "weekly": "Weekly",
+      "every2Weeks": "Every 2 weeks",
+      "monthly": "Monthly",
+      "quarterly": "Quarterly",
+      "yearly": "Yearly",
+      "everyNWeeks": "Every {{value}} weeks",
+      "everyNMonths": "Every {{value}} months",
+      "everyNYears": "Every {{value}} years"
+    },
+    "units": {
+      "currency": "Currency",
+      "percent": "Percent",
+      "count": "Subscriptions",
+      "unavailable": "Unavailable"
+    },
+    "trend": {
+      "rangeSummary": "{{from}} to {{to}}",
+      "rangeEmpty": "No buckets returned for the current range.",
+      "max": "Max",
+      "min": "Min",
+      "dailyBars": "Daily bars",
+      "bucketsDay": "Day buckets",
+      "bucketsWeek": "Week buckets",
+      "bucketsMonth": "Month buckets",
+      "createdUtcNote": "Created always renders one UTC bar per day.",
+      "createdRangeNote": "Created uses one UTC bar per day and only follows the selected date range.",
+      "trendUtcNote": "Trends are bucketed in UTC and follow the same filters as the KPI cards.",
+      "ariaTrendChart": "{{label}} trend chart",
+      "ariaBarChart": "{{label}} bar chart",
+      "flat": "Flat vs previous window · {{delta}}",
+      "up": "Trending up vs previous window · {{delta}}",
+      "down": "Trending down vs previous window · {{delta}}",
+      "createdBarTitle": "{{bucket}}: {{value}} subscriptions created"
+    },
+    "export": {
+      "button": "Export",
+      "csv": "Export CSV",
+      "json": "Export JSON"
+    },
+    "toast": {
+      "exported": "Analytics {{format}} export downloaded"
+    }
   }
 }

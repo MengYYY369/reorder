@@ -826,5 +826,171 @@
         "noLinkedRenewal": "无关联续订周期"
       }
     }
+  },
+  "activityLog": {
+    "list": {
+      "title": "操作日志",
+      "description": "查看续订、催收与取消工作流中的订阅生命周期事件。",
+      "loadError": "加载操作日志条目失败。",
+      "emptyFiltered": "没有符合当前筛选条件的日志条目",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无操作日志条目",
+      "emptyHint": "订阅工作流运行后，操作日志条目将显示在这里。"
+    },
+    "columns": {
+      "subscription": "订阅",
+      "created": "创建时间",
+      "actor": "操作者",
+      "event": "事件",
+      "reason": "原因"
+    },
+    "filters": {
+      "addFilter": "添加筛选",
+      "quickPresets": "快速预设",
+      "eventType": "事件类型",
+      "preset": "预设",
+      "createdFrom": "创建时间从",
+      "createdTo": "创建时间到"
+    },
+    "actor": {
+      "admin": "管理员",
+      "customer": "客户",
+      "system": "系统",
+      "scheduler": "计划任务"
+    },
+    "domains": {
+      "subscriptions": "订阅",
+      "renewals": "续订",
+      "dunning": "催收",
+      "cancellation": "取消",
+      "cancellationFull": "取消与挽留",
+      "unknown": "活动"
+    },
+    "summaryFields": {
+      "subscriptionCreated": "订阅已创建",
+      "pendingUpdateData": "已安排计划变更",
+      "status": "状态已变更",
+      "recipient": "收件人已更新",
+      "address": "地址",
+      "addressLinesChanged": "地址已更新",
+      "postalCodeChanged": "邮政编码已更新",
+      "phoneChanged": "电话已更新",
+      "countryCode": "国家已更新",
+      "province": "省份已更新",
+      "city": "城市已更新"
+    },
+    "eventDetail": {
+      "title": "操作日志事件",
+      "loading": "正在加载事件详情……",
+      "loadError": "加载操作日志详情失败。",
+      "close": "关闭",
+      "overview": "概览",
+      "event": "事件",
+      "domain": "领域",
+      "actor": "操作者",
+      "created": "创建时间",
+      "reason": "原因",
+      "summary": "摘要",
+      "subscriptionSnapshot": "订阅快照",
+      "reference": "订阅编号",
+      "customer": "客户",
+      "product": "商品",
+      "variant": "变体",
+      "changedFields": "变更字段",
+      "changedFieldsLabel": "变更字段",
+      "noChangedFields": "未捕获变更字段",
+      "previousState": "变更前状态",
+      "newState": "变更后状态",
+      "metadata": "元数据",
+      "noData": "无数据",
+      "noSummary": "无摘要"
+    }
+  },
+  "analytics": {
+    "list": {
+      "title": "数据分析",
+      "description": "从分析读取模型中查看经常性收入、流失、LTV 与订阅创建趋势。",
+      "loadError": "加载数据分析失败。",
+      "exportError": "导出数据分析失败",
+      "trendOverview": "趋势概览",
+      "noDataRange": "该时间范围内没有分析数据",
+      "noDataRangeHint": "请尝试扩大日期范围或移除筛选条件，以查看更大范围的订阅活动。",
+      "noBuckets": "当前时间范围内没有返回任何分桶数据。",
+      "noComparisonWindow": "暂无可用的对比窗口。",
+      "noTrendPoints": "暂无趋势数据点",
+      "noTrendPointsHint": "当前筛选条件下该指标的快照数据不足。",
+      "noDailyBuckets": "暂无按日分桶数据",
+      "noDailyBucketsHint": "请选择有效的日期范围以查看每日订阅创建情况。"
+    },
+    "filters": {
+      "addFilter": "添加筛选",
+      "dateFrom": "开始日期",
+      "dateTo": "结束日期",
+      "groupBy": "分组方式",
+      "status": "状态",
+      "frequency": "频率",
+      "product": "商品",
+      "allProducts": "全部商品"
+    },
+    "metricTabs": {
+      "mrr": "MRR",
+      "churn": "流失",
+      "ltv": "LTV",
+      "created": "新增"
+    },
+    "status": {
+      "active": "生效中",
+      "paused": "已暂停",
+      "pastDue": "已逾期",
+      "cancelled": "已取消"
+    },
+    "groupBy": {
+      "day": "按日",
+      "week": "按周",
+      "month": "按月"
+    },
+    "frequency": {
+      "weekly": "每周",
+      "every2Weeks": "每 2 周",
+      "monthly": "每月",
+      "quarterly": "每季度",
+      "yearly": "每年",
+      "everyNWeeks": "每 {{value}} 周",
+      "everyNMonths": "每 {{value}} 个月",
+      "everyNYears": "每 {{value}} 年"
+    },
+    "units": {
+      "currency": "货币",
+      "percent": "百分比",
+      "count": "订阅数",
+      "unavailable": "不可用"
+    },
+    "trend": {
+      "rangeSummary": "{{from}} 至 {{to}}",
+      "rangeEmpty": "当前时间范围内没有返回任何分桶数据。",
+      "max": "最高",
+      "min": "最低",
+      "dailyBars": "按日柱状图",
+      "bucketsDay": "按日分桶",
+      "bucketsWeek": "按周分桶",
+      "bucketsMonth": "按月分桶",
+      "createdUtcNote": "创建指标始终按 UTC 每天渲染一根柱形。",
+      "createdRangeNote": "创建指标按 UTC 每天渲染一根柱形，且仅跟随所选日期范围。",
+      "trendUtcNote": "趋势按 UTC 分桶，并使用与 KPI 卡片相同的筛选条件。",
+      "ariaTrendChart": "{{label}} 趋势图",
+      "ariaBarChart": "{{label}} 柱状图",
+      "flat": "与上一窗口持平 · {{delta}}",
+      "up": "较上一窗口上升 · {{delta}}",
+      "down": "较上一窗口下降 · {{delta}}",
+      "createdBarTitle": "{{bucket}}：创建了 {{value}} 个订阅"
+    },
+    "export": {
+      "button": "导出",
+      "csv": "导出 CSV",
+      "json": "导出 JSON"
+    },
+    "toast": {
+      "exported": "数据分析 {{format}} 导出已下载"
+    }
   }
 }
