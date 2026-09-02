@@ -117,6 +117,8 @@ Runtime source-of-truth documents currently exist for:
   - `api/admin-analytics.md`
   - `admin/analytics.md`
   - `testing/analytics.md`
+- `Admin Internationalization`
+  - `admin/i18n.md`
 
 ## Recommended Reading Order
 
