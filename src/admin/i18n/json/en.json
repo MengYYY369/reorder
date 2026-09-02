@@ -654,5 +654,179 @@
       }
     }
   },
-  "cancellations": { "breadcrumb": "Cancellation" }
+  "cancellations": {
+    "breadcrumb": "Cancellation",
+    "list": {
+      "title": "Cancellation & Retention",
+      "description": "Review cancellation cases, churn reasons, and retention outcomes.",
+      "loadError": "Failed to load cancellation cases.",
+      "empty": "No cancellation cases",
+      "emptyHint": "No cancellation and retention cases match the current filters."
+    },
+    "columns": {
+      "subscription": "Subscription",
+      "reasonCategory": "Reason category",
+      "outcome": "Outcome",
+      "created": "Created"
+    },
+    "filters": {
+      "createdFrom": "Created from",
+      "createdTo": "Created to"
+    },
+    "caseStatus": {
+      "requested": "Requested",
+      "evaluating": "Evaluating",
+      "evaluatingRetention": "Evaluating retention",
+      "retentionOffered": "Retention offered",
+      "retained": "Retained",
+      "paused": "Paused",
+      "canceled": "Canceled"
+    },
+    "outcome": {
+      "retained": "Retained",
+      "paused": "Paused",
+      "canceled": "Canceled"
+    },
+    "offerType": {
+      "pauseOffer": "Pause offer",
+      "discountOffer": "Discount offer",
+      "bonusOffer": "Bonus offer"
+    },
+    "decisionStatus": {
+      "proposed": "Proposed",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "applied": "Applied",
+      "expired": "Expired"
+    },
+    "reasonCategory": {
+      "price": "Price",
+      "productFit": "Product fit",
+      "delivery": "Delivery",
+      "billing": "Billing",
+      "temporaryPause": "Temporary pause",
+      "switchedCompetitor": "Switched competitor",
+      "other": "Other",
+      "unclassified": "Unclassified"
+    },
+    "fields": {
+      "offerType": "Offer type",
+      "finalizedBy": "Finalized by",
+      "finalizedAt": "Finalized at",
+      "cancellationEffectiveAt": "Cancellation effective at",
+      "cancelledAt": "Cancelled at"
+    },
+    "actions": {
+      "applyOffer": "Apply retention offer",
+      "applyPauseOffer": "Apply pause offer",
+      "finalize": "Finalize cancellation",
+      "editReason": "Edit reason"
+    },
+    "toast": {
+      "offerApplied": "Retention offer applied",
+      "finalized": "Cancellation finalized",
+      "reasonUpdated": "Reason updated"
+    },
+    "errors": {
+      "applyOfferFailed": "Failed to apply retention offer",
+      "finalizeFailed": "Failed to finalize cancellation",
+      "reasonUpdateFailed": "Failed to update reason",
+      "reasonRequired": "Reason is required",
+      "offerNotAllowed": "Selected retention offer is not allowed for this case",
+      "pauseOfferRequiresCyclesOrResume": "Pause offer requires pause cycles or resume date",
+      "discountValuePositive": "Discount value must be greater than 0",
+      "bonusValueRequired": "Bonus value is required for free cycle or credit"
+    },
+    "prompt": {
+      "applyPauseTitle": "Apply pause offer?",
+      "applyPauseDescription": "You are about to pause the subscription as a retention outcome and close this case as paused.",
+      "applyDiscountTitle": "Apply discount offer?",
+      "applyDiscountDescription": "You are about to apply a retention discount and close this case as retained.",
+      "applyBonusTitle": "Apply bonus offer?",
+      "applyBonusDescription": "You are about to apply a retention bonus and close this case as retained.",
+      "finalizeTitle": "Finalize cancellation?",
+      "finalizeDescription": "You are about to finalize this case as canceled and update the subscription lifecycle."
+    },
+    "drawer": {
+      "updateReason": "Update reason",
+      "loadingLatest": "Loading latest case data for this action...",
+      "selectOfferType": "Select offer type",
+      "noOffersAvailable": "No retention offers are available for the current subscription state.",
+      "pauseCycles": "Pause cycles",
+      "resumeAt": "Resume at",
+      "discountType": "Discount type",
+      "percentage": "Percentage",
+      "fixed": "Fixed",
+      "discountValue": "Discount value",
+      "durationCycles": "Duration cycles",
+      "bonusType": "Bonus type",
+      "freeCycle": "Free cycle",
+      "gift": "Gift",
+      "credit": "Credit",
+      "bonusValue": "Value",
+      "label": "Label",
+      "optionalLabel": "Optional label",
+      "offerNote": "Offer note",
+      "offerNotePlaceholder": "Optional note attached to the offer payload",
+      "decisionReason": "Decision reason",
+      "decisionReasonPlaceholder": "Optional reason or customer response",
+      "reasonRequiredHint": "Reason is required before final cancel",
+      "notes": "Notes",
+      "optionalOperatorNotes": "Optional operator notes",
+      "optionalFinalNotes": "Optional final cancellation notes",
+      "selectCategory": "Select a category",
+      "changeReason": "Change reason",
+      "optionalUpdateExplanation": "Optional explanation for the update",
+      "captureChurnReason": "Capture the churn reason",
+      "effectiveAt": "Effective at",
+      "immediately": "Immediately",
+      "endOfCycle": "End of cycle",
+      "applyOfferFooter": "Apply offer",
+      "continueFooter": "Continue"
+    },
+    "detail": {
+      "title": "Cancellation case",
+      "header": "Cancellation case",
+      "description": "Review cancellation context, retention actions, linked module summaries, and final outcome.",
+      "loading": "Loading cancellation case details...",
+      "loadError": "Failed to load cancellation case details.",
+      "unavailable": "Cancellation case details are unavailable.",
+      "sections": {
+        "caseOverview": "Case overview",
+        "timeline": "Decision timeline",
+        "offerHistory": "Offer history",
+        "metadata": "Technical metadata",
+        "subscriptionSummary": "Subscription summary",
+        "linkedDunning": "Linked dunning summary",
+        "linkedRenewal": "Linked renewal summary"
+      },
+      "fields": {
+        "offer": "Offer",
+        "decided": "Decided",
+        "applied": "Applied",
+        "scheduledFor": "Scheduled for",
+        "approval": "Approval",
+        "generatedOrder": "Generated order",
+        "attemptCount": "Attempt count",
+        "nextRetry": "Next retry",
+        "lastError": "Last error"
+      },
+      "timeline": {
+        "offerEventRecorded": "Retention offer event recorded",
+        "finalOutcome": "Final outcome",
+        "terminalOutcome": "Case reached a terminal outcome",
+        "effectiveAt": "Effective at {{date}}"
+      },
+      "empty": {
+        "noOutcome": "No final outcome yet",
+        "noReason": "No reason recorded",
+        "noTimelineEntries": "No retention offers or final outcome entries have been recorded yet.",
+        "noOffers": "No retention offers have been recorded for this case yet.",
+        "noPayloadSummary": "No payload summary",
+        "noMetadata": "No metadata was stored for this case.",
+        "noLinkedDunning": "No active dunning case linked",
+        "noLinkedRenewal": "No linked renewal cycle"
+      }
+    }
+  }
 }

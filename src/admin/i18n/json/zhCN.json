@@ -652,5 +652,179 @@
       }
     }
   },
-  "cancellations": { "breadcrumb": "取消" }
+  "cancellations": {
+    "breadcrumb": "取消",
+    "list": {
+      "title": "取消与挽留",
+      "description": "查看取消案件、流失原因与挽留结果。",
+      "loadError": "加载取消案件失败。",
+      "empty": "暂无取消案件",
+      "emptyHint": "没有符合当前筛选条件的取消与挽留案件。"
+    },
+    "columns": {
+      "subscription": "订阅",
+      "reasonCategory": "原因分类",
+      "outcome": "结果",
+      "created": "创建时间"
+    },
+    "filters": {
+      "createdFrom": "创建时间从",
+      "createdTo": "创建时间到"
+    },
+    "caseStatus": {
+      "requested": "已申请",
+      "evaluating": "评估中",
+      "evaluatingRetention": "挽留评估中",
+      "retentionOffered": "已提供挽留优惠",
+      "retained": "已挽留",
+      "paused": "已暂停",
+      "canceled": "已取消"
+    },
+    "outcome": {
+      "retained": "已挽留",
+      "paused": "已暂停",
+      "canceled": "已取消"
+    },
+    "offerType": {
+      "pauseOffer": "暂停优惠",
+      "discountOffer": "折扣优惠",
+      "bonusOffer": "赠额优惠"
+    },
+    "decisionStatus": {
+      "proposed": "已提议",
+      "accepted": "已接受",
+      "rejected": "已拒绝",
+      "applied": "已应用",
+      "expired": "已过期"
+    },
+    "reasonCategory": {
+      "price": "价格",
+      "productFit": "商品不合适",
+      "delivery": "配送",
+      "billing": "账单",
+      "temporaryPause": "临时暂停",
+      "switchedCompetitor": "转向竞争对手",
+      "other": "其他",
+      "unclassified": "未分类"
+    },
+    "fields": {
+      "offerType": "优惠类型",
+      "finalizedBy": "最终处理人",
+      "finalizedAt": "最终处理时间",
+      "cancellationEffectiveAt": "取消生效时间",
+      "cancelledAt": "取消时间"
+    },
+    "actions": {
+      "applyOffer": "应用挽留优惠",
+      "applyPauseOffer": "应用暂停优惠",
+      "finalize": "最终取消",
+      "editReason": "编辑原因"
+    },
+    "toast": {
+      "offerApplied": "挽留优惠已应用",
+      "finalized": "取消已最终处理",
+      "reasonUpdated": "原因已更新"
+    },
+    "errors": {
+      "applyOfferFailed": "应用挽留优惠失败",
+      "finalizeFailed": "最终取消失败",
+      "reasonUpdateFailed": "更新原因失败",
+      "reasonRequired": "请填写原因",
+      "offerNotAllowed": "所选挽留优惠不适用于此案件",
+      "pauseOfferRequiresCyclesOrResume": "暂停优惠需要填写暂停周期数或恢复时间",
+      "discountValuePositive": "折扣值必须大于 0",
+      "bonusValueRequired": "免费周期或抵扣额度的赠额必须填写数值"
+    },
+    "prompt": {
+      "applyPauseTitle": "应用暂停优惠？",
+      "applyPauseDescription": "您即将暂停此订阅作为挽留结果，并将此案件关闭为已暂停。",
+      "applyDiscountTitle": "应用折扣优惠？",
+      "applyDiscountDescription": "您即将应用一项挽留折扣，并将此案件关闭为已挽留。",
+      "applyBonusTitle": "应用赠额优惠？",
+      "applyBonusDescription": "您即将应用一项挽留赠额，并将此案件关闭为已挽留。",
+      "finalizeTitle": "最终取消？",
+      "finalizeDescription": "您即将把此案件最终处理为已取消，并更新订阅生命周期。"
+    },
+    "drawer": {
+      "updateReason": "更新原因",
+      "loadingLatest": "正在加载此操作所需的最新案件数据……",
+      "selectOfferType": "选择优惠类型",
+      "noOffersAvailable": "当前订阅状态下没有可用的挽留优惠。",
+      "pauseCycles": "暂停周期数",
+      "resumeAt": "恢复时间",
+      "discountType": "折扣类型",
+      "percentage": "按百分比",
+      "fixed": "固定金额",
+      "discountValue": "折扣值",
+      "durationCycles": "生效周期数",
+      "bonusType": "赠额类型",
+      "freeCycle": "免费周期",
+      "gift": "礼品",
+      "credit": "抵扣额度",
+      "bonusValue": "数值",
+      "label": "标签",
+      "optionalLabel": "可选标签",
+      "offerNote": "优惠备注",
+      "offerNotePlaceholder": "附加到优惠负载的可选备注",
+      "decisionReason": "决策原因",
+      "decisionReasonPlaceholder": "可选原因或客户反馈",
+      "reasonRequiredHint": "最终取消前必须填写原因",
+      "notes": "备注",
+      "optionalOperatorNotes": "操作员可选备注",
+      "optionalFinalNotes": "最终取消的可选备注",
+      "selectCategory": "选择分类",
+      "changeReason": "变更原因",
+      "optionalUpdateExplanation": "此次更新的可选说明",
+      "captureChurnReason": "请填写流失原因",
+      "effectiveAt": "生效时间",
+      "immediately": "立即",
+      "endOfCycle": "本周期结束时",
+      "applyOfferFooter": "应用优惠",
+      "continueFooter": "继续"
+    },
+    "detail": {
+      "title": "取消案件",
+      "header": "取消案件",
+      "description": "查看取消背景、挽留操作、关联模块摘要与最终结果。",
+      "loading": "正在加载取消案件详情……",
+      "loadError": "加载取消案件详情失败。",
+      "unavailable": "取消案件详情不可用。",
+      "sections": {
+        "caseOverview": "案件概览",
+        "timeline": "决策时间线",
+        "offerHistory": "优惠历史",
+        "metadata": "技术元数据",
+        "subscriptionSummary": "订阅摘要",
+        "linkedDunning": "关联催收摘要",
+        "linkedRenewal": "关联续订摘要"
+      },
+      "fields": {
+        "offer": "优惠",
+        "decided": "决策时间",
+        "applied": "应用时间",
+        "scheduledFor": "排期时间",
+        "approval": "审批",
+        "generatedOrder": "生成的订单",
+        "attemptCount": "尝试次数",
+        "nextRetry": "下次重试",
+        "lastError": "最近错误"
+      },
+      "timeline": {
+        "offerEventRecorded": "已记录挽留优惠事件",
+        "finalOutcome": "最终结果",
+        "terminalOutcome": "案件已到达最终状态",
+        "effectiveAt": "生效于 {{date}}"
+      },
+      "empty": {
+        "noOutcome": "暂无最终结果",
+        "noReason": "未记录原因",
+        "noTimelineEntries": "尚未记录任何挽留优惠或最终结果条目。",
+        "noOffers": "此案件尚未记录任何挽留优惠。",
+        "noPayloadSummary": "无负载摘要",
+        "noMetadata": "此案件未存储元数据。",
+        "noLinkedDunning": "无活跃催收案例",
+        "noLinkedRenewal": "无关联续订周期"
+      }
+    }
+  }
 }
