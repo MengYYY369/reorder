@@ -60,6 +60,120 @@
       "selectVariant": "选择变体",
       "selectVariantHint": "从 {{productTitle}} 中选择一个变体。",
       "selectProductFirst": "请先选择商品。"
+    },
+    "list": {
+      "title": "计划与优惠",
+      "description": "配置商品级和变体级订阅优惠。",
+      "loadError": "加载计划优惠失败。",
+      "backToSubscriptions": "返回订阅",
+      "emptyFiltered": "没有匹配的计划优惠",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无计划优惠",
+      "emptyHint": "创建一个商品级或变体级订阅优惠即可开始。"
+    },
+    "columns": {
+      "name": "名称",
+      "target": "目标",
+      "status": "状态",
+      "frequencies": "频率",
+      "effectiveSource": "生效来源",
+      "updated": "更新时间",
+      "allVariants": "所有变体",
+      "moreCount": "还有 {{count}} 项"
+    },
+    "filters": {
+      "status": "状态",
+      "scope": "范围",
+      "frequency": "频率",
+      "discountRange": "折扣范围",
+      "discountRangeUpTo": "最高 {{max}}"
+    },
+    "status": {
+      "enabled": "启用",
+      "disabled": "停用",
+      "inactive": "未生效"
+    },
+    "scope": {
+      "product": "商品",
+      "variant": "变体"
+    },
+    "actions": {
+      "create": "创建",
+      "edit": "编辑",
+      "enable": "启用",
+      "enabling": "启用中……",
+      "disable": "停用",
+      "disabling": "停用中……"
+    },
+    "toast": {
+      "enabled": "计划优惠已启用",
+      "disabled": "计划优惠已停用",
+      "created": "计划优惠已创建",
+      "updated": "计划优惠已更新"
+    },
+    "errors": {
+      "updateFailed": "更新计划优惠失败",
+      "createFailed": "创建计划优惠失败",
+      "loadFailed": "加载计划优惠失败。"
+    },
+    "prompt": {
+      "enableTitle": "启用计划优惠？",
+      "enableDescription": "您即将启用此计划优惠。是否继续？",
+      "disableTitle": "停用计划优惠？",
+      "disableDescription": "您即将停用此计划优惠。是否继续？",
+      "removeFrequencyTitle": "移除该频率？",
+      "removeFrequencyDescription": "此频率行及其折扣配置将被移除。",
+      "remove": "移除"
+    },
+    "form": {
+      "createTitle": "创建计划优惠",
+      "createDescription": "创建商品级或变体级订阅优惠。",
+      "editTitle": "编辑计划优惠",
+      "loading": "正在加载计划优惠……",
+      "name": "名称",
+      "scope": "范围",
+      "target": "目标",
+      "productLevelConfig": "商品级配置",
+      "variantLevelConfig": "变体级配置",
+      "noProductSelected": "未选择商品",
+      "noVariantSelected": "未选择变体",
+      "change": "更改",
+      "select": "选择",
+      "offerEnabled": "启用优惠",
+      "offerEnabledHint": "创建后立即启用此优惠。",
+      "offerEnabledEditHint": "启用或停用此配置。",
+      "offerRules": "优惠规则",
+      "offerRulesHint": "定义可选的优惠约束，例如最短周期、试用行为和叠加策略。",
+      "offerRulesEditHint": "更新最短周期、试用行为和叠加策略。",
+      "minimumCycles": "最短周期数",
+      "minimumCyclesHint": "如果没有最短订阅周期，请留空。",
+      "stackingPolicy": "叠加策略",
+      "stackingPolicyHint": "控制此优惠是否可以与其他折扣叠加。",
+      "stackingAllowed": "允许叠加",
+      "stackingDisallowAll": "全部禁止",
+      "stackingDisallowSubscriptionDiscounts": "禁止订阅折扣叠加",
+      "trialEnabled": "启用试用",
+      "trialEnabledHint": "允许此优惠包含试用期。",
+      "trialDays": "试用天数",
+      "frequencies": "频率",
+      "frequenciesHint": "定义允许的频率与可选折扣。",
+      "frequenciesEditHint": "更新允许的频率及其折扣。",
+      "addFrequency": "添加频率",
+      "interval": "周期",
+      "value": "频率值",
+      "discountForFrequency": "此频率的折扣",
+      "discountForFrequencyHint": "仅在此频率需要折扣时启用。",
+      "discountType": "折扣类型",
+      "percentage": "按百分比",
+      "fixed": "固定金额",
+      "discountValue": "折扣值"
+    },
+    "validation": {
+      "selectVariant": "请选择变体",
+      "frequencyUnique": "频率不能重复",
+      "discountValueRequired": "请填写折扣值",
+      "trialDaysRequired": "启用试用时必须填写试用天数",
+      "trialDaysPositive": "试用天数必须大于 0"
     }
   },
   "subscriptions": {

@@ -62,6 +62,120 @@
       "selectVariant": "Select variant",
       "selectVariantHint": "Choose a variant from {{productTitle}}.",
       "selectProductFirst": "Select a product first."
+    },
+    "list": {
+      "title": "Plans & Offers",
+      "description": "Configure product-level and variant-level subscription offers.",
+      "loadError": "Failed to load plan offers.",
+      "backToSubscriptions": "Back to Subscriptions",
+      "emptyFiltered": "No matching plan offers",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No plan offers yet",
+      "emptyHint": "Create a product-level or variant-level subscription offer to get started."
+    },
+    "columns": {
+      "name": "Name",
+      "target": "Target",
+      "status": "Status",
+      "frequencies": "Frequencies",
+      "effectiveSource": "Effective source",
+      "updated": "Updated",
+      "allVariants": "All variants",
+      "moreCount": "+{{count}} more"
+    },
+    "filters": {
+      "status": "Status",
+      "scope": "Scope",
+      "frequency": "Frequency",
+      "discountRange": "Discount range",
+      "discountRangeUpTo": "Up to {{max}}"
+    },
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "inactive": "Inactive"
+    },
+    "scope": {
+      "product": "Product",
+      "variant": "Variant"
+    },
+    "actions": {
+      "create": "Create",
+      "edit": "Edit",
+      "enable": "Enable",
+      "enabling": "Enabling...",
+      "disable": "Disable",
+      "disabling": "Disabling..."
+    },
+    "toast": {
+      "enabled": "Plan offer enabled",
+      "disabled": "Plan offer disabled",
+      "created": "Plan offer created",
+      "updated": "Plan offer updated"
+    },
+    "errors": {
+      "updateFailed": "Failed to update plan offer",
+      "createFailed": "Failed to create plan offer",
+      "loadFailed": "Failed to load plan offer."
+    },
+    "prompt": {
+      "enableTitle": "Enable plan offer?",
+      "enableDescription": "You are about to enable this plan offer. Do you want to continue?",
+      "disableTitle": "Disable plan offer?",
+      "disableDescription": "You are about to disable this plan offer. Do you want to continue?",
+      "removeFrequencyTitle": "Remove frequency?",
+      "removeFrequencyDescription": "This frequency row and its discount configuration will be removed.",
+      "remove": "Remove"
+    },
+    "form": {
+      "createTitle": "Create plan offer",
+      "createDescription": "Create a product-level or variant-level subscription offer.",
+      "editTitle": "Edit plan offer",
+      "loading": "Loading plan offer...",
+      "name": "Name",
+      "scope": "Scope",
+      "target": "Target",
+      "productLevelConfig": "Product-level configuration",
+      "variantLevelConfig": "Variant-level configuration",
+      "noProductSelected": "No product selected",
+      "noVariantSelected": "No variant selected",
+      "change": "Change",
+      "select": "Select",
+      "offerEnabled": "Offer enabled",
+      "offerEnabledHint": "Enable this offer as soon as it is created.",
+      "offerEnabledEditHint": "Enable or disable this configuration.",
+      "offerRules": "Offer rules",
+      "offerRulesHint": "Define optional offer constraints such as minimum period, trial behavior, and stacking policy.",
+      "offerRulesEditHint": "Update minimum period, trial behavior, and stacking policy.",
+      "minimumCycles": "Minimum cycles",
+      "minimumCyclesHint": "Leave empty if there is no minimum subscription period.",
+      "stackingPolicy": "Stacking policy",
+      "stackingPolicyHint": "Control whether this offer can stack with other discounts.",
+      "stackingAllowed": "Allowed",
+      "stackingDisallowAll": "Disallow all",
+      "stackingDisallowSubscriptionDiscounts": "Disallow subscription discounts",
+      "trialEnabled": "Trial enabled",
+      "trialEnabledHint": "Allow a trial period for this offer.",
+      "trialDays": "Trial days",
+      "frequencies": "Frequencies",
+      "frequenciesHint": "Define allowed frequencies and optional discounts.",
+      "frequenciesEditHint": "Update allowed frequencies and their discounts.",
+      "addFrequency": "Add frequency",
+      "interval": "Interval",
+      "value": "Value",
+      "discountForFrequency": "Discount for this frequency",
+      "discountForFrequencyHint": "Enable only if this frequency should have a discount.",
+      "discountType": "Discount type",
+      "percentage": "Percentage",
+      "fixed": "Fixed",
+      "discountValue": "Discount value"
+    },
+    "validation": {
+      "selectVariant": "Select a variant",
+      "frequencyUnique": "Frequency must be unique",
+      "discountValueRequired": "Discount value is required",
+      "trialDaysRequired": "Trial days is required when trial is enabled",
+      "trialDaysPositive": "Trial days must be greater than 0"
     }
   },
   "subscriptions": {

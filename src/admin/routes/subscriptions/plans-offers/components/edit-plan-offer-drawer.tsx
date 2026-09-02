@@ -15,6 +15,7 @@ import {
 } from "@medusajs/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { Controller, useFieldArray, useForm } from "react-hook-form"
 import { z } from "zod"
 import { sdk } from "../../../../lib/client"
@@ -59,7 +60,7 @@ const editPlanOfferSchema = z
       if (seen.has(key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Frequency must be unique",
+          message: "planOffers.validation.frequencyUnique",
           path: ["frequency_rows", index, "value"],
         })
       }
@@ -69,7 +70,7 @@ const editPlanOfferSchema = z
       if (row.has_discount && row.discount_value === null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Discount value is required",
+          message: "planOffers.validation.discountValueRequired",
           path: ["frequency_rows", index, "discount_value"],
         })
       }
@@ -78,7 +79,7 @@ const editPlanOfferSchema = z
     if (values.trial_enabled && values.trial_days === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Trial days is required when trial is enabled",
+        message: "planOffers.validation.trialDaysRequired",
         path: ["trial_days"],
       })
     }
@@ -90,7 +91,7 @@ const editPlanOfferSchema = z
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Trial days must be greater than 0",
+        message: "planOffers.validation.trialDaysPositive",
         path: ["trial_days"],
       })
     }
@@ -109,6 +110,7 @@ export const EditPlanOfferDrawer = ({
   onOpenChange,
   planOfferId,
 }: EditPlanOfferDrawerProps) => {
+  const { t } = useTranslation("reorder")
   const queryClient = useQueryClient()
   const prompt = usePrompt()
 
@@ -205,14 +207,14 @@ export const EditPlanOfferDrawer = ({
             })
           : Promise.resolve(),
       ])
-      toast.success("Plan offer updated")
+      toast.success(t("planOffers.toast.updated"))
       onOpenChange(false)
     },
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error
           ? mutationError.message
-          : "Failed to update plan offer"
+          : t("planOffers.errors.updateFailed")
       )
     },
   })
@@ -248,11 +250,10 @@ export const EditPlanOfferDrawer = ({
     }
 
     const confirmed = await prompt({
-      title: "Remove frequency?",
-      description:
-        "This frequency row and its discount configuration will be removed.",
-      confirmText: "Remove",
-      cancelText: "Cancel",
+      title: t("planOffers.prompt.removeFrequencyTitle"),
+      description: t("planOffers.prompt.removeFrequencyDescription"),
+      confirmText: t("planOffers.prompt.remove"),
+      cancelText: t("common.actions.cancel"),
     })
 
     if (!confirmed) {
@@ -281,7 +282,7 @@ export const EditPlanOfferDrawer = ({
     <Drawer open={open} onOpenChange={onOpenChange}>
       <Drawer.Content className="flex flex-col overflow-hidden">
         <Drawer.Header>
-          <Drawer.Title>Edit plan offer</Drawer.Title>
+          <Drawer.Title>{t("planOffers.form.editTitle")}</Drawer.Title>
         </Drawer.Header>
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <Drawer.Body className="flex min-h-0 flex-1 flex-col gap-y-6 overflow-y-auto p-4">
@@ -289,20 +290,22 @@ export const EditPlanOfferDrawer = ({
               <div className="flex items-center gap-x-2 text-ui-fg-subtle">
                 <div className="bg-ui-fg-subtle size-2 rounded-full" />
                 <Text size="small" leading="compact" className="text-ui-fg-subtle">
-                  Loading plan offer...
+                  {t("planOffers.form.loading")}
                 </Text>
               </div>
             ) : null}
             {isError ? (
               <Alert variant="error">
-                {error instanceof Error ? error.message : "Failed to load plan offer."}
+                {error instanceof Error
+                  ? error.message
+                  : t("planOffers.errors.loadFailed")}
               </Alert>
             ) : null}
             {!isLoading && !isError && detail ? (
               <>
                 <div className="grid gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="edit-name">Name</Label>
+                    <Label htmlFor="edit-name">{t("planOffers.form.name")}</Label>
                     <Input id="edit-name" {...form.register("name")} />
                     <FieldError message={form.formState.errors.name?.message} />
                   </div>
@@ -310,7 +313,7 @@ export const EditPlanOfferDrawer = ({
                   <div className="grid gap-3 rounded-lg border border-ui-border-base p-4">
                     <div className="grid gap-1">
                       <Text size="small" leading="compact" weight="plus">
-                        Target
+                        {t("planOffers.form.target")}
                       </Text>
                       <Text
                         size="small"
@@ -328,8 +331,8 @@ export const EditPlanOfferDrawer = ({
                         className="text-ui-fg-subtle"
                       >
                         {detail.target.scope === "product"
-                          ? "Product-level configuration"
-                          : "Variant-level configuration"}
+                          ? t("planOffers.form.productLevelConfig")
+                          : t("planOffers.form.variantLevelConfig")}
                       </Text>
                     </div>
                   </div>
@@ -338,14 +341,14 @@ export const EditPlanOfferDrawer = ({
                     <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
                       <div className="flex flex-col">
                         <Text size="small" leading="compact" weight="plus">
-                          Offer enabled
+                          {t("planOffers.form.offerEnabled")}
                         </Text>
                         <Text
                           size="small"
                           leading="compact"
                           className="text-ui-fg-subtle"
                         >
-                          Enable or disable this configuration.
+                          {t("planOffers.form.offerEnabledEditHint")}
                         </Text>
                       </div>
                       <Controller
@@ -365,13 +368,15 @@ export const EditPlanOfferDrawer = ({
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
-                      <Heading level="h2">Frequencies</Heading>
+                      <Heading level="h2">
+                        {t("planOffers.form.frequencies")}
+                      </Heading>
                       <Text
                         size="small"
                         leading="compact"
                         className="text-ui-fg-subtle"
                       >
-                        Update allowed frequencies and their discounts.
+                        {t("planOffers.form.frequenciesEditHint")}
                       </Text>
                     </div>
                     <Button
@@ -388,26 +393,27 @@ export const EditPlanOfferDrawer = ({
                         })
                       }
                     >
-                      Add frequency
+                      {t("planOffers.form.addFrequency")}
                     </Button>
                   </div>
 
                   <div className="grid gap-4 rounded-lg border border-ui-border-base p-4">
                     <div className="flex flex-col gap-y-1">
-                      <Heading level="h2">Offer rules</Heading>
+                      <Heading level="h2">{t("planOffers.form.offerRules")}</Heading>
                       <Text
                         size="small"
                         leading="compact"
                         className="text-ui-fg-subtle"
                       >
-                        Update minimum period, trial behavior, and stacking
-                        policy.
+                        {t("planOffers.form.offerRulesEditHint")}
                       </Text>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div className="grid gap-2">
-                        <Label htmlFor="edit-minimum-cycles">Minimum cycles</Label>
+                        <Label htmlFor="edit-minimum-cycles">
+                          {t("planOffers.form.minimumCycles")}
+                        </Label>
                         <Input
                           id="edit-minimum-cycles"
                           type="number"
@@ -423,15 +429,16 @@ export const EditPlanOfferDrawer = ({
                           leading="compact"
                           className="text-ui-fg-subtle"
                         >
-                          Leave empty if there is no minimum subscription
-                          period.
+                          {t("planOffers.form.minimumCyclesHint")}
                         </Text>
                         <FieldError
                           message={form.formState.errors.minimum_cycles?.message}
                         />
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor="edit-stacking-policy">Stacking policy</Label>
+                        <Label htmlFor="edit-stacking-policy">
+                          {t("planOffers.form.stackingPolicy")}
+                        </Label>
                         <Controller
                           control={form.control}
                           name="stacking_policy"
@@ -444,12 +451,16 @@ export const EditPlanOfferDrawer = ({
                                 <Select.Value />
                               </Select.Trigger>
                               <Select.Content>
-                                <Select.Item value="allowed">Allowed</Select.Item>
+                                <Select.Item value="allowed">
+                                  {t("planOffers.form.stackingAllowed")}
+                                </Select.Item>
                                 <Select.Item value="disallow_all">
-                                  Disallow all
+                                  {t("planOffers.form.stackingDisallowAll")}
                                 </Select.Item>
                                 <Select.Item value="disallow_subscription_discounts">
-                                  Disallow subscription discounts
+                                  {t(
+                                    "planOffers.form.stackingDisallowSubscriptionDiscounts"
+                                  )}
                                 </Select.Item>
                               </Select.Content>
                             </Select>
@@ -460,7 +471,7 @@ export const EditPlanOfferDrawer = ({
                           leading="compact"
                           className="text-ui-fg-subtle"
                         >
-                          Control whether this offer can stack with other discounts.
+                          {t("planOffers.form.stackingPolicyHint")}
                         </Text>
                       </div>
                     </div>
@@ -469,14 +480,14 @@ export const EditPlanOfferDrawer = ({
                       <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
                         <div className="flex flex-col">
                           <Text size="small" leading="compact" weight="plus">
-                            Trial enabled
+                            {t("planOffers.form.trialEnabled")}
                           </Text>
                           <Text
                             size="small"
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            Allow a trial period for this offer.
+                            {t("planOffers.form.trialEnabledHint")}
                           </Text>
                         </div>
                         <Controller
@@ -500,7 +511,9 @@ export const EditPlanOfferDrawer = ({
                       </div>
 
                       <div className="grid gap-2">
-                        <Label htmlFor="edit-trial-days">Trial days</Label>
+                        <Label htmlFor="edit-trial-days">
+                          {t("planOffers.form.trialDays")}
+                        </Label>
                         <Input
                           id="edit-trial-days"
                           type="number"
@@ -534,7 +547,7 @@ export const EditPlanOfferDrawer = ({
                       >
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_140px_auto]">
                           <div className="grid gap-2">
-                            <Label>Interval</Label>
+                            <Label>{t("planOffers.form.interval")}</Label>
                             <Controller
                               control={form.control}
                               name={`frequency_rows.${index}.interval`}
@@ -548,13 +561,13 @@ export const EditPlanOfferDrawer = ({
                                   </Select.Trigger>
                                   <Select.Content>
                                     <Select.Item value={PlanOfferFrequencyInterval.WEEK}>
-                                      Weekly
+                                      {t("common.intervals.week")}
                                     </Select.Item>
                                     <Select.Item value={PlanOfferFrequencyInterval.MONTH}>
-                                      Monthly
+                                      {t("common.intervals.month")}
                                     </Select.Item>
                                     <Select.Item value={PlanOfferFrequencyInterval.YEAR}>
-                                      Yearly
+                                      {t("common.intervals.year")}
                                     </Select.Item>
                                   </Select.Content>
                                 </Select>
@@ -562,7 +575,7 @@ export const EditPlanOfferDrawer = ({
                             />
                           </div>
                           <div className="grid gap-2">
-                            <Label>Value</Label>
+                            <Label>{t("planOffers.form.value")}</Label>
                             <Input
                               type="number"
                               min={1}
@@ -591,14 +604,14 @@ export const EditPlanOfferDrawer = ({
                           <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
                             <div className="flex flex-col">
                               <Text size="small" leading="compact" weight="plus">
-                                Discount for this frequency
+                                {t("planOffers.form.discountForFrequency")}
                               </Text>
                               <Text
                                 size="small"
                                 leading="compact"
                                 className="text-ui-fg-subtle"
                               >
-                                Enable only if this frequency should have a discount.
+                                {t("planOffers.form.discountForFrequencyHint")}
                               </Text>
                             </div>
                             <Controller
@@ -616,7 +629,7 @@ export const EditPlanOfferDrawer = ({
                           {form.watch(`frequency_rows.${index}.has_discount`) ? (
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <div className="grid gap-2">
-                                <Label>Discount type</Label>
+                                <Label>{t("planOffers.form.discountType")}</Label>
                                 <Controller
                                   control={form.control}
                                   name={`frequency_rows.${index}.discount_type`}
@@ -632,10 +645,10 @@ export const EditPlanOfferDrawer = ({
                                         <Select.Item
                                           value={PlanOfferDiscountType.PERCENTAGE}
                                         >
-                                          Percentage
+                                          {t("planOffers.form.percentage")}
                                         </Select.Item>
                                         <Select.Item value={PlanOfferDiscountType.FIXED}>
-                                          Fixed
+                                          {t("planOffers.form.fixed")}
                                         </Select.Item>
                                       </Select.Content>
                                     </Select>
@@ -643,7 +656,7 @@ export const EditPlanOfferDrawer = ({
                                 />
                               </div>
                               <div className="grid gap-2">
-                                <Label>Discount value</Label>
+                                <Label>{t("planOffers.form.discountValue")}</Label>
                                 <Input
                                   type="number"
                                   min={0}
@@ -684,7 +697,7 @@ export const EditPlanOfferDrawer = ({
                   variant="secondary"
                   disabled={updateMutation.isPending}
                 >
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
               </Drawer.Close>
               <Button
@@ -693,7 +706,7 @@ export const EditPlanOfferDrawer = ({
                 isLoading={updateMutation.isPending}
                 disabled={isLoading || isError || !detail}
               >
-                Save
+                {t("common.actions.save")}
               </Button>
             </div>
           </Drawer.Footer>
@@ -704,13 +717,15 @@ export const EditPlanOfferDrawer = ({
 }
 
 const FieldError = ({ message }: { message?: string }) => {
+  const { t } = useTranslation("reorder")
+
   if (!message) {
     return null
   }
 
   return (
     <Text size="small" leading="compact" className="text-ui-fg-error">
-      {message}
+      {t(message)}
     </Text>
   )
 }

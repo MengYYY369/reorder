@@ -15,6 +15,7 @@ import {
 } from "@medusajs/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useFieldArray, useForm, Controller } from "react-hook-form"
 import { z } from "zod"
 import { sdk } from "../../../../lib/client"
@@ -62,7 +63,7 @@ const createPlanOfferSchema = z
     if (values.scope === PlanOfferScope.VARIANT && !values.variant_id) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Select a variant",
+        message: "planOffers.validation.selectVariant",
         path: ["variant_id"],
       })
     }
@@ -75,7 +76,7 @@ const createPlanOfferSchema = z
       if (seen.has(key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Frequency must be unique",
+          message: "planOffers.validation.frequencyUnique",
           path: ["frequency_rows", index, "value"],
         })
       }
@@ -85,7 +86,7 @@ const createPlanOfferSchema = z
       if (row.has_discount && row.discount_value === null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Discount value is required",
+          message: "planOffers.validation.discountValueRequired",
           path: ["frequency_rows", index, "discount_value"],
         })
       }
@@ -94,7 +95,7 @@ const createPlanOfferSchema = z
     if (values.trial_enabled && values.trial_days === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Trial days is required when trial is enabled",
+        message: "planOffers.validation.trialDaysRequired",
         path: ["trial_days"],
       })
     }
@@ -106,7 +107,7 @@ const createPlanOfferSchema = z
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Trial days must be greater than 0",
+        message: "planOffers.validation.trialDaysPositive",
         path: ["trial_days"],
       })
     }
@@ -146,6 +147,7 @@ export const CreatePlanOfferModal = ({
   open,
   onOpenChange,
 }: CreatePlanOfferModalProps) => {
+  const { t } = useTranslation("reorder")
   const queryClient = useQueryClient()
   const prompt = usePrompt()
   const [productPickerOpen, setProductPickerOpen] = useState(false)
@@ -200,13 +202,15 @@ export const CreatePlanOfferModal = ({
       await queryClient.invalidateQueries({
         queryKey: adminPlanOffersQueryKeys.all,
       })
-      toast.success("Plan offer created")
+      toast.success(t("planOffers.toast.created"))
       form.reset(defaultValues)
       onOpenChange(false)
     },
     onError: (error) => {
       toast.error(
-        error instanceof Error ? error.message : "Failed to create plan offer"
+        error instanceof Error
+          ? error.message
+          : t("planOffers.errors.createFailed")
       )
     },
   })
@@ -248,11 +252,10 @@ export const CreatePlanOfferModal = ({
     }
 
     const confirmed = await prompt({
-      title: "Remove frequency?",
-      description:
-        "This frequency row and its discount configuration will be removed.",
-      confirmText: "Remove",
-      cancelText: "Cancel",
+      title: t("planOffers.prompt.removeFrequencyTitle"),
+      description: t("planOffers.prompt.removeFrequencyDescription"),
+      confirmText: t("planOffers.prompt.remove"),
+      cancelText: t("common.actions.cancel"),
     })
 
     if (!confirmed) {
@@ -300,7 +303,7 @@ export const CreatePlanOfferModal = ({
                     variant="secondary"
                     disabled={createMutation.isPending}
                   >
-                    Cancel
+                    {t("common.actions.cancel")}
                   </Button>
                 </FocusModal.Close>
                 <Button
@@ -308,7 +311,7 @@ export const CreatePlanOfferModal = ({
                   size="small"
                   isLoading={createMutation.isPending}
                 >
-                  Create
+                  {t("planOffers.actions.create")}
                 </Button>
               </div>
             </FocusModal.Header>
@@ -316,25 +319,25 @@ export const CreatePlanOfferModal = ({
               <div className="flex flex-1 flex-col items-center overflow-y-auto">
                 <div className="mx-auto flex w-full max-w-[720px] flex-col gap-y-8 px-2 py-16">
                   <div className="flex flex-col gap-y-1">
-                    <Heading>Create plan offer</Heading>
+                    <Heading>{t("planOffers.form.createTitle")}</Heading>
                     <Text
                       size="small"
                       leading="compact"
                       className="text-ui-fg-subtle"
                     >
-                      Create a product-level or variant-level subscription offer.
+                      {t("planOffers.form.createDescription")}
                     </Text>
                   </div>
 
                   <div className="grid gap-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="create-name">Name</Label>
+                      <Label htmlFor="create-name">{t("planOffers.form.name")}</Label>
                       <Input id="create-name" {...form.register("name")} />
                       <FieldError message={form.formState.errors.name?.message} />
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="create-scope">Scope</Label>
+                      <Label htmlFor="create-scope">{t("planOffers.form.scope")}</Label>
                       <Controller
                         control={form.control}
                         name="scope"
@@ -354,10 +357,10 @@ export const CreatePlanOfferModal = ({
                             </Select.Trigger>
                             <Select.Content>
                               <Select.Item value={PlanOfferScope.PRODUCT}>
-                                Product
+                                {t("planOffers.scope.product")}
                               </Select.Item>
                               <Select.Item value={PlanOfferScope.VARIANT}>
-                                Variant
+                                {t("planOffers.scope.variant")}
                               </Select.Item>
                             </Select.Content>
                           </Select>
@@ -369,14 +372,14 @@ export const CreatePlanOfferModal = ({
                       <div className="flex items-center justify-between">
                         <div className="flex flex-col">
                           <Text size="small" leading="compact" weight="plus">
-                            Product
+                            {t("common.fields.product")}
                           </Text>
                           <Text
                             size="small"
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            {productTitle || "No product selected"}
+                            {productTitle || t("planOffers.form.noProductSelected")}
                           </Text>
                         </div>
                         <Button
@@ -385,7 +388,9 @@ export const CreatePlanOfferModal = ({
                           variant="secondary"
                           onClick={() => setProductPickerOpen(true)}
                         >
-                          {productId ? "Change" : "Select"}
+                          {productId
+                            ? t("planOffers.form.change")
+                            : t("planOffers.form.select")}
                         </Button>
                       </div>
                       <FieldError
@@ -401,14 +406,15 @@ export const CreatePlanOfferModal = ({
                         <div className="flex items-center justify-between">
                           <div className="flex flex-col">
                             <Text size="small" leading="compact" weight="plus">
-                              Variant
+                              {t("common.fields.variant")}
                             </Text>
                             <Text
                               size="small"
                               leading="compact"
                               className="text-ui-fg-subtle"
                             >
-                              {variantTitle || "No variant selected"}
+                              {variantTitle ||
+                                t("planOffers.form.noVariantSelected")}
                             </Text>
                           </div>
                           <Button
@@ -418,7 +424,9 @@ export const CreatePlanOfferModal = ({
                             disabled={!productId}
                             onClick={() => setVariantPickerOpen(true)}
                           >
-                            {variantId ? "Change" : "Select"}
+                            {variantId
+                              ? t("planOffers.form.change")
+                              : t("planOffers.form.select")}
                           </Button>
                         </div>
                         <FieldError message={form.formState.errors.variant_id?.message} />
@@ -429,14 +437,14 @@ export const CreatePlanOfferModal = ({
                       <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
                         <div className="flex flex-col">
                           <Text size="small" leading="compact" weight="plus">
-                            Offer enabled
+                            {t("planOffers.form.offerEnabled")}
                           </Text>
                           <Text
                             size="small"
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            Enable this offer as soon as it is created.
+                            {t("planOffers.form.offerEnabledHint")}
                           </Text>
                         </div>
                         <Controller
@@ -454,20 +462,21 @@ export const CreatePlanOfferModal = ({
 
                     <div className="grid gap-4 rounded-lg border border-ui-border-base p-4">
                       <div className="flex flex-col gap-y-1">
-                        <Heading level="h2">Offer rules</Heading>
+                        <Heading level="h2">{t("planOffers.form.offerRules")}</Heading>
                         <Text
                           size="small"
                           leading="compact"
                           className="text-ui-fg-subtle"
                         >
-                          Define optional offer constraints such as minimum
-                          period, trial behavior, and stacking policy.
+                          {t("planOffers.form.offerRulesHint")}
                         </Text>
                       </div>
 
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div className="grid gap-2">
-                          <Label htmlFor="minimum-cycles">Minimum cycles</Label>
+                          <Label htmlFor="minimum-cycles">
+                            {t("planOffers.form.minimumCycles")}
+                          </Label>
                           <Input
                             id="minimum-cycles"
                             type="number"
@@ -483,15 +492,16 @@ export const CreatePlanOfferModal = ({
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            Leave empty if there is no minimum subscription
-                            period.
+                            {t("planOffers.form.minimumCyclesHint")}
                           </Text>
                           <FieldError
                             message={form.formState.errors.minimum_cycles?.message}
                           />
                         </div>
                         <div className="grid gap-2">
-                          <Label htmlFor="stacking-policy">Stacking policy</Label>
+                          <Label htmlFor="stacking-policy">
+                            {t("planOffers.form.stackingPolicy")}
+                          </Label>
                           <Controller
                             control={form.control}
                             name="stacking_policy"
@@ -505,13 +515,15 @@ export const CreatePlanOfferModal = ({
                                 </Select.Trigger>
                                 <Select.Content>
                                   <Select.Item value="allowed">
-                                    Allowed
+                                    {t("planOffers.form.stackingAllowed")}
                                   </Select.Item>
                                   <Select.Item value="disallow_all">
-                                    Disallow all
+                                    {t("planOffers.form.stackingDisallowAll")}
                                   </Select.Item>
                                   <Select.Item value="disallow_subscription_discounts">
-                                    Disallow subscription discounts
+                                    {t(
+                                      "planOffers.form.stackingDisallowSubscriptionDiscounts"
+                                    )}
                                   </Select.Item>
                                 </Select.Content>
                               </Select>
@@ -522,25 +534,25 @@ export const CreatePlanOfferModal = ({
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            Control whether this offer can stack with other discounts.
+                            {t("planOffers.form.stackingPolicyHint")}
                           </Text>
                         </div>
                       </div>
 
                       <div className="grid gap-3">
                         <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
-                          <div className="flex flex-col">
-                            <Text size="small" leading="compact" weight="plus">
-                              Trial enabled
-                            </Text>
-                            <Text
-                              size="small"
-                              leading="compact"
-                              className="text-ui-fg-subtle"
-                            >
-                              Allow a trial period for this offer.
-                            </Text>
-                          </div>
+                        <div className="flex flex-col">
+                          <Text size="small" leading="compact" weight="plus">
+                            {t("planOffers.form.trialEnabled")}
+                          </Text>
+                          <Text
+                            size="small"
+                            leading="compact"
+                            className="text-ui-fg-subtle"
+                          >
+                            {t("planOffers.form.trialEnabledHint")}
+                          </Text>
+                        </div>
                           <Controller
                             control={form.control}
                             name="trial_enabled"
@@ -562,7 +574,9 @@ export const CreatePlanOfferModal = ({
                         </div>
 
                         <div className="grid gap-2">
-                          <Label htmlFor="trial-days">Trial days</Label>
+                          <Label htmlFor="trial-days">
+                            {t("planOffers.form.trialDays")}
+                          </Label>
                           <Input
                             id="trial-days"
                             type="number"
@@ -591,13 +605,15 @@ export const CreatePlanOfferModal = ({
                     <div className="grid gap-4">
                       <div className="flex items-center justify-between">
                         <div className="flex flex-col">
-                          <Heading level="h2">Frequencies</Heading>
+                          <Heading level="h2">
+                            {t("planOffers.form.frequencies")}
+                          </Heading>
                           <Text
                             size="small"
                             leading="compact"
                             className="text-ui-fg-subtle"
                           >
-                            Define allowed frequencies and optional discounts.
+                            {t("planOffers.form.frequenciesHint")}
                           </Text>
                         </div>
                         <Button
@@ -615,7 +631,7 @@ export const CreatePlanOfferModal = ({
                           }
                         >
                           <Plus />
-                          Add frequency
+                          {t("planOffers.form.addFrequency")}
                         </Button>
                       </div>
 
@@ -627,7 +643,7 @@ export const CreatePlanOfferModal = ({
                           >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_140px_auto]">
                               <div className="grid gap-2">
-                                <Label>Interval</Label>
+                                <Label>{t("planOffers.form.interval")}</Label>
                                 <Controller
                                   control={form.control}
                                   name={`frequency_rows.${index}.interval`}
@@ -641,13 +657,13 @@ export const CreatePlanOfferModal = ({
                                       </Select.Trigger>
                                       <Select.Content>
                                         <Select.Item value={PlanOfferFrequencyInterval.WEEK}>
-                                          Weekly
+                                          {t("common.intervals.week")}
                                         </Select.Item>
                                         <Select.Item value={PlanOfferFrequencyInterval.MONTH}>
-                                          Monthly
+                                          {t("common.intervals.month")}
                                         </Select.Item>
                                         <Select.Item value={PlanOfferFrequencyInterval.YEAR}>
-                                          Yearly
+                                          {t("common.intervals.year")}
                                         </Select.Item>
                                       </Select.Content>
                                     </Select>
@@ -655,7 +671,7 @@ export const CreatePlanOfferModal = ({
                                 />
                               </div>
                               <div className="grid gap-2">
-                                <Label>Value</Label>
+                                <Label>{t("planOffers.form.value")}</Label>
                                 <Input
                                   type="number"
                                   min={1}
@@ -684,14 +700,14 @@ export const CreatePlanOfferModal = ({
                               <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
                                 <div className="flex flex-col">
                                   <Text size="small" leading="compact" weight="plus">
-                                    Discount for this frequency
+                                    {t("planOffers.form.discountForFrequency")}
                                   </Text>
                                   <Text
                                     size="small"
                                     leading="compact"
                                     className="text-ui-fg-subtle"
                                   >
-                                    Enable only if this frequency should have a discount.
+                                    {t("planOffers.form.discountForFrequencyHint")}
                                   </Text>
                                 </div>
                                 <Controller
@@ -709,7 +725,7 @@ export const CreatePlanOfferModal = ({
                               {form.watch(`frequency_rows.${index}.has_discount`) ? (
                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                   <div className="grid gap-2">
-                                    <Label>Discount type</Label>
+                                    <Label>{t("planOffers.form.discountType")}</Label>
                                     <Controller
                                       control={form.control}
                                       name={`frequency_rows.${index}.discount_type`}
@@ -725,12 +741,12 @@ export const CreatePlanOfferModal = ({
                                             <Select.Item
                                               value={PlanOfferDiscountType.PERCENTAGE}
                                             >
-                                              Percentage
+                                              {t("planOffers.form.percentage")}
                                             </Select.Item>
                                             <Select.Item
                                               value={PlanOfferDiscountType.FIXED}
                                             >
-                                              Fixed
+                                              {t("planOffers.form.fixed")}
                                             </Select.Item>
                                           </Select.Content>
                                         </Select>
@@ -738,7 +754,7 @@ export const CreatePlanOfferModal = ({
                                     />
                                   </div>
                                   <div className="grid gap-2">
-                                    <Label>Discount value</Label>
+                                    <Label>{t("planOffers.form.discountValue")}</Label>
                                     <Input
                                       type="number"
                                       min={0}
@@ -780,13 +796,15 @@ export const CreatePlanOfferModal = ({
 }
 
 const FieldError = ({ message }: { message?: string }) => {
+  const { t } = useTranslation("reorder")
+
   if (!message) {
     return null
   }
 
   return (
     <Text size="small" leading="compact" className="text-ui-fg-error">
-      {message}
+      {t(message)}
     </Text>
   )
 }
