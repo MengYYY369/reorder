@@ -359,7 +359,298 @@
       }
     }
   },
-  "renewals": { "breadcrumb": "续订" },
-  "dunning": { "breadcrumb": "催收" },
+  "renewals": {
+    "breadcrumb": "续订",
+    "list": {
+      "title": "续订",
+      "description": "监控已排期的订阅续订周期及其最新执行状态。",
+      "loadError": "加载续订失败。",
+      "emptyFiltered": "没有匹配的续订周期",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无续订周期",
+      "emptyHint": "订阅排期进入处理后，续订周期将显示在这里。"
+    },
+    "columns": {
+      "scheduled": "排期时间",
+      "subscription": "订阅",
+      "status": "状态",
+      "approval": "审批",
+      "lastAttempt": "最近一次尝试",
+      "operationalCycle": "实际周期：{{value}}",
+      "noAttemptsYet": "暂无尝试记录"
+    },
+    "filters": {
+      "status": "状态",
+      "approvalStatus": "审批状态",
+      "lastAttemptResult": "最近一次尝试结果",
+      "scheduledFrom": "排期时间起",
+      "scheduledTo": "排期时间至"
+    },
+    "status": {
+      "scheduled": "已排期",
+      "processing": "正在处理",
+      "succeeded": "已成功",
+      "failed": "已失败"
+    },
+    "attemptStatus": {
+      "processing": "进行中",
+      "succeeded": "已成功",
+      "failed": "已失败"
+    },
+    "approval": {
+      "notRequired": "无需审批",
+      "pending": "待审批",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "pendingApproval": "待审批"
+    },
+    "relativeStatus": {
+      "awaitingProcessing": "等待处理",
+      "currentlyProcessing": "正在处理",
+      "processed": "已处理",
+      "needsReview": "需要复核"
+    },
+    "detail": {
+      "title": "续订",
+      "loading": "正在加载续订详情……",
+      "loadError": "加载续订详情失败。",
+      "unavailable": "续订详情不可用。",
+      "header": "续订周期",
+      "description": "查看执行状态、审批状态、关联记录与尝试历史。",
+      "actions": {
+        "forceRenewal": "立即续订",
+        "forcing": "续订中……",
+        "approveChanges": "批准变更",
+        "rejectChanges": "拒绝变更",
+        "approve": "批准",
+        "reject": "拒绝"
+      },
+      "prompt": {
+        "forceTitle": "立即续订？",
+        "forceDescription": "您即将手动触发此续订周期。是否继续？",
+        "approveTitle": "批准变更？",
+        "approveDescription": "您即将批准此续订周期的待处理变更。",
+        "rejectTitle": "拒绝变更？",
+        "rejectDescription": "您即将拒绝此续订周期的待处理变更。"
+      },
+      "toast": {
+        "forced": "续订已触发",
+        "approved": "待处理变更已批准",
+        "rejected": "待处理变更已拒绝"
+      },
+      "errors": {
+        "forceFailed": "触发续订失败",
+        "approveFailed": "批准变更失败",
+        "rejectFailed": "拒绝变更失败",
+        "reasonRequired": "请填写原因"
+      },
+      "sections": {
+        "cycleOverview": "周期概览",
+        "approvalSummary": "审批摘要",
+        "pendingChanges": "待处理变更",
+        "attemptHistory": "尝试历史",
+        "technicalMetadata": "技术元数据",
+        "subscriptionSummary": "订阅摘要",
+        "generatedOrderSummary": "生成的订单摘要"
+      },
+      "fields": {
+        "projectedDelivery": "预计交付时间",
+        "operationalCycle": "实际周期",
+        "processedAt": "处理时间",
+        "createdAt": "创建时间",
+        "lastError": "最近错误",
+        "noErrorRecorded": "无错误记录",
+        "required": "是否必需",
+        "decidedAt": "审批时间",
+        "decidedBy": "审批人",
+        "effectiveAt": "生效时间",
+        "variantId": "变体 ID",
+        "noPendingChanges": "此续订周期没有关联的待处理变更。",
+        "attempt": "尝试",
+        "started": "开始时间",
+        "finished": "结束时间",
+        "error": "错误",
+        "order": "订单",
+        "noErrorMessage": "无错误信息",
+        "noAttempts": "此续订周期尚未记录任何尝试。",
+        "noMetadata": "此续订周期未存储元数据。",
+        "noOrderGenerated": "未生成订单",
+        "orderStatus": "订单状态",
+        "orderId": "订单 ID"
+      },
+      "drawer": {
+        "approveTitle": "批准变更",
+        "rejectTitle": "拒绝变更",
+        "reasonRequired": "原因 *",
+        "optionalNote": "可选的审核备注",
+        "requiredRejectionReason": "必填的拒绝原因"
+      }
+    }
+  },
+  "dunning": {
+    "breadcrumb": "催收",
+    "list": {
+      "title": "催收",
+      "description": "监控逾期订阅、重试时机与回收状态。",
+      "loadError": "加载催收案件失败。",
+      "emptyFiltered": "没有匹配的催收案件",
+      "emptyFilteredHint": "请尝试更改搜索词或当前筛选条件。",
+      "empty": "暂无催收案件",
+      "emptyHint": "续订扣款失败进入回收流程后，催收案件将显示在这里。"
+    },
+    "columns": {
+      "subscription": "订阅",
+      "status": "状态",
+      "nextRetry": "下次重试",
+      "attempts": "尝试次数",
+      "lastError": "最近错误",
+      "lastAttemptAt": "上次尝试 {{value}}",
+      "noRetryAttemptsYet": "暂无重试尝试",
+      "noPaymentErrorCode": "无支付错误代码",
+      "unknownProvider": "未知支付渠道"
+    },
+    "filters": {
+      "status": "状态",
+      "providerId": "支付渠道 ID",
+      "errorCode": "错误代码",
+      "attemptRange": "尝试次数范围",
+      "min": "最小值",
+      "max": "最大值",
+      "nextRetryFrom": "下次重试起",
+      "nextRetryTo": "下次重试至",
+      "provider": "支付渠道",
+      "attemptCount": "尝试次数",
+      "upTo": "最多 {{max}}"
+    },
+    "status": {
+      "open": "待处理",
+      "retryScheduled": "已安排重试",
+      "retrying": "重试中",
+      "awaitingManualResolution": "等待人工处理",
+      "recovered": "已回收",
+      "unrecovered": "未回收"
+    },
+    "attemptStatus": {
+      "processing": "进行中",
+      "succeeded": "已成功",
+      "failed": "已失败"
+    },
+    "retryWindow": {
+      "recovered": "已回收",
+      "closedUnrecovered": "已按未回收关闭",
+      "waitingManualResolution": "等待人工处理",
+      "noRetryScheduled": "未安排重试",
+      "queuedForRetry": "已排队等待重试"
+    },
+    "dateRange": {
+      "fromTo": "{{from}} 至 {{to}}",
+      "from": "自 {{value}} 起",
+      "until": "截至 {{value}}"
+    },
+    "intervals": {
+      "minuteUnit": "{{value}} 分钟"
+    },
+    "detail": {
+      "title": "催收案件",
+      "loading": "正在加载催收案件详情……",
+      "loadError": "加载催收案件详情失败。",
+      "unavailable": "催收案件详情不可用。",
+      "header": "催收案件",
+      "description": "查看回收状态、关联记录、重试时机与尝试历史。",
+      "actions": {
+        "retryNow": "立即重试",
+        "retrying": "重试中……",
+        "markRecovered": "标记为已回收",
+        "markUnrecovered": "标记为未回收",
+        "markingRecovered": "正在标记为已回收……",
+        "markingUnrecovered": "正在标记为未回收……",
+        "editRetrySchedule": "编辑重试计划",
+        "saveSchedule": "保存重试计划",
+        "savingSchedule": "正在保存重试计划……"
+      },
+      "prompt": {
+        "retryNowTitle": "立即重试扣款？",
+        "retryNowDescription": "您即将为此催收案件触发一次立即扣款重试。",
+        "overrideTitle": "覆盖重试计划？",
+        "overrideDescription": "您即将替换此催收案件当前的重试计划。",
+        "markRecoveredTitle": "标记为已回收？",
+        "markRecoveredDescription": "您即将关闭此案件并标记为已回收。",
+        "markUnrecoveredTitle": "标记为未回收？",
+        "markUnrecoveredDescription": "您即将关闭此案件并标记为未回收。"
+      },
+      "toast": {
+        "retryStarted": "重试已开始",
+        "markedRecovered": "案件已标记为已回收",
+        "markedUnrecovered": "案件已标记为未回收",
+        "retryScheduleUpdated": "重试计划已更新"
+      },
+      "errors": {
+        "retryNowFailed": "立即重试失败",
+        "markRecoveredFailed": "标记为已回收失败",
+        "markUnrecoveredFailed": "标记为未回收失败",
+        "retryScheduleFailed": "更新重试计划失败",
+        "reasonRequired": "请填写原因",
+        "intervalsRequired": "至少需要填写一个重试间隔",
+        "maxAttemptsPositive": "最大尝试次数必须是正整数",
+        "maxAttemptsMismatch": "最大尝试次数必须等于重试间隔数量"
+      },
+      "sections": {
+        "overview": "案件概览",
+        "payment": "支付摘要",
+        "retrySchedule": "重试计划",
+        "attempts": "尝试时间线",
+        "metadata": "技术元数据",
+        "subscription": "订阅摘要",
+        "renewal": "续订摘要",
+        "order": "订单 / 支付摘要"
+      },
+      "fields": {
+        "attemptCount": "尝试次数",
+        "nextRetry": "下次重试",
+        "lastAttempt": "上次尝试",
+        "recoveredAt": "回收时间",
+        "closedAt": "关闭时间",
+        "createdAt": "创建时间",
+        "updatedAt": "更新时间",
+        "lastErrorCode": "最近错误代码",
+        "provider": "支付渠道",
+        "lastErrorMessage": "最近错误信息",
+        "noPaymentErrorMessage": "无支付错误信息",
+        "latestPaymentReference": "最近支付凭据",
+        "recoveryReason": "回收原因",
+        "strategy": "策略",
+        "timezone": "时区",
+        "intervals": "重试间隔",
+        "source": "来源",
+        "attempt": "尝试",
+        "started": "开始时间",
+        "finished": "结束时间",
+        "error": "错误",
+        "paymentReference": "支付凭据",
+        "renewalStatus": "续订状态",
+        "scheduledFor": "排期时间",
+        "generatedOrderId": "生成的订单 ID",
+        "orderStatus": "订单状态",
+        "orderId": "订单 ID"
+      },
+      "empty": {
+        "noAttempts": "此催收案件尚未记录任何尝试。",
+        "noMetadata": "此催收案件未存储元数据。",
+        "noError": "无错误信息",
+        "noLinkedRenewal": "无关联续订",
+        "noLinkedOrder": "无关联订单"
+      },
+      "drawer": {
+        "warning": "覆盖重试计划将更新此案件未来的重试时机。",
+        "intervals": "重试间隔（分钟）",
+        "intervalsPlaceholder": "1440, 4320, 10080",
+        "maxAttempts": "最大尝试次数",
+        "reasonRequired": "原因 *",
+        "retryScheduleNote": "关于此次重试策略覆盖的可选备注",
+        "recoveredNote": "可选的回收备注",
+        "unrecoveredReason": "必填原因"
+      }
+    }
+  },
   "cancellations": { "breadcrumb": "取消" }
 }

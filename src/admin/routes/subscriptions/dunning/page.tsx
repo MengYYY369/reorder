@@ -1,5 +1,6 @@
 import { defineRouteConfig } from "@medusajs/admin-sdk"
-import { translate } from "../../../i18n/translate"
+import { translate, type ReorderTranslate } from "../../../i18n/translate"
+import { useTranslation } from "react-i18next"
 import { XMarkMini } from "@medusajs/icons"
 import {
   Alert,
@@ -37,101 +38,18 @@ const DEFAULT_NEXT_RETRY_TO = toLocalDateTimeInputValue(
 
 const columnHelper = createDataTableColumnHelper<DunningCaseAdminListItem>()
 
-const statusFilterOptions = [
-  { label: "Open", value: DunningCaseAdminStatus.OPEN },
-  { label: "Retry scheduled", value: DunningCaseAdminStatus.RETRY_SCHEDULED },
-  { label: "Retrying", value: DunningCaseAdminStatus.RETRYING },
-  {
-    label: "Awaiting manual resolution",
-    value: DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION,
-  },
-  { label: "Recovered", value: DunningCaseAdminStatus.RECOVERED },
-  { label: "Unrecovered", value: DunningCaseAdminStatus.UNRECOVERED },
-] as const
-
-const baseColumns = [
-  columnHelper.accessor("subscription.reference", {
-    id: "subscription_reference",
-    header: "Subscription",
-    enableSorting: true,
-    sortLabel: "Subscription",
-    cell: ({ row }) => (
-      <div className="flex flex-col gap-y-0.5">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.subscription.reference}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.subscription.customer_name}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {[
-            row.original.subscription.product_title,
-            row.original.subscription.variant_title,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("status", {
-    header: "Status",
-    enableSorting: true,
-    sortLabel: "Status",
-    cell: ({ getValue }) => (
-      <StatusBadge color={getStatusColor(getValue())} className="text-nowrap">
-        {formatStatus(getValue())}
-      </StatusBadge>
-    ),
-  }),
-  columnHelper.accessor("next_retry_at", {
-    header: "Next retry",
-    enableSorting: true,
-    sortLabel: "Next retry",
-    cell: ({ getValue, row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {formatDateTime(getValue())}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {formatRetryWindow(row.original)}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("attempt_count", {
-    header: "Attempts",
-    enableSorting: true,
-    sortLabel: "Attempts",
-    cell: ({ row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.attempt_count} / {row.original.max_attempts}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.last_attempt_at
-            ? `Last attempt ${formatDateTime(row.original.last_attempt_at)}`
-            : "No retry attempts yet"}
-        </Text>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("last_payment_error_code", {
-    header: "Last error",
-    cell: ({ row }) => (
-      <div className="flex flex-col">
-        <Text size="small" leading="compact" weight="plus">
-          {row.original.last_payment_error_code || "No payment error code"}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {row.original.subscription.payment_provider_id || "Unknown provider"}
-        </Text>
-      </div>
-    ),
-  }),
-]
+const DUNNING_CASE_STATUS_KEYS = {
+  [DunningCaseAdminStatus.OPEN]: "dunning.status.open",
+  [DunningCaseAdminStatus.RETRY_SCHEDULED]: "dunning.status.retryScheduled",
+  [DunningCaseAdminStatus.RETRYING]: "dunning.status.retrying",
+  [DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION]:
+    "dunning.status.awaitingManualResolution",
+  [DunningCaseAdminStatus.RECOVERED]: "dunning.status.recovered",
+  [DunningCaseAdminStatus.UNRECOVERED]: "dunning.status.unrecovered",
+} as const
 
 const DunningPage = () => {
+  const { t } = useTranslation("reorder")
   const navigate = useNavigate()
   const [search, setSearch] = useState("")
   const [filtering, setFiltering] = useState<DataTableFilteringState>(() => ({
@@ -146,6 +64,132 @@ const DunningPage = () => {
     pageIndex: 0,
     pageSize: PAGE_SIZE,
   })
+
+  const statusFilterOptions = useMemo(() => {
+    return [
+      {
+        label: t(DUNNING_CASE_STATUS_KEYS[DunningCaseAdminStatus.OPEN]),
+        value: DunningCaseAdminStatus.OPEN,
+      },
+      {
+        label: t(
+          DUNNING_CASE_STATUS_KEYS[DunningCaseAdminStatus.RETRY_SCHEDULED]
+        ),
+        value: DunningCaseAdminStatus.RETRY_SCHEDULED,
+      },
+      {
+        label: t(DUNNING_CASE_STATUS_KEYS[DunningCaseAdminStatus.RETRYING]),
+        value: DunningCaseAdminStatus.RETRYING,
+      },
+      {
+        label: t(
+          DUNNING_CASE_STATUS_KEYS[
+            DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION
+          ]
+        ),
+        value: DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION,
+      },
+      {
+        label: t(DUNNING_CASE_STATUS_KEYS[DunningCaseAdminStatus.RECOVERED]),
+        value: DunningCaseAdminStatus.RECOVERED,
+      },
+      {
+        label: t(DUNNING_CASE_STATUS_KEYS[DunningCaseAdminStatus.UNRECOVERED]),
+        value: DunningCaseAdminStatus.UNRECOVERED,
+      },
+    ] as const
+  }, [t])
+
+  const columns = useMemo(() => {
+    return [
+      columnHelper.accessor("subscription.reference", {
+        id: "subscription_reference",
+        header: t("dunning.columns.subscription"),
+        enableSorting: true,
+        sortLabel: t("dunning.columns.subscription"),
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-y-0.5">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.subscription.reference}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.subscription.customer_name}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {[
+                row.original.subscription.product_title,
+                row.original.subscription.variant_title,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("status", {
+        header: t("dunning.columns.status"),
+        enableSorting: true,
+        sortLabel: t("dunning.columns.status"),
+        cell: ({ getValue }) => (
+          <StatusBadge color={getStatusColor(getValue())} className="text-nowrap">
+            {t(DUNNING_CASE_STATUS_KEYS[getValue()])}
+          </StatusBadge>
+        ),
+      }),
+      columnHelper.accessor("next_retry_at", {
+        header: t("dunning.columns.nextRetry"),
+        enableSorting: true,
+        sortLabel: t("dunning.columns.nextRetry"),
+        cell: ({ getValue, row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {formatDateTime(getValue(), t("common.empty.noValue"))}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {formatRetryWindow(row.original, t)}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("attempt_count", {
+        header: t("dunning.columns.attempts"),
+        enableSorting: true,
+        sortLabel: t("dunning.columns.attempts"),
+        cell: ({ row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.attempt_count} / {row.original.max_attempts}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.last_attempt_at
+                ? t("dunning.columns.lastAttemptAt", {
+                    value: formatDateTime(
+                      row.original.last_attempt_at,
+                      t("common.empty.noValue")
+                    ),
+                  })
+                : t("dunning.columns.noRetryAttemptsYet")}
+            </Text>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("last_payment_error_code", {
+        header: t("dunning.columns.lastError"),
+        cell: ({ row }) => (
+          <div className="flex flex-col">
+            <Text size="small" leading="compact" weight="plus">
+              {row.original.last_payment_error_code ||
+                t("dunning.columns.noPaymentErrorCode")}
+            </Text>
+            <Text size="small" leading="compact" className="text-ui-fg-subtle">
+              {row.original.subscription.payment_provider_id ||
+                t("dunning.columns.unknownProvider")}
+            </Text>
+          </div>
+        ),
+      }),
+    ]
+  }, [t])
 
   const statusFilterValue = useMemo(() => {
     return Array.isArray(filtering.status)
@@ -195,7 +239,7 @@ const DunningPage = () => {
   })
 
   const table = useDataTable({
-    columns: baseColumns,
+    columns,
     data: data?.dunning_cases || [],
     getRowId: (row) => row.id,
     rowCount: data?.count || 0,
@@ -223,20 +267,22 @@ const DunningPage = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between gap-x-4">
             <div className="flex flex-col">
-              <Heading level="h1">Dunning</Heading>
+              <Heading level="h1">{t("dunning.list.title")}</Heading>
               <Text
                 size="small"
                 leading="compact"
                 className="text-ui-fg-subtle"
               >
-                Monitor past-due subscriptions, retry timing, and recovery state.
+                {t("dunning.list.description")}
               </Text>
             </div>
           </div>
         </div>
         <div className="px-6 py-6">
           <Alert variant="error">
-            {error instanceof Error ? error.message : "Failed to load dunning cases."}
+            {error instanceof Error
+              ? error.message
+              : t("dunning.list.loadError")}
           </Alert>
         </div>
       </Container>
@@ -256,9 +302,9 @@ const DunningPage = () => {
     <Container className="divide-y p-0">
       <div className="flex items-center justify-between px-6 py-4">
         <div className="flex flex-col">
-          <Heading level="h1">Dunning</Heading>
+          <Heading level="h1">{t("dunning.list.title")}</Heading>
           <Text size="small" leading="compact" className="text-ui-fg-subtle">
-            Monitor past-due subscriptions, retry timing, and recovery state.
+            {t("dunning.list.description")}
           </Text>
         </div>
       </div>
@@ -268,8 +314,8 @@ const DunningPage = () => {
             {statusFilterValue.map((status) => (
               <FilterChip
                 key={status}
-                label="Status"
-                value={formatStatus(status)}
+                label={t("dunning.columns.status")}
+                value={t(DUNNING_CASE_STATUS_KEYS[status])}
                 onRemove={() => {
                   setFiltering((current) => ({
                     ...current,
@@ -280,7 +326,7 @@ const DunningPage = () => {
             ))}
             {paymentProviderValue ? (
               <FilterChip
-                label="Provider"
+                label={t("dunning.filters.provider")}
                 value={paymentProviderValue}
                 onRemove={() => {
                   setFiltering((current) =>
@@ -291,7 +337,7 @@ const DunningPage = () => {
             ) : null}
             {errorCodeValue ? (
               <FilterChip
-                label="Error code"
+                label={t("dunning.filters.errorCode")}
                 value={errorCodeValue}
                 onRemove={() => {
                   setFiltering((current) =>
@@ -302,8 +348,9 @@ const DunningPage = () => {
             ) : null}
             {attemptCountMinValue || attemptCountMaxValue ? (
               <FilterChip
-                label="Attempt count"
+                label={t("dunning.filters.attemptCount")}
                 value={formatAttemptRange(
+                  t,
                   attemptCountMinValue,
                   attemptCountMaxValue
                 )}
@@ -318,12 +365,14 @@ const DunningPage = () => {
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
                 <Button size="small" variant="secondary" type="button">
-                  Add filter
+                  {t("common.filters.addFilter")}
                 </Button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="start">
                 <DropdownMenu.SubMenu>
-                  <DropdownMenu.SubMenuTrigger>Status</DropdownMenu.SubMenuTrigger>
+                  <DropdownMenu.SubMenuTrigger>
+                    {t("dunning.filters.status")}
+                  </DropdownMenu.SubMenuTrigger>
                   <DropdownMenu.SubMenuContent>
                     {statusFilterOptions.map((option) => (
                       <DropdownMenu.CheckboxItem
@@ -361,7 +410,7 @@ const DunningPage = () => {
                   })
                 }
               >
-                Clear all
+                {t("common.filters.clearAll")}
               </button>
             ) : null}
           </div>
@@ -369,12 +418,12 @@ const DunningPage = () => {
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Provider id
+                  {t("dunning.filters.providerId")}
                 </Text>
                 <Input
                   type="text"
                   size="small"
-                  placeholder="Provider id"
+                  placeholder={t("dunning.filters.providerId")}
                   value={paymentProviderValue}
                   onChange={(event) => {
                     const value = event.target.value
@@ -389,12 +438,12 @@ const DunningPage = () => {
               </div>
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Error code
+                  {t("dunning.filters.errorCode")}
                 </Text>
                 <Input
                   type="text"
                   size="small"
-                  placeholder="Error code"
+                  placeholder={t("dunning.filters.errorCode")}
                   value={errorCodeValue}
                   onChange={(event) => {
                     const value = event.target.value
@@ -409,14 +458,14 @@ const DunningPage = () => {
               </div>
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Attempt range
+                  {t("dunning.filters.attemptRange")}
                 </Text>
                 <div className="grid grid-cols-2 gap-3">
                   <Input
                     type="number"
                     min={0}
                     size="small"
-                    placeholder="Min"
+                    placeholder={t("dunning.filters.min")}
                     value={attemptCountMinValue}
                     onChange={(event) => {
                       const value = event.target.value
@@ -432,7 +481,7 @@ const DunningPage = () => {
                     type="number"
                     min={0}
                     size="small"
-                    placeholder="Max"
+                    placeholder={t("dunning.filters.max")}
                     value={attemptCountMaxValue}
                     onChange={(event) => {
                       const value = event.target.value
@@ -448,7 +497,7 @@ const DunningPage = () => {
               </div>
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Next retry from
+                  {t("dunning.filters.nextRetryFrom")}
                 </Text>
                 <Input
                   type="datetime-local"
@@ -467,7 +516,7 @@ const DunningPage = () => {
               </div>
               <div className="flex flex-col gap-y-1">
                 <Text size="small" leading="compact" weight="plus">
-                  Next retry to
+                  {t("dunning.filters.nextRetryTo")}
                 </Text>
                 <Input
                   type="datetime-local"
@@ -488,7 +537,7 @@ const DunningPage = () => {
 
             <div className="flex items-center gap-x-2 self-end">
               <div className="w-full md:w-auto">
-                <DataTable.Search placeholder="Search" />
+                <DataTable.Search placeholder={t("common.actions.search")} />
               </div>
               <DataTable.SortingMenu />
             </div>
@@ -565,13 +614,13 @@ const DunningPage = () => {
           <div className="flex min-h-[250px] w-full flex-col items-center justify-center border-y px-6 py-4 text-center">
             <Text size="base" weight="plus">
               {hasActiveFilters || search
-                ? "No matching dunning cases"
-                : "No dunning cases yet"}
+                ? t("dunning.list.emptyFiltered")
+                : t("dunning.list.empty")}
             </Text>
             <Text size="small" leading="compact" className="text-ui-fg-subtle">
               {hasActiveFilters || search
-                ? "Try changing the search term or active filters."
-                : "Dunning cases will appear here after failed renewal payments enter the recovery flow."}
+                ? t("dunning.list.emptyFilteredHint")
+                : t("dunning.list.emptyHint")}
             </Text>
           </div>
         )}
@@ -602,11 +651,13 @@ const FilterChip = ({
   value: string
   onRemove: () => void
 }) => {
+  const { t } = useTranslation("reorder")
+
   return (
     <div className="shadow-buttons-neutral txt-compact-small-plus bg-ui-button-neutral text-ui-fg-base inline-flex items-center overflow-hidden rounded-md">
       <span className="border-ui-border-base border-r px-3 py-1.5">{label}</span>
       <span className="border-ui-border-base border-r px-3 py-1.5 text-ui-fg-subtle">
-        is
+        {t("common.filters.is")}
       </span>
       <span className="border-ui-border-base border-r px-3 py-1.5">{value}</span>
       <button
@@ -629,23 +680,6 @@ function removeFilter(
   return next
 }
 
-function formatStatus(status: DunningCaseAdminStatus) {
-  switch (status) {
-    case DunningCaseAdminStatus.OPEN:
-      return "Open"
-    case DunningCaseAdminStatus.RETRY_SCHEDULED:
-      return "Retry scheduled"
-    case DunningCaseAdminStatus.RETRYING:
-      return "Retrying"
-    case DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION:
-      return "Awaiting manual resolution"
-    case DunningCaseAdminStatus.RECOVERED:
-      return "Recovered"
-    case DunningCaseAdminStatus.UNRECOVERED:
-      return "Unrecovered"
-  }
-}
-
 function getStatusColor(status: DunningCaseAdminStatus) {
   switch (status) {
     case DunningCaseAdminStatus.OPEN:
@@ -663,35 +697,31 @@ function getStatusColor(status: DunningCaseAdminStatus) {
   }
 }
 
-function formatRetryWindow(item: DunningCaseAdminListItem) {
+function formatRetryWindow(item: DunningCaseAdminListItem, t: ReorderTranslate) {
   if (item.status === DunningCaseAdminStatus.RECOVERED) {
-    return "Recovered"
+    return t("dunning.retryWindow.recovered")
   }
 
   if (item.status === DunningCaseAdminStatus.UNRECOVERED) {
-    return "Closed as unrecovered"
+    return t("dunning.retryWindow.closedUnrecovered")
   }
 
   if (item.status === DunningCaseAdminStatus.AWAITING_MANUAL_RESOLUTION) {
-    return "Waiting for manual resolution"
+    return t("dunning.retryWindow.waitingManualResolution")
   }
 
   if (!item.next_retry_at) {
-    return "No retry scheduled"
+    return t("dunning.retryWindow.noRetryScheduled")
   }
 
-  return "Queued for retry"
+  return t("dunning.retryWindow.queuedForRetry")
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) {
-    return "-"
-  }
+function formatDateTime(value?: string | null, emptyValue: string) {
+  const date = value ? new Date(value) : null
 
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return "-"
+  if (!date || Number.isNaN(date.getTime())) {
+    return emptyValue
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -700,7 +730,7 @@ function formatDateTime(value?: string | null) {
   }).format(date)
 }
 
-function formatAttemptRange(min?: string, max?: string) {
+function formatAttemptRange(t: ReorderTranslate, min?: string, max?: string) {
   if (min && max) {
     return `${min}-${max}`
   }
@@ -710,29 +740,36 @@ function formatAttemptRange(min?: string, max?: string) {
   }
 
   if (max) {
-    return `Up to ${max}`
+    return t("dunning.filters.upTo", { max })
   }
 
-  return "-"
+  return t("common.empty.noValue")
 }
 
-function formatDateRange(from?: string, to?: string) {
-  const formattedFrom = formatDateTime(from)
-  const formattedTo = formatDateTime(to)
+function formatDateRange(
+  from: string | undefined,
+  to: string | undefined,
+  t: ReorderTranslate
+) {
+  const formattedFrom = formatDateTime(from, t("common.empty.noValue"))
+  const formattedTo = formatDateTime(to, t("common.empty.noValue"))
 
   if (from && to) {
-    return `${formattedFrom} to ${formattedTo}`
+    return t("dunning.dateRange.fromTo", {
+      from: formattedFrom,
+      to: formattedTo,
+    })
   }
 
   if (from) {
-    return `From ${formattedFrom}`
+    return t("dunning.dateRange.from", { value: formattedFrom })
   }
 
   if (to) {
-    return `Until ${formattedTo}`
+    return t("dunning.dateRange.until", { value: formattedTo })
   }
 
-  return "-"
+  return t("common.empty.noValue")
 }
 
 function addDays(date: Date, amount: number) {

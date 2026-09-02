@@ -361,7 +361,298 @@
       }
     }
   },
-  "renewals": { "breadcrumb": "Renewal" },
-  "dunning": { "breadcrumb": "Dunning" },
+  "renewals": {
+    "breadcrumb": "Renewal",
+    "list": {
+      "title": "Renewals",
+      "description": "Monitor scheduled subscription renewal cycles and their latest execution state.",
+      "loadError": "Failed to load renewals.",
+      "emptyFiltered": "No matching renewal cycles",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No renewal cycles yet",
+      "emptyHint": "Renewal cycles will appear here once subscriptions are scheduled for processing."
+    },
+    "columns": {
+      "scheduled": "Scheduled",
+      "subscription": "Subscription",
+      "status": "Status",
+      "approval": "Approval",
+      "lastAttempt": "Last attempt",
+      "operationalCycle": "Operational cycle: {{value}}",
+      "noAttemptsYet": "No attempts yet"
+    },
+    "filters": {
+      "status": "Status",
+      "approvalStatus": "Approval status",
+      "lastAttemptResult": "Last attempt result",
+      "scheduledFrom": "Scheduled from",
+      "scheduledTo": "Scheduled to"
+    },
+    "status": {
+      "scheduled": "Scheduled",
+      "processing": "Processing",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "attemptStatus": {
+      "processing": "Processing",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "approval": {
+      "notRequired": "Not required",
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "pendingApproval": "Pending approval"
+    },
+    "relativeStatus": {
+      "awaitingProcessing": "Awaiting processing",
+      "currentlyProcessing": "Currently processing",
+      "processed": "Processed",
+      "needsReview": "Needs review"
+    },
+    "detail": {
+      "title": "Renewal",
+      "loading": "Loading renewal details...",
+      "loadError": "Failed to load renewal details.",
+      "unavailable": "Renewal details are unavailable.",
+      "header": "Renewal cycle",
+      "description": "Review execution status, approval state, linked records, and attempt history.",
+      "actions": {
+        "forceRenewal": "Force renewal",
+        "forcing": "Forcing...",
+        "approveChanges": "Approve changes",
+        "rejectChanges": "Reject changes",
+        "approve": "Approve",
+        "reject": "Reject"
+      },
+      "prompt": {
+        "forceTitle": "Force renewal?",
+        "forceDescription": "You are about to manually trigger this renewal cycle. Do you want to continue?",
+        "approveTitle": "Approve changes?",
+        "approveDescription": "You are about to approve the pending changes for this renewal cycle.",
+        "rejectTitle": "Reject changes?",
+        "rejectDescription": "You are about to reject the pending changes for this renewal cycle."
+      },
+      "toast": {
+        "forced": "Renewal forced",
+        "approved": "Pending changes approved",
+        "rejected": "Pending changes rejected"
+      },
+      "errors": {
+        "forceFailed": "Failed to force renewal",
+        "approveFailed": "Failed to approve changes",
+        "rejectFailed": "Failed to reject changes",
+        "reasonRequired": "Reason is required"
+      },
+      "sections": {
+        "cycleOverview": "Cycle overview",
+        "approvalSummary": "Approval summary",
+        "pendingChanges": "Pending changes",
+        "attemptHistory": "Attempt history",
+        "technicalMetadata": "Technical metadata",
+        "subscriptionSummary": "Subscription summary",
+        "generatedOrderSummary": "Generated order summary"
+      },
+      "fields": {
+        "projectedDelivery": "Projected delivery",
+        "operationalCycle": "Operational cycle",
+        "processedAt": "Processed at",
+        "createdAt": "Created at",
+        "lastError": "Last error",
+        "noErrorRecorded": "No error recorded",
+        "required": "Required",
+        "decidedAt": "Decided at",
+        "decidedBy": "Decided by",
+        "effectiveAt": "Effective at",
+        "variantId": "Variant ID",
+        "noPendingChanges": "No pending changes are attached to this renewal cycle.",
+        "attempt": "Attempt",
+        "started": "Started",
+        "finished": "Finished",
+        "error": "Error",
+        "order": "Order",
+        "noErrorMessage": "No error message",
+        "noAttempts": "No attempts have been recorded for this renewal cycle yet.",
+        "noMetadata": "No metadata was stored for this renewal cycle.",
+        "noOrderGenerated": "No order generated",
+        "orderStatus": "Order status",
+        "orderId": "Order ID"
+      },
+      "drawer": {
+        "approveTitle": "Approve changes",
+        "rejectTitle": "Reject changes",
+        "reasonRequired": "Reason *",
+        "optionalNote": "Optional review note",
+        "requiredRejectionReason": "Required rejection reason"
+      }
+    }
+  },
+  "dunning": {
+    "breadcrumb": "Dunning",
+    "list": {
+      "title": "Dunning",
+      "description": "Monitor past-due subscriptions, retry timing, and recovery state.",
+      "loadError": "Failed to load dunning cases.",
+      "emptyFiltered": "No matching dunning cases",
+      "emptyFilteredHint": "Try changing the search term or active filters.",
+      "empty": "No dunning cases yet",
+      "emptyHint": "Dunning cases will appear here after failed renewal payments enter the recovery flow."
+    },
+    "columns": {
+      "subscription": "Subscription",
+      "status": "Status",
+      "nextRetry": "Next retry",
+      "attempts": "Attempts",
+      "lastError": "Last error",
+      "lastAttemptAt": "Last attempt {{value}}",
+      "noRetryAttemptsYet": "No retry attempts yet",
+      "noPaymentErrorCode": "No payment error code",
+      "unknownProvider": "Unknown provider"
+    },
+    "filters": {
+      "status": "Status",
+      "providerId": "Provider id",
+      "errorCode": "Error code",
+      "attemptRange": "Attempt range",
+      "min": "Min",
+      "max": "Max",
+      "nextRetryFrom": "Next retry from",
+      "nextRetryTo": "Next retry to",
+      "provider": "Provider",
+      "attemptCount": "Attempt count",
+      "upTo": "Up to {{max}}"
+    },
+    "status": {
+      "open": "Open",
+      "retryScheduled": "Retry scheduled",
+      "retrying": "Retrying",
+      "awaitingManualResolution": "Awaiting manual resolution",
+      "recovered": "Recovered",
+      "unrecovered": "Unrecovered"
+    },
+    "attemptStatus": {
+      "processing": "Processing",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "retryWindow": {
+      "recovered": "Recovered",
+      "closedUnrecovered": "Closed as unrecovered",
+      "waitingManualResolution": "Waiting for manual resolution",
+      "noRetryScheduled": "No retry scheduled",
+      "queuedForRetry": "Queued for retry"
+    },
+    "dateRange": {
+      "fromTo": "{{from}} to {{to}}",
+      "from": "From {{value}}",
+      "until": "Until {{value}}"
+    },
+    "intervals": {
+      "minuteUnit": "{{value}} min"
+    },
+    "detail": {
+      "title": "Dunning case",
+      "loading": "Loading dunning case details...",
+      "loadError": "Failed to load dunning case details.",
+      "unavailable": "Dunning case details are unavailable.",
+      "header": "Dunning case",
+      "description": "Review recovery state, linked records, retry timing, and attempt history.",
+      "actions": {
+        "retryNow": "Retry now",
+        "retrying": "Retrying...",
+        "markRecovered": "Mark recovered",
+        "markUnrecovered": "Mark unrecovered",
+        "markingRecovered": "Marking recovered...",
+        "markingUnrecovered": "Marking unrecovered...",
+        "editRetrySchedule": "Edit retry schedule",
+        "saveSchedule": "Save schedule",
+        "savingSchedule": "Saving schedule..."
+      },
+      "prompt": {
+        "retryNowTitle": "Retry payment now?",
+        "retryNowDescription": "You are about to trigger an immediate payment retry for this dunning case.",
+        "overrideTitle": "Override retry schedule?",
+        "overrideDescription": "You are about to replace the current retry schedule for this dunning case.",
+        "markRecoveredTitle": "Mark as recovered?",
+        "markRecoveredDescription": "You are about to close this case as recovered.",
+        "markUnrecoveredTitle": "Mark as unrecovered?",
+        "markUnrecoveredDescription": "You are about to close this case as unrecovered."
+      },
+      "toast": {
+        "retryStarted": "Retry started",
+        "markedRecovered": "Case marked as recovered",
+        "markedUnrecovered": "Case marked as unrecovered",
+        "retryScheduleUpdated": "Retry schedule updated"
+      },
+      "errors": {
+        "retryNowFailed": "Failed to retry now",
+        "markRecoveredFailed": "Failed to mark as recovered",
+        "markUnrecoveredFailed": "Failed to mark as unrecovered",
+        "retryScheduleFailed": "Failed to update retry schedule",
+        "reasonRequired": "Reason is required",
+        "intervalsRequired": "At least one retry interval is required",
+        "maxAttemptsPositive": "Max attempts must be a positive integer",
+        "maxAttemptsMismatch": "Max attempts must equal the number of retry intervals"
+      },
+      "sections": {
+        "overview": "Case overview",
+        "payment": "Payment summary",
+        "retrySchedule": "Retry schedule",
+        "attempts": "Attempt timeline",
+        "metadata": "Technical metadata",
+        "subscription": "Subscription summary",
+        "renewal": "Renewal summary",
+        "order": "Order / payment summary"
+      },
+      "fields": {
+        "attemptCount": "Attempt count",
+        "nextRetry": "Next retry",
+        "lastAttempt": "Last attempt",
+        "recoveredAt": "Recovered at",
+        "closedAt": "Closed at",
+        "createdAt": "Created at",
+        "updatedAt": "Updated at",
+        "lastErrorCode": "Last error code",
+        "provider": "Provider",
+        "lastErrorMessage": "Last error message",
+        "noPaymentErrorMessage": "No payment error message",
+        "latestPaymentReference": "Latest payment reference",
+        "recoveryReason": "Recovery reason",
+        "strategy": "Strategy",
+        "timezone": "Timezone",
+        "intervals": "Intervals",
+        "source": "Source",
+        "attempt": "Attempt",
+        "started": "Started",
+        "finished": "Finished",
+        "error": "Error",
+        "paymentReference": "Payment reference",
+        "renewalStatus": "Renewal status",
+        "scheduledFor": "Scheduled for",
+        "generatedOrderId": "Generated order id",
+        "orderStatus": "Order status",
+        "orderId": "Order ID"
+      },
+      "empty": {
+        "noAttempts": "No attempts have been recorded for this dunning case yet.",
+        "noMetadata": "No metadata was stored for this dunning case.",
+        "noError": "No error message",
+        "noLinkedRenewal": "No linked renewal",
+        "noLinkedOrder": "No linked order"
+      },
+      "drawer": {
+        "warning": "Overriding the retry schedule updates future retry timing for this case.",
+        "intervals": "Retry intervals (minutes)",
+        "intervalsPlaceholder": "1440, 4320, 10080",
+        "maxAttempts": "Max attempts",
+        "reasonRequired": "Reason *",
+        "retryScheduleNote": "Optional note about this retry policy override",
+        "recoveredNote": "Optional recovery note",
+        "unrecoveredReason": "Required reason"
+      }
+    }
+  },
   "cancellations": { "breadcrumb": "Cancellation" }
 }
