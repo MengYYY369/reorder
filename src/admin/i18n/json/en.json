@@ -994,5 +994,91 @@
     "toast": {
       "exported": "Analytics {{format}} export downloaded"
     }
+  },
+  "settings": {
+    "list": {
+      "title": "Subscription Settings",
+      "description": "Manage runtime defaults for trials, dunning, renewals, and cancellation flows.",
+      "loading": "Loading current runtime configuration…",
+      "loadError": "Failed to load subscription settings"
+    },
+    "intro": {
+      "futureOperations": "Changes apply to future operations and newly created process state.",
+      "existingCases": "Existing active dunning, cancellation, and renewal processes keep their persisted configuration."
+    },
+    "status": {
+      "fallbackDefaults": "Using fallback defaults until the first save",
+      "noRecord": "No persisted settings record exists yet.",
+      "persistedVersion": "Persisted version {{version}}",
+      "lastUpdatedAt": "Last updated at {{date}}",
+      "updatedBy": "Updated by {{actor}}",
+      "bootstrapNoActor": "Updated by system bootstrap or no actor recorded."
+    },
+    "alerts": {
+      "resetUnsupported": "Reset to defaults is not supported yet in the admin UI.",
+      "unsavedChanges": "Unsaved changes in: {{sections}}",
+      "narrowImpact": "These changes update global defaults for future subscription operations.",
+      "wideImpact": "These changes affect defaults for future renewal, dunning, or cancellation operations. Existing active cases keep their persisted process state.",
+      "applyAfterSave": "Changes will apply after this save completes.",
+      "noUnsavedChanges": "No unsaved changes.",
+      "saving": "Saving updated defaults…"
+    },
+    "sections": {
+      "trial": "Trial",
+      "dunning": "Dunning",
+      "renewals": "Renewals",
+      "cancellation": "Cancellation Defaults",
+      "trialDescription": "Configure the default trial period applied to future subscription operations.",
+      "dunningDescription": "Define the retry schedule used when a new dunning case is created.",
+      "renewalsDescription": "Choose the default behavior used when a new renewal cycle is created.",
+      "cancellationDescription": "Define how newly created cancellation cases should start."
+    },
+    "changedSections": {
+      "trial": "Trial",
+      "dunning": "Dunning",
+      "renewals": "Renewals",
+      "cancellation": "Cancellation"
+    },
+    "fields": {
+      "defaultTrialDays": "Default trial days",
+      "retryIntervals": "Retry intervals",
+      "retryIntervalsHint": "Values are stored in minutes and must be strictly increasing.",
+      "addInterval": "Add interval",
+      "maxDunningAttempts": "Max dunning attempts",
+      "defaultRenewalBehavior": "Default renewal behavior",
+      "defaultCancellationBehavior": "Default cancellation behavior"
+    },
+    "behaviorOptions": {
+      "renewal": {
+        "process_immediately": {
+          "label": "Process immediately",
+          "hint": "New renewal cycles default to immediate processing when no reviewable change is pending."
+        },
+        "require_review_for_pending_changes": {
+          "label": "Review pending changes",
+          "hint": "New renewal cycles require approval when a pending subscription update becomes applicable."
+        }
+      },
+      "cancellation": {
+        "recommend_retention_first": {
+          "label": "Recommend retention first",
+          "hint": "New cancellation cases start with a retention-first posture before direct cancellation."
+        },
+        "allow_direct_cancellation": {
+          "label": "Allow direct cancellation",
+          "hint": "New cancellation cases can proceed directly to cancellation without a retention-first default."
+        }
+      }
+    },
+    "validation": {
+      "retryIntervalPositive": "Retry interval must be a positive integer",
+      "retryIntervalsStrictlyIncreasing": "Retry intervals must be strictly increasing",
+      "maxAttemptsMatchIntervals": "Max dunning attempts must match the number of retry intervals"
+    },
+    "toast": {
+      "updated": "Subscription settings updated",
+      "updateFailed": "Failed to update subscription settings",
+      "versionConflict": "Settings changed in another session. Refresh the page and try saving again."
+    }
   }
 }

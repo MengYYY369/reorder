@@ -992,5 +992,91 @@
     "toast": {
       "exported": "数据分析 {{format}} 导出已下载"
     }
+  },
+  "settings": {
+    "list": {
+      "title": "订阅设置",
+      "description": "管理试用、催收、续订与取消流程的运行时默认值。",
+      "loading": "正在加载当前运行时配置……",
+      "loadError": "加载订阅设置失败"
+    },
+    "intro": {
+      "futureOperations": "更改仅影响后续操作和新建的流程状态。",
+      "existingCases": "现有的催收、取消与续订流程会保留其已持久化的配置。"
+    },
+    "status": {
+      "fallbackDefaults": "首次保存前使用回退默认值",
+      "noRecord": "尚不存在已持久化的设置记录。",
+      "persistedVersion": "已持久化版本 {{version}}",
+      "lastUpdatedAt": "最后更新于 {{date}}",
+      "updatedBy": "由 {{actor}} 更新",
+      "bootstrapNoActor": "由系统引导更新，或未记录操作人。"
+    },
+    "alerts": {
+      "resetUnsupported": "管理界面暂不支持恢复默认值。",
+      "unsavedChanges": "未保存的更改位于：{{sections}}",
+      "narrowImpact": "这些更改将更新后续订阅操作的全局默认值。",
+      "wideImpact": "这些更改会影响后续续订、催收或取消操作的默认值。现有的进行中案件会保留其已持久化的流程状态。",
+      "applyAfterSave": "更改将在本次保存完成后生效。",
+      "noUnsavedChanges": "没有未保存的更改。",
+      "saving": "正在保存更新的默认值……"
+    },
+    "sections": {
+      "trial": "试用",
+      "dunning": "催收",
+      "renewals": "续订",
+      "cancellation": "取消默认设置",
+      "trialDescription": "配置应用于后续订阅操作的默认试用天数。",
+      "dunningDescription": "定义新建催收案件时使用的重试计划。",
+      "renewalsDescription": "选择新建续订周期时使用的默认行为。",
+      "cancellationDescription": "定义新建取消案件的启动方式。"
+    },
+    "changedSections": {
+      "trial": "试用",
+      "dunning": "催收",
+      "renewals": "续订",
+      "cancellation": "取消"
+    },
+    "fields": {
+      "defaultTrialDays": "默认试用天数",
+      "retryIntervals": "重试间隔",
+      "retryIntervalsHint": "值以分钟存储，且必须严格递增。",
+      "addInterval": "添加间隔",
+      "maxDunningAttempts": "最大催收尝试次数",
+      "defaultRenewalBehavior": "默认续订行为",
+      "defaultCancellationBehavior": "默认取消行为"
+    },
+    "behaviorOptions": {
+      "renewal": {
+        "process_immediately": {
+          "label": "立即处理",
+          "hint": "没有待审核更改时，新建续订周期默认立即处理。"
+        },
+        "require_review_for_pending_changes": {
+          "label": "审核待处理的更改",
+          "hint": "当待处理的订阅更新生效时，新建续订周期需要审核。"
+        }
+      },
+      "cancellation": {
+        "recommend_retention_first": {
+          "label": "优先推荐挽留",
+          "hint": "新建取消案件默认先采取挽留优先策略，再进入直接取消。"
+        },
+        "allow_direct_cancellation": {
+          "label": "允许直接取消",
+          "hint": "新建取消案件可以不采用挽留优先默认策略，直接进入取消。"
+        }
+      }
+    },
+    "validation": {
+      "retryIntervalPositive": "重试间隔必须是正整数",
+      "retryIntervalsStrictlyIncreasing": "重试间隔必须严格递增",
+      "maxAttemptsMatchIntervals": "最大催收尝试次数必须与重试间隔数量一致"
+    },
+    "toast": {
+      "updated": "订阅设置已更新",
+      "updateFailed": "更新订阅设置失败",
+      "versionConflict": "设置已在另一个会话中更改。请刷新页面后重试保存。"
+    }
   }
 }
