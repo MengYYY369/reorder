@@ -21,6 +21,7 @@ Completed:
 - `Subscriptions` Admin UI: list, details, actions, plan change, shipping address edit, and order-detail subscription widget
 - `Subscriptions` backend integration tests
 - `Subscriptions` admin flow integration test
+- `Subscriptions` Admin UI Playwright E2E test coverage (list view)
 - `Plans & Offers` domain model
 - `Plans & Offers` admin API routes
 - `Plans & Offers` Admin UI: list, create, edit, toggle, filtering, sorting, and selection flows
