@@ -49,3 +49,5 @@ It should be reviewed at the start of a session and updated after fixing any bug
 * **Subscription MRR on First Billing Cycle**: Newly created subscriptions do not have a renewal cycle record yet (`latestRenewal` is null). Analytics daily snapshots must resolve the latest order from linked subscription orders (including the initial checkout order) rather than exclusively checking renewal cycles to avoid calculating MRR as unavailable or zero before the first renewal.
 * **Analytics Daily Snapshot Order Resolution**: When resolving `latestOrderId` for daily metric snapshots, always prefer `latestRenewal.generated_order_id` (representing the most recent renewal order) and fallback to `latestOrderBySubscription` (representing initial order creation) so that both renewal-generated orders and initial orders are properly captured.
 
+
+* **E2E Prompt Scoping**: A Medusa Drawer remains open beneath its confirmation `alertdialog`; target the confirmation by `role="alertdialog"` and accessible name rather than a generic dialog locator to avoid strict-mode conflicts.

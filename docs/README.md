@@ -48,6 +48,7 @@ Completed:
 - `Cancellation & Retention` Admin UI: queue, detail, apply-offer, finalize, and reason-update flows
 - `Cancellation & Retention` backend integration tests
 - `Cancellation & Retention` admin flow integration coverage
+- `Cancellation & Retention` Admin UI Playwright E2E coverage for pause retention and final cancellation
 - smoke-level integration between `Cancellation & Retention`, `Subscriptions`, `Renewals`, and `Dunning`
 - `Cancellation & Retention` operational hardening for audit trail, structured logging, and scheduler summary metrics
 - `Activity Log` domain model and storage
