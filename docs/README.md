@@ -27,6 +27,7 @@ Completed:
 - `Plans & Offers` Admin UI: list, create, edit, toggle, filtering, sorting, and selection flows
 - `Plans & Offers` backend integration tests
 - `Plans & Offers` admin flow integration coverage
+- `Plans & Offers` Admin UI Playwright E2E test coverage (plan creation flow)
 - smoke-level integration between `Plans & Offers` and `Subscriptions`
 - `Renewals` domain model
 - `Renewals` admin API routes
