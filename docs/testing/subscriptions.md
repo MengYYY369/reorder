@@ -91,11 +91,13 @@ Purpose:
 - seed or verify subscription test data via PostgreSQL / Admin API setup (`e2e/seed.setup.ts`)
 - verify table rendering, column headers, status badges, search filtering, and row action menus
 - verify navigation from the list view to the subscription detail page
+- verify detail-page status transitions (pause and resume) including API response assertions and UI feedback
 
 Current files:
 - [auth.setup.ts](../../e2e/auth.setup.ts)
 - [seed.setup.ts](../../e2e/seed.setup.ts)
 - [subscriptions-list.spec.ts](../../e2e/subscriptions-list.spec.ts)
+- [subscription-status.spec.ts](../../e2e/subscription-status.spec.ts)
 
 This layer protects the actual operator experience in the browser, complementing backend integration flows.
 
@@ -177,6 +179,11 @@ Covered through Playwright browser tests:
 - status badge visibility on subscription rows
 - navigation to subscription detail on row click
 - row action menu visibility and status-appropriate options
+- subscription detail page pause and resume flows: StatusBadge transitions, toast messages, API response payload (`status` field), menu item presence/absence per state
+
+Page Object Models:
+- `PlanFormPage` (`e2e/pages/PlanFormPage.ts`) — plan offer creation form
+- `SubscriptionDetailPage` (`e2e/pages/SubscriptionDetailPage.ts`) — detail page navigation, status assertions, action menu interactions, prompt confirmation
 
 ## 6. Commands
 

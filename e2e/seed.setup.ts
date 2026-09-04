@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { test as setup, expect, request } from "@playwright/test";
 
 const BASE_URL = process.env.ADMIN_BASE_URL ?? "http://localhost:9000";
@@ -80,7 +80,7 @@ setup("seed subscription for e2e", async ({}) => {
     `);`,
   ].join(" ");
 
-  execSync(`psql "${DB_URL}" -c "${sql}"`, { stdio: "pipe" });
+  execFileSync("psql", [DB_URL, "-c", sql], { stdio: "pipe" });
   console.log(`[e2e-seed] Inserted subscription ${reference}`);
 
   // 5. Verify the subscription appears in the admin API
