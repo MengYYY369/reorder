@@ -29,6 +29,12 @@ export type CreateSubscriptionRecordStepInput = {
   is_trial: boolean
   trial_ends_at: string | null
   next_renewal_at: string | null
+  /**
+   * Value stored in subscription metadata.source. Defaults to
+   * "store_cart_subscribe" (upstream checkout flow); the order-driven flow
+   * passes "store_order_placed".
+   */
+  metadata_source?: string
 }
 
 type CreatedSubscriptionRecord = {
@@ -71,7 +77,7 @@ export const createSubscriptionRecordStep = createStep(
       payment_context: input.payment_context,
       pending_update_data: null,
       metadata: {
-        source: "store_cart_subscribe",
+        source: input.metadata_source ?? "store_cart_subscribe",
         source_order_id: input.order_id,
       },
     } as any)
