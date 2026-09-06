@@ -54,7 +54,7 @@ const settingsSchema = z
     intervals.forEach((interval, index) => {
       if (!Number.isInteger(interval) || interval <= 0) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "settings.validation.retryIntervalPositive",
           path: ["dunning_retry_intervals", index, "value"],
         })
@@ -62,7 +62,7 @@ const settingsSchema = z
 
       if (index > 0 && interval <= intervals[index - 1]) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "settings.validation.retryIntervalsStrictlyIncreasing",
           path: ["dunning_retry_intervals", index, "value"],
         })
@@ -71,7 +71,7 @@ const settingsSchema = z
 
     if (values.max_dunning_attempts !== intervals.length) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "settings.validation.maxAttemptsMatchIntervals",
         path: ["max_dunning_attempts"],
       })

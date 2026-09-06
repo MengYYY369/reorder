@@ -1,5 +1,5 @@
 import { createFindParams } from "@medusajs/medusa/api/utils/validators"
-import { z } from "zod"
+import { z } from "@medusajs/framework/zod"
 
 const stringToBoolean = z.preprocess((value) => {
   if (typeof value === "string") {
@@ -111,4 +111,13 @@ export const PostAdminUpdateSubscriptionShippingAddressSchema = z.object({
 
 export type PostAdminUpdateSubscriptionShippingAddressSchemaType = z.infer<
   typeof PostAdminUpdateSubscriptionShippingAddressSchema
+>
+
+export const PostAdminUpdateSubscriptionPaymentMethodSchema = z.object({
+  payment_method_id: z.string().trim().min(1),
+  provider_id: z.string().trim().min(1).optional(),
+})
+
+export type PostAdminUpdateSubscriptionPaymentMethodSchemaType = z.infer<
+  typeof PostAdminUpdateSubscriptionPaymentMethodSchema
 >

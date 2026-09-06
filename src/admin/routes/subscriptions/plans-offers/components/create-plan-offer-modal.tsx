@@ -33,17 +33,17 @@ import {
 } from "./selection-modals"
 
 const frequencyRowSchema = z.object({
-  interval: z.nativeEnum(PlanOfferFrequencyInterval),
+  interval: z.enum(PlanOfferFrequencyInterval),
   value: z.number().int().positive(),
   has_discount: z.boolean(),
-  discount_type: z.nativeEnum(PlanOfferDiscountType),
+  discount_type: z.enum(PlanOfferDiscountType),
   discount_value: z.number().positive().nullable(),
 })
 
 const createPlanOfferSchema = z
   .object({
     name: z.string().trim().min(1).max(255),
-    scope: z.nativeEnum(PlanOfferScope),
+    scope: z.enum(PlanOfferScope),
     product_id: z.string().trim().min(1),
     product_title: z.string().trim().min(1),
     variant_id: z.string().trim().optional().nullable(),
@@ -62,7 +62,7 @@ const createPlanOfferSchema = z
   .superRefine((values, ctx) => {
     if (values.scope === PlanOfferScope.VARIANT && !values.variant_id) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "planOffers.validation.selectVariant",
         path: ["variant_id"],
       })
@@ -75,7 +75,7 @@ const createPlanOfferSchema = z
 
       if (seen.has(key)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "planOffers.validation.frequencyUnique",
           path: ["frequency_rows", index, "value"],
         })
@@ -85,7 +85,7 @@ const createPlanOfferSchema = z
 
       if (row.has_discount && row.discount_value === null) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "planOffers.validation.discountValueRequired",
           path: ["frequency_rows", index, "discount_value"],
         })
@@ -94,7 +94,7 @@ const createPlanOfferSchema = z
 
     if (values.trial_enabled && values.trial_days === null) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "planOffers.validation.trialDaysRequired",
         path: ["trial_days"],
       })
@@ -106,7 +106,7 @@ const createPlanOfferSchema = z
       values.trial_days <= 0
     ) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "planOffers.validation.trialDaysPositive",
         path: ["trial_days"],
       })
@@ -484,7 +484,9 @@ export const CreatePlanOfferModal = ({
                             step={1}
                             {...form.register("minimum_cycles", {
                               setValueAs: (value) =>
-                                value === "" ? null : Number(value),
+                                value === "" || value === null || value === undefined
+                                  ? null
+                                  : Number(value),
                             })}
                           />
                           <Text
@@ -763,7 +765,9 @@ export const CreatePlanOfferModal = ({
                                         `frequency_rows.${index}.discount_value`,
                                         {
                                           setValueAs: (value) =>
-                                            value === "" ? null : Number(value),
+                                            value === "" || value === null || value === undefined
+                                              ? null
+                                              : Number(value),
                                         }
                                       )}
                                     />

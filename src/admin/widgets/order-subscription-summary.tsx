@@ -161,7 +161,7 @@ const OrderSubscriptionSummaryWidget = ({
 };
 
 export const config = defineWidgetConfig({
-  zone: "order.details.side.after",
+  zone: "order.details",
 });
 
 export default OrderSubscriptionSummaryWidget;

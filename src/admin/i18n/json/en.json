@@ -223,7 +223,8 @@
       "resuming": "Resuming...",
       "cancelling": "Cancelling...",
       "cancelSubscription": "Cancel subscription",
-      "keepSubscription": "Keep subscription"
+      "keepSubscription": "Keep subscription",
+      "changePaymentMethod": "Change payment method"
     },
     "prompt": {
       "pauseTitle": "Pause subscription?",
@@ -236,7 +237,9 @@
     "toast": {
       "paused": "Subscription paused",
       "resumed": "Subscription resumed",
-      "cancelled": "Subscription cancelled"
+      "cancelled": "Subscription cancelled",
+      "paymentMethodUpdated": "Payment method updated",
+      "paymentMethodUpdateFailed": "Failed to update payment method"
     },
     "errors": {
       "pauseFailed": "Failed to pause subscription",
@@ -304,6 +307,22 @@
         "company": "Company",
         "firstName": "First name",
         "lastName": "Last name"
+      },
+      "paymentMethod": {
+        "heading": "Payment method",
+        "change": "Change",
+        "provider": "Provider",
+        "card": "Card",
+        "expires": "Expires",
+        "unresolvedWarning": "The stored payment method could not be resolved from the payment provider. Renewals will fail until a new payment method is selected."
+      },
+      "paymentMethodDrawer": {
+        "title": "Change payment method",
+        "loading": "Loading saved payment methods...",
+        "loadError": "Failed to load saved payment methods",
+        "empty": "This customer has no saved payment method for the configured payment provider. The customer must save a reusable payment method before renewals can be charged.",
+        "current": "(current)",
+        "selectFirst": "Select a payment method first"
       }
     },
     "addressHints": {

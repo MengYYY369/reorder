@@ -21,7 +21,7 @@ It should be reviewed at the start of a session and updated after fixing any bug
   - **Medusa Backend API**: `http://localhost:9000`
   - **Medusa Admin Dashboard**: `http://localhost:9000/app`
   - **Medusa Storefront**: `http://localhost:8000`
-  directly to the user.
+    directly to the user.
 - **Context**: Prevents leaving the user guessing where the dev server, admin panel, and storefront are hosted when processes run in the background.
 
 ### Mandatory Confirmation for Test Data Wipe
@@ -42,14 +42,40 @@ It should be reviewed at the start of a session and updated after fixing any bug
   3. **Preserve Catalog Inventory**: In transactional data wipes (`wipe-test-data.ts`), never truncate `inventory_item` or catalog tables, as Medusa v2 requires inventory items and levels for cart item creation when `manage_inventory: true`.
 - **Context**: Prevents 401 "Invalid email or password" admin login failures, 400 "A valid publishable key is required to proceed with the request" storefront errors, and 500 cart item creation failures.
 
+### Activity Log Event Types Require a Migration
+
+- **Rule**: Adding a value to `ActivityLogEventType` (or `ActivityLogActorType`) is not a types-only change. `subscription_log.event_type` is a Postgres check constraint, so every new value needs a migration in `src/modules/activity-log/migrations/` that drops and re-adds `subscription_log_event_type_check` with the full value list, plus a `down` that restores the previous list. Also add the new value to the Admin activity-log domain filter lists in `src/admin/routes/subscriptions/[id]/page.tsx` and `src/admin/routes/subscriptions/activity-log/page.tsx`, or the event will never be selectable in the timeline filters.
+- **Context**: Without the migration, writing the new event type fails at runtime with a check constraint violation even though the code type-checks and builds.
+
+### Payment Provider Isolation on Subscription Payment Method Queries
+
+- **Rule**: When querying or listing customer payment methods for a subscription, always verify that `provider_id` exists in the subscription's `payment_context`. If `provider_id` is null or not configured, return `{ payment_provider_id: null, payment_methods: [] }` immediately. Never pass `provider_id: null` to core Medusa Payment Module listing utilities, as Medusa treats a null provider ID as querying across all account holders and providers, which leaks unrelated customer payment methods across different gateways.
+- **Context**: In Store and Admin APIs, subscriptions that were created without an initialized payment provider context must not expose saved cards from other providers or gateways.
+
 ## General Lessons
 
 * **Stale Tool-Snapshot Reads**: File contents shown in system reminders or context summaries can be stale after subagents modify the working tree. Always verify actual file state with `grep`/`git status` before acting on a reminder-injected read (hit during the i18n branch: files shown as untranslated were already migrated).
 * **Subagent Silent No-Op**: A dispatched subagent can return "completed" with empty output and zero working-tree changes (provider hiccup). Check `git status` before assuming failure, and prefer resuming the same agent via SendMessage before re-dispatching from scratch (hit during Plan 5 of the i18n branch).
 * **Medusa 2.19 Typecheck Surfaces**: `medusa plugin:build` on 2.19 typechecks `scripts/` and module tests too. Hand-written narrow connection types (e.g. a custom `PgConnection`) can break on `whereIn`/`where` — resolve `ContainerRegistrationKeys.PG_CONNECTION` untyped instead of annotating a narrow type.
 * **Translation Key Hygiene for Backend-Event Strings**: Strings that are backend contract values (e.g. dunning event types `dunning.started`, `dunning.recovered`) must never become translation keys; the contract test denylists them so the key-literal scan cannot confuse logic strings with copy.
+
+### Zod must be imported from the Medusa re-export in backend code
+
+- **Zod imports**: In backend code (`src/api/`, `src/workflows/`, `src/modules/`, `src/jobs/`), import Zod as `import { z } from "@medusajs/framework/zod"`, never from `"zod"`. Admin dashboard customizations under `src/admin/` keep importing from `"zod"` directly, since the dashboard supplies it.
+
+### Admin widget zones must not use deprecated position suffixes
+
+- **Widget zones**: In Medusa >= 2.17.2 with Layout Composer, admin widget injection zones must specify the base zone (e.g. `order.details`), never legacy position suffixes like `.before`, `.after`, or `.side.after`. The merchant/administrator controls visual positioning via the dashboard's Editor view (Layout Composer), while plugins must never attempt to enforce or migrate layout configuration directly in database tables.
+
 * **Publishable API Key Mismatch**: If Storefront throws `Error: A valid publishable key is required to proceed with the request`, the key in `.env.local` (`NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`) is out of sync with the active key in the Medusa backend database (table `api_key` where `type = 'publishable'`).
 * **Missing Inventory on Cart Line Items**: In Medusa v2, `addToCartWorkflow` checks inventory levels for all variants with `manage_inventory: true`. If `inventory_item` or `inventory_level` rows are missing, `POST /store/carts/:id/line-items` will fail with a 500 error.
 * **Subscription MRR on First Billing Cycle**: Newly created subscriptions do not have a renewal cycle record yet (`latestRenewal` is null). Analytics daily snapshots must resolve the latest order from linked subscription orders (including the initial checkout order) rather than exclusively checking renewal cycles to avoid calculating MRR as unavailable or zero before the first renewal.
+* **Yarn Version and Toolchain**: The repository pins `yarn@4.4.1` via `packageManager`, but the globally installed Yarn is `1.22`. Running `yarn install` or `yarn build` directly fails with a Corepack error and installs nothing. Use `corepack yarn <command>` (or enable Corepack once) for any Yarn invocation in this repository.
+* **Migration Generators Need a Live Database**: `medusa plugin:db:generate` connects to Postgres before generating anything, so it cannot be used to refresh `.snapshot-medusa-*.json` when the local database is down. Hand-written constraint migrations are still valid, but the module snapshot stays stale until the generator is run against a live database.
 * **Analytics Daily Snapshot Order Resolution**: When resolving `latestOrderId` for daily metric snapshots, always prefer `latestRenewal.generated_order_id` (representing the most recent renewal order) and fallback to `latestOrderBySubscription` (representing initial order creation) so that both renewal-generated orders and initial orders are properly captured.
 
+
+* **E2E Prompt Scoping**: A Medusa Drawer remains open beneath its confirmation `alertdialog`; target the confirmation by `role="alertdialog"` and accessible name rather than a generic dialog locator to avoid strict-mode conflicts.
+* **E2E Tests & Vite Dependency Cache Invalidation**: Browser E2E tests (`yarn test:e2e`) run against the local Medusa backend (`my-medusa-store`), which pre-bundles plugin admin code in `node_modules/.vite/deps`. If backend admin UI behavior is stale or diverges from the current plugin source (e.g., outdated form validation logic), rebuild and push the plugin (`yarn build && npx yalc push`), clear Vite cache (`rm -rf ../my-medusa-store/node_modules/.vite`), and restart `medusa-backend`. Ensure Playwright binaries are installed via `npx playwright install chromium`.
+* **Nullable Number Inputs in React Hook Form**: When registering optional number inputs validated by Zod's `.positive().nullable()`, never use `setValueAs: (value) => value === "" ? null : Number(value)`. Untouched fields initialized with `null` in `defaultValues` pass `null` to `setValueAs` on submit; since `null === ""` is `false`, `Number(null)` evaluates to `0`, failing Zod's positive constraint with `"Number must be greater than 0"`. Always check `value === "" || value === null || value === undefined ? null : Number(value)`.
+* **Integration Tests Worker Concurrency vs in-band OOM**: Running all backend HTTP integration tests with Jest's `--runInBand` in a single Node process causes cumulative heap growth (~200 MB per test suite) from repeated Medusa v2 container initializations and MikroORM/Knex metadata caches, eventually exhausting the default 4 GB V8 heap limit (`JavaScript heap out of memory`). Use `--maxWorkers=2` instead of `--runInBand` so tests run in isolated worker processes, eliminating the memory leak and cutting execution time by more than half without database or port collisions.
