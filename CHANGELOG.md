@@ -1,3 +1,15 @@
+## [1.3.0] - 2026-09-07
+
+### Sync
+- Merged upstream v1.1.0: payment method management, analytics module alias
+  rename (`subscriptionAnalytics`), zod v4 idioms, Playwright E2E scaffolding,
+  widget-zone layout composer compliance.
+
+### Features (this fork)
+- Order-driven subscription creation with manual payment mode (mc02)
+- Manual renewal workflow + lifecycle events (mc03/mc04)
+- Simplified-Chinese admin translations incl. payment-method UI (i18n)
+
 ## [1.1.0] - 2026-09-06
 
 ### Features
