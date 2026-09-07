@@ -46,6 +46,7 @@ const NON_TRANSLATION_KEYS = new Set([
   "dunning.recovered",
   "dunning.unrecovered",
   "dunning.retry_schedule_updated",
+  "subscription.payment_method_updated",
 ])
 
 function usedKeys(): Array<{ key: string; file: string }> {

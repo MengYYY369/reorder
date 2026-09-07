@@ -30,10 +30,10 @@ import {
 } from "../data-loading"
 
 const frequencyRowSchema = z.object({
-  interval: z.nativeEnum(PlanOfferFrequencyInterval),
+  interval: z.enum(PlanOfferFrequencyInterval),
   value: z.number().int().positive(),
   has_discount: z.boolean(),
-  discount_type: z.nativeEnum(PlanOfferDiscountType),
+  discount_type: z.enum(PlanOfferDiscountType),
   discount_value: z.number().positive().nullable(),
 })
 
@@ -59,7 +59,7 @@ const editPlanOfferSchema = z
 
       if (seen.has(key)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "planOffers.validation.frequencyUnique",
           path: ["frequency_rows", index, "value"],
         })
@@ -69,7 +69,7 @@ const editPlanOfferSchema = z
 
       if (row.has_discount && row.discount_value === null) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "planOffers.validation.discountValueRequired",
           path: ["frequency_rows", index, "discount_value"],
         })
@@ -78,7 +78,7 @@ const editPlanOfferSchema = z
 
     if (values.trial_enabled && values.trial_days === null) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "planOffers.validation.trialDaysRequired",
         path: ["trial_days"],
       })
@@ -90,7 +90,7 @@ const editPlanOfferSchema = z
       values.trial_days <= 0
     ) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "planOffers.validation.trialDaysPositive",
         path: ["trial_days"],
       })
@@ -421,7 +421,9 @@ export const EditPlanOfferDrawer = ({
                           step={1}
                           {...form.register("minimum_cycles", {
                             setValueAs: (value) =>
-                              value === "" ? null : Number(value),
+                              value === "" || value === null || value === undefined
+                                ? null
+                                : Number(value),
                           })}
                         />
                         <Text
@@ -665,7 +667,9 @@ export const EditPlanOfferDrawer = ({
                                     `frequency_rows.${index}.discount_value`,
                                     {
                                       setValueAs: (value) =>
-                                        value === "" ? null : Number(value),
+                                        value === "" || value === null || value === undefined
+                                          ? null
+                                          : Number(value),
                                     }
                                   )}
                                 />

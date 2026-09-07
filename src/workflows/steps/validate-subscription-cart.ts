@@ -6,14 +6,32 @@ import { resolveProductSubscriptionConfig } from "../../modules/plan-offer/utils
 import {
   SubscriptionFrequencyInterval,
   type SubscriptionPaymentContext,
+  type SubscriptionPaymentMethodRecord,
+  type SubscriptionPaymentMode,
   type SubscriptionPricingSnapshot,
   type SubscriptionProductSnapshot,
   type SubscriptionShippingAddress,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import {
+  sortPaymentMethodSummaries,
+  toPaymentMethodSummary,
+} from "../../modules/subscription/utils/payment-methods"
 
 export type ValidateSubscriptionCartStepInput = {
   cart_id: string
+  /**
+   * Allow validating a cart that was already completed. Used by the
+   * order-driven creation flow, where the cart completed through the normal
+   * checkout before the subscription record is minted.
+   */
+  allow_completed?: boolean
+  /**
+   * Payment mode assumed when the subscription line item metadata does not
+   * declare one. Defaults to "auto" (upstream behavior: a reusable payment
+   * method reference is required). The order-driven flow passes "manual".
+   */
+  default_payment_mode?: SubscriptionPaymentMode
 }
 
 type CartLineItemRecord = {
@@ -87,7 +105,7 @@ export const validateSubscriptionCartStep = createStep(
   ) {
     const cart = await loadCart(container, input.cart_id)
 
-    if (cart.completed_at) {
+    if (cart.completed_at && !input.allow_completed) {
       throw subscriptionErrors.conflict(
         `Cart '${input.cart_id}' is already completed`
       )
@@ -143,6 +161,10 @@ export const validateSubscriptionCartStep = createStep(
 
     const frequencyInterval = readFrequencyInterval(subscriptionItem.metadata)
     const frequencyValue = readFrequencyValue(subscriptionItem.metadata)
+    const paymentMode = readPaymentMode(
+      subscriptionItem.metadata,
+      input.default_payment_mode
+    )
     const effectiveConfig = await resolveProductSubscriptionConfig(container, {
       product_id: productId,
       variant_id: variantId,
@@ -171,7 +193,11 @@ export const validateSubscriptionCartStep = createStep(
       frequencyValue
     )
 
-    const paymentContext = await buildPaymentContext(container, cart)
+    const paymentContext = await buildPaymentContext(
+      container,
+      cart,
+      paymentMode
+    )
 
     return new StepResponse<ValidatedSubscriptionCart>({
       cart_id: cart.id,
@@ -379,7 +405,8 @@ function buildShippingAddress(
 
 async function buildPaymentContext(
   container: MedusaContainer,
-  cart: CartRecord
+  cart: CartRecord,
+  paymentMode: SubscriptionPaymentMode
 ): Promise<SubscriptionPaymentContext> {
   const paymentCollectionId = cart.payment_collection?.id ?? null
   const session =
@@ -395,6 +422,24 @@ async function buildPaymentContext(
     throw subscriptionErrors.invalidData(
       "Subscription checkout requires an initialized payment session"
     )
+  }
+
+  if (paymentMode === "manual") {
+    // Redirect-based providers (cashier URL + async notify) never carry a
+    // reusable payment method reference. The subscription is minted after the
+    // order is placed; renewal charging for manual mode is handled by the
+    // manual renewal flow instead of the off-session scheduler.
+    return {
+      payment_provider_id: session.provider_id,
+      payment_mode: "manual",
+      source_payment_collection_id: paymentCollectionId,
+      source_payment_session_id: session.id,
+      payment_method_reference: null,
+      customer_payment_reference:
+        readNullableString(session.data?.customer) ??
+        readNullableString(session.data?.customer_id) ??
+        null,
+    }
   }
 
   const paymentMethodReference =
@@ -413,6 +458,7 @@ async function buildPaymentContext(
 
   return {
     payment_provider_id: session.provider_id,
+    payment_mode: "auto",
     source_payment_collection_id: paymentCollectionId,
     source_payment_session_id: session.id,
     payment_method_reference: paymentMethodReference,
@@ -421,6 +467,19 @@ async function buildPaymentContext(
       readNullableString(session.data?.customer_id) ??
       null,
   }
+}
+
+function readPaymentMode(
+  metadata?: Record<string, unknown> | null,
+  fallback?: SubscriptionPaymentMode
+): SubscriptionPaymentMode {
+  const value = metadata?.payment_mode
+
+  if (value === "manual" || value === "auto") {
+    return value
+  }
+
+  return fallback ?? "auto"
 }
 
 async function resolveSavedPaymentMethodReference(
@@ -446,7 +505,7 @@ async function resolveSavedPaymentMethodReference(
 
   const paymentModule =
     container.resolve<IPaymentModuleService>(Modules.PAYMENT)
-  const paymentMethods = await paymentModule.listPaymentMethods({
+  const paymentMethods = (await paymentModule.listPaymentMethods({
     provider_id: providerId,
     context: {
       account_holder: {
@@ -454,15 +513,12 @@ async function resolveSavedPaymentMethodReference(
         data: accountHolder.data ?? {},
       },
     },
-  })
-  const latestPaymentMethod = paymentMethods
-    .slice()
-    .sort((left, right) => {
-      const leftCreated = readNumericTimestamp(left.data?.created)
-      const rightCreated = readNumericTimestamp(right.data?.created)
-
-      return rightCreated - leftCreated
-    })[0]
+  })) as SubscriptionPaymentMethodRecord[]
+  const latestPaymentMethod = sortPaymentMethodSummaries(
+    (paymentMethods ?? [])
+      .filter((paymentMethod) => !!paymentMethod?.id)
+      .map((paymentMethod) => toPaymentMethodSummary(paymentMethod, providerId))
+  )[0]
 
   if (!latestPaymentMethod?.id) {
     throw subscriptionErrors.invalidData(
@@ -471,22 +527,6 @@ async function resolveSavedPaymentMethodReference(
   }
 
   return latestPaymentMethod.id
-}
-
-function readNumericTimestamp(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10)
-
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-
-  return 0
 }
 
 function readString(value: unknown) {

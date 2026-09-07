@@ -33,6 +33,7 @@ type SubscriptionRecord = {
   customer_id: string
   payment_context: {
     payment_provider_id: string | null
+    payment_mode?: string | null
     payment_method_reference: string | null
   } | null
 }
@@ -421,6 +422,18 @@ async function executePaymentRetry(
 
   try {
     const paymentContext = subscription.payment_context
+
+    if (paymentContext?.payment_mode === "manual") {
+      // Manual subscriptions are paid via the interactive manual renewal flow;
+      // off-session retries would always fail without a method reference.
+      return {
+        kind: "permanent_failure",
+        payment_reference: null,
+        error_code: "manual_payment_mode",
+        error_message:
+          "Subscription is in manual payment mode; pay via the manual renewal flow",
+      }
+    }
 
     if (
       !paymentContext?.payment_provider_id ||

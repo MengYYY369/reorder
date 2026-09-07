@@ -1,4 +1,4 @@
-import { z } from "zod"
+import { z } from "@medusajs/framework/zod"
 import { CancellationReasonCategory } from "../../../../../modules/cancellation/types"
 
 const metadataSchema = z.record(z.string(), z.unknown()).optional()
@@ -78,4 +78,13 @@ export const PostStoreRetrySubscriptionPaymentSchema = z.object({
 
 export type PostStoreRetrySubscriptionPaymentSchemaType = z.infer<
   typeof PostStoreRetrySubscriptionPaymentSchema
+>
+
+export const PostStoreUpdateSubscriptionPaymentMethodSchema = z.object({
+  payment_method_id: z.string().trim().min(1),
+  provider_id: z.string().trim().min(1).optional(),
+})
+
+export type PostStoreUpdateSubscriptionPaymentMethodSchemaType = z.infer<
+  typeof PostStoreUpdateSubscriptionPaymentMethodSchema
 >

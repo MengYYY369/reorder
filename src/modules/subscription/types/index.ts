@@ -43,12 +43,49 @@ export type SubscriptionShippingAddress = {
   phone: string | null
 }
 
+/**
+ * How renewals are charged for a subscription.
+ *
+ * - "auto": the off-session scheduler charges `payment_method_reference`
+ *   directly (tokenizable providers). Default for upstream compatibility.
+ * - "manual": renewals are paid through an interactive cashier link minted by
+ *   the manual renewal flow; the scheduler skips these subscriptions.
+ */
+export type SubscriptionPaymentMode = "manual" | "auto"
+
 export type SubscriptionPaymentContext = {
   payment_provider_id: string | null
+  payment_mode: SubscriptionPaymentMode
   source_payment_collection_id: string | null
   source_payment_session_id: string | null
   payment_method_reference: string | null
   customer_payment_reference: string | null
+}
+
+export type SubscriptionPaymentMethodSummary = {
+  id: string
+  provider_id: string
+  type: string | null
+  brand: string | null
+  last4: string | null
+  exp_month: number | null
+  exp_year: number | null
+  created_at: number | null
+}
+
+export type SubscriptionAccountHolderRecord = {
+  id: string
+  provider_id: string
+  external_id?: string | null
+  email?: string | null
+  data?: Record<string, unknown> | null
+  metadata?: Record<string, unknown> | null
+}
+
+export type SubscriptionPaymentMethodRecord = {
+  id: string
+  provider_id?: string | null
+  data?: Record<string, unknown> | null
 }
 
 export type SubscriptionPendingUpdateData = {

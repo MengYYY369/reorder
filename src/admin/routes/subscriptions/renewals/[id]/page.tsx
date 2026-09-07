@@ -806,8 +806,8 @@ const RenewalDetailPage = () => {
 export default RenewalDetailPage;
 
 export const handle = {
-  breadcrumb: ({ params, data }: UIMatch<RenewalCycleAdminDetailResponse>) =>
-    params?.id || data?.renewal?.id || translate("renewals.breadcrumb"),
+  breadcrumb: ({ params, loaderData }: UIMatch<RenewalCycleAdminDetailResponse>) =>
+    params?.id || loaderData?.renewal?.id || translate("renewals.breadcrumb"),
 };
 
 const DetailRow = ({

@@ -152,6 +152,7 @@ The detail page currently renders:
 - `Customer`
 - `Product`
 - `Shipping address`
+- `Payment method`
 - `Pending plan change`
 - `Activity Log`
 
@@ -166,14 +167,13 @@ Current data resolution rule:
 
 ### Order Detail Widget
 
-The plugin also extends the standard Medusa `Order detail` page.
+The plugin extends the standard Medusa `Order detail` page (`order.details` zone). In Medusa v2.17.2+, visual positioning and section placement are managed by the merchant via the Admin dashboard's Editor view (Layout Composer).
 
 The `Subscription` widget shows:
 - `Subscription order` with a linked subscription card when the order is linked to a subscription
 - current subscription discount label derived from `pricing_snapshot`
 - projected next renewal date
 - `One-time order` when no `subscription_order` link exists
-
 ## 3. Detail Actions
 
 ### Action Menu
@@ -183,6 +183,7 @@ The detail page action menu includes:
 - `Resume`
 - `Schedule plan change`
 - `Edit shipping address`
+- `Change payment method`
 - `Cancel`
 
 Action availability follows the same state rules as the list where relevant.
@@ -240,6 +241,25 @@ Behavior:
 - the form validates required fields before submit
 - the save action is shown in standard Medusa Drawer footer form
 - the resulting activity-log event stores readable address diffs such as `Address: old -> new`
+
+### Change Payment Method Drawer
+
+Purpose:
+- change the saved payment method a subscription renews with
+
+Behavior:
+- the drawer lists the payment methods the subscription customer has saved with the subscription payment provider
+- each option shows brand, last four digits, and expiry, and the current one is marked
+- the current payment method is preselected
+- `Save` is disabled while the preselected payment method is unchanged
+- a warning is shown instead of the list when the customer has no saved payment method for the provider
+- the resulting activity-log event stores only provider, brand, last four digits, and expiry
+
+The `Payment method` section is also the place where an unresolvable stored payment method surfaces: when a payment provider is configured but the stored payment method can no longer be read from the provider, the section warns that renewals will fail until a new payment method is selected.
+
+Operational note:
+- changing the payment method does not retry a failed payment
+- to recover a failing subscription, change the payment method and then use the `Dunning` retry action
 
 ## 5. Activity Log Section
 
@@ -359,10 +379,9 @@ The implemented UI is supported by integration coverage for the underlying Admin
 - edit shipping address
 - cancel
 
-The browser UI itself is not currently covered by Playwright.
+The browser UI is covered by Playwright E2E tests for the list view (`e2e/subscriptions-list.spec.ts`), verifying table rendering, column headers, status badges, search filtering, row actions, and detail navigation.
 
-The current project relies on Medusa-supported HTTP integration tests for end-to-end backend flow validation.
-
+Detailed backend lifecycle operations and mutation flows remain validated through Medusa-supported HTTP integration tests.
 ## 11. Boundary with Cancellation & Retention
 
 The `Subscriptions` Admin area still owns direct lifecycle actions such as:

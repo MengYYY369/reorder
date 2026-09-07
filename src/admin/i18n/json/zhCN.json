@@ -221,7 +221,8 @@
       "resuming": "恢复中……",
       "cancelling": "取消中……",
       "cancelSubscription": "取消订阅",
-      "keepSubscription": "保留订阅"
+      "keepSubscription": "保留订阅",
+      "changePaymentMethod": "更换支付方式"
     },
     "prompt": {
       "pauseTitle": "暂停订阅？",
@@ -234,7 +235,9 @@
     "toast": {
       "paused": "订阅已暂停",
       "resumed": "订阅已恢复",
-      "cancelled": "订阅已取消"
+      "cancelled": "订阅已取消",
+      "paymentMethodUpdated": "支付方式已更新",
+      "paymentMethodUpdateFailed": "更新支付方式失败"
     },
     "errors": {
       "pauseFailed": "暂停订阅失败",
@@ -302,6 +305,22 @@
         "company": "公司",
         "firstName": "名",
         "lastName": "姓"
+      },
+      "paymentMethod": {
+        "heading": "支付方式",
+        "change": "更换",
+        "provider": "服务商",
+        "card": "卡片",
+        "expires": "有效期",
+        "unresolvedWarning": "无法从支付服务商解析已保存的支付方式。在选择新的支付方式之前，续费将失败。"
+      },
+      "paymentMethodDrawer": {
+        "title": "更换支付方式",
+        "loading": "正在加载已保存的支付方式...",
+        "loadError": "加载已保存的支付方式失败",
+        "empty": "该客户在当前配置的支付服务商下没有已保存的支付方式。客户必须先保存可复用的支付方式，续费才能扣款。",
+        "current": "（当前）",
+        "selectFirst": "请先选择支付方式"
       }
     },
     "addressHints": {

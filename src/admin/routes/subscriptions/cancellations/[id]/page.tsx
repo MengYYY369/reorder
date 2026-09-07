@@ -1276,8 +1276,8 @@ const CancellationDetailPage = () => {
 export default CancellationDetailPage
 
 export const handle = {
-  breadcrumb: ({ params, data }: UIMatch<CancellationCaseAdminDetailResponse>) =>
-    params?.id || data?.cancellation?.id || translate("cancellations.breadcrumb"),
+  breadcrumb: ({ params, loaderData }: UIMatch<CancellationCaseAdminDetailResponse>) =>
+    params?.id || loaderData?.cancellation?.id || translate("cancellations.breadcrumb"),
 }
 
 const DetailRow = ({
