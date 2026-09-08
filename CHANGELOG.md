@@ -1,3 +1,10 @@
+## [1.3.1] - 2026-09-08
+
+### Fixes
+- **subscribers:** export the missing `config` from payment-captured-manual-renewal —
+  without it Medusa skipped the subscriber ("missing a config. skipped."), so
+  manual renewal orders could never finalize via the payment.captured path.
+
 ## [1.3.0] - 2026-09-07
 
 ### Sync
