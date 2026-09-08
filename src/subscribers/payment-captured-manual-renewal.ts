@@ -123,3 +123,7 @@ async function findOrderIdForCollection(
 
   return (data as Array<{ order_id?: string }>)[0]?.order_id ?? null
 }
+
+export const config: SubscriberConfig = {
+  event: "payment.captured",
+}
