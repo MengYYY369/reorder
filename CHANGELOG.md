@@ -1,3 +1,24 @@
+## [1.4.0] - 2026-09-09
+
+### Features
+- **redemption:** add redemption codes for payment-free subscription grants (c6371d4) —
+  merchants create batches of single-use codes bound to a plan-offer variant with a
+  configurable free-cycle grant; customers redeem them via
+  `POST /store/customers/me/redemptions` (preview via `/preview`) to start a
+  subscription without payment, or extend an existing one. Includes the redemption
+  module (batches, codes, records), redeem/preview/create-batch workflows, expiry
+  scheduler, admin API routes, admin UI page with batch management and record view,
+  PAST_DUE recovery via redemption, activity-log `redemption.redeemed` events,
+  EN/zh-CN i18n, HTTP + module integration tests, and Playwright E2E coverage.
+
+### Fixes (during acceptance)
+- **admin:** replace nonexistent `Ticket` icon with `ReceiptPercent` so the plugin
+  admin bundle builds against the host's `@medusajs/icons`.
+- **admin:** forward the selected product id between chained picker modals so the
+  variant picker no longer renders an empty "Select a product first." state.
+- **api:** accept the `direction` sort param in the admin batches list validator so
+  the admin DataTable no longer receives a 400 on load.
+
 ## [1.3.1] - 2026-09-08
 
 ### Fixes
