@@ -4,10 +4,12 @@ import { adminSubscriptionOffersMiddlewares } from "./admin/subscription-offers/
 import { adminRenewalsMiddlewares } from "./admin/renewals/middlewares"
 import { adminDunningMiddlewares } from "./admin/dunning/middlewares"
 import { adminCancellationsMiddlewares } from "./admin/cancellations/middlewares"
+import { adminRedemptionsMiddlewares } from "./admin/redemptions/middlewares"
 import { adminSubscriptionLogsMiddlewares } from "./admin/subscription-logs/middlewares"
 import { adminSubscriptionAnalyticsMiddlewares } from "./admin/subscription-analytics/middlewares"
 import { adminSubscriptionSettingsMiddlewares } from "./admin/subscription-settings/middlewares"
 import { storeCustomerSubscriptionsMiddlewares } from "./store/customers/me/subscriptions/middlewares"
+import { storeCustomerRedemptionsMiddlewares } from "./store/customers/me/redemptions/middlewares"
 import { storeProductMiddlewares } from "./store/products/middlewares"
 
 export default defineMiddlewares({
@@ -20,7 +22,9 @@ export default defineMiddlewares({
     ...adminRenewalsMiddlewares,
     ...adminDunningMiddlewares,
     ...adminCancellationsMiddlewares,
+    ...adminRedemptionsMiddlewares,
     ...storeCustomerSubscriptionsMiddlewares,
+    ...storeCustomerRedemptionsMiddlewares,
     ...storeProductMiddlewares,
   ],
 })

@@ -22,6 +22,7 @@ const Subscription = model
     cancelled_at: model.dateTime().nullable(),
     cancel_effective_at: model.dateTime().nullable(),
     skip_next_cycle: model.boolean().default(false),
+    free_cycles_remaining: model.number().default(0),
     is_trial: model.boolean().default(false),
     trial_ends_at: model.dateTime().nullable(),
     customer_snapshot: model.json().nullable(),

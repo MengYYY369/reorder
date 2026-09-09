@@ -25,6 +25,15 @@ build
 
 .medusa
 
+# Scratch files
+.scratch/
+
+# ZCode workspace data
+.zcode/
+
+# Superpowers plugin artifacts
+docs/superpowers/
+
 # Playwright
 e2e/.auth/
 playwright-report/

@@ -7,7 +7,8 @@
     "cancellations": "取消与挽留",
     "analytics": "数据分析",
     "activityLog": "操作日志",
-    "settings": "订阅设置"
+    "settings": "订阅设置",
+    "redemptions": "兑换码"
   },
   "common": {
     "actions": {
@@ -23,6 +24,7 @@
       "variant": "变体",
       "status": "状态",
       "frequency": "频率",
+      "interval": "频率区间",
       "discount": "折扣",
       "nextRenewal": "下次续订",
       "subscription": "订阅",
@@ -46,7 +48,9 @@
     "placeholders": {
       "searchProducts": "搜索商品……"
     },
-    "empty": { "noValue": "-" },
+    "empty": {
+      "noValue": "-"
+    },
     "intervals": {
       "week": "每周",
       "month": "每月",
@@ -1096,6 +1100,105 @@
       "updated": "订阅设置已更新",
       "updateFailed": "更新订阅设置失败",
       "versionConflict": "设置已在另一个会话中更改。请刷新页面后重试保存。"
+    }
+  },
+  "redemptions": {
+    "list": {
+      "title": "兑换码批次",
+      "description": "创建和管理兑换码活动。",
+      "empty": "暂无兑换码批次",
+      "emptyHint": "创建一个批次开始分发兑换码。",
+      "loadError": "加载兑换码批次失败"
+    },
+    "create": {
+      "title": "创建兑换码批次",
+      "description": "批次授予固定内容：指定规格、频率和免费周期数。码继承批次配置。"
+    },
+    "fields": {
+      "name": "名称",
+      "freeCycles": "免费周期数",
+      "maxRedemptionsPerCode": "单码兑换上限",
+      "codePrefix": "码前缀",
+      "generatedCodeCount": "生成数量",
+      "customCodes": "自定义码",
+      "customCodesHint": "添加易记的码（字母、数字、连字符）。",
+      "validityWindow": "有效期",
+      "validityWindowHint": "码仅在有效期窗口内可兑换。",
+      "startsAt": "开始时间",
+      "expiresAt": "结束时间",
+      "frequencyValue": "频率值"
+    },
+    "columns": {
+      "name": "名称",
+      "status": "状态",
+      "grant": "授予内容",
+      "grantValue": "{cycles} 个免费周期，{interval}/{value}",
+      "codes": "码数",
+      "redemptions": "兑换次数",
+      "frequency": "频率"
+    },
+    "status": {
+      "active": "启用",
+      "disabled": "已停用"
+    },
+    "actions": {
+      "create": "创建批次",
+      "disable": "停用",
+      "disableBatch": "停用批次",
+      "disableCode": "停用码",
+      "selectVariant": "选择规格",
+      "addCustomCode": "添加码"
+    },
+    "codes": {
+      "title": "码列表",
+      "description": "该批次共 {count} 个码",
+      "code": "码",
+      "status": "状态",
+      "usage": "使用情况",
+      "created": "创建时间"
+    },
+    "detail": {
+      "variantId": "规格：{variantId}",
+      "noWindow": "无限制",
+      "loading": "加载中…"
+    },
+    "placeholders": {
+      "batchName": "夏季赠品"
+    },
+    "prompt": {
+      "disableBatchTitle": "停用批次？",
+      "disableBatchDescription": "该批次下所有码将立即停止兑换。",
+      "disableCodeTitle": "停用码？",
+      "disableCodeDescription": "码 {code} 将立即停止兑换。"
+    },
+    "toast": {
+      "created": "兑换码批次已创建",
+      "batchDisabled": "批次已停用",
+      "codeDisabled": "码已停用"
+    },
+    "errors": {
+      "createFailed": "创建兑换码批次失败",
+      "disableFailed": "停用失败",
+      "required": "必填项"
+    },
+    "validation": {
+      "selectVariant": "请选择规格",
+      "atLeastOneCode": "至少添加一个生成码或自定义码",
+      "windowOrder": "开始时间必须早于结束时间",
+      "customCodeFormat": "仅限字母、数字和中间连字符（至少 2 个字符）",
+      "codePrefixFormat": "1-8 位字母或数字"
+    },
+    "records": {
+      "title": "兑换记录",
+      "description": "该批次共 {count} 次兑换",
+      "customer": "客户",
+      "outcome": "结果",
+      "outcomeCreated": "新建订阅",
+      "outcomeExtended": "延长订阅",
+      "freeCycles": "免费周期",
+      "subscription": "订阅",
+      "redeemedAt": "兑换时间",
+      "empty": "暂无兑换记录"
     }
   }
 }

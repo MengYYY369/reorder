@@ -12,6 +12,7 @@ At the moment, the following areas are implemented and tested:
 - `Cancellation & Retention`
 - `Activity Log`
 - `Analytics`
+- `Redemption Codes`
 
 ## Current Status
 
@@ -124,6 +125,11 @@ Runtime source-of-truth documents currently exist for:
   - `api/admin-analytics.md`
   - `admin/analytics.md`
   - `testing/analytics.md`
+- `Redemption Codes`
+  - `architecture/redemption.md`
+  - `api/admin-redemptions.md`
+  - `api/store-redemptions.md`
+  - `testing/redemptions.md`
 - `Admin Internationalization`
   - `admin/i18n.md`
 
@@ -154,7 +160,7 @@ Do not assume the Medusa backend is using the newest local plugin code until tha
 
 ## Implemented Areas
 
-The currently implemented areas are `Subscriptions`, `Plans & Offers`, `Renewals`, `Dunning`, `Cancellation & Retention`, `Activity Log`, and `Analytics`.
+The currently implemented areas are `Subscriptions`, `Plans & Offers`, `Renewals`, `Dunning`, `Cancellation & Retention`, `Activity Log`, `Analytics`, and `Redemption Codes`.
 
 `Activity Log` is now implemented end-to-end as a business audit trail with Admin read APIs, a dedicated Admin page, and a subscription-level timeline.
 
@@ -230,6 +236,20 @@ This area includes:
 - per-subscription timeline on the subscription detail page
 - snapshot-first read model and Admin read API routes
 - backend coverage for normalization, event creation, API contracts, and admin flow integration
+
+### Redemption Codes
+
+This area includes:
+- redemption batches and codes domain model with case-insensitive unique codes and schema-level per-customer redemption limits
+- Admin API for batch creation (generated and custom codes), listing, detail, batch disable, and code disable
+- Admin UI: batches list, create modal (grant config, quantity, limits, validity window), batch detail with codes table, disable actions, and redemption records
+- Store API for logged-in customers: code preview, redemption, and redemption history
+- auto-resolving redemption: extends an existing ACTIVE/PAST_DUE subscription of the variant or creates a payment-free subscription
+- payment-free subscriptions terminated automatically at the end of the free period through a daily expiry job
+- free cycles consumed by the renewal engine as SUCCEEDED cycles without orders or payments (`free_cycles_remaining` counter)
+- PAST_DUE extension recovers the open dunning case and reactivates the subscription
+- activity log events `redemption.redeemed` and `subscription.expired`
+- backend coverage for module constraints, admin routes, and the full store redemption flow
 
 ### Analytics
 

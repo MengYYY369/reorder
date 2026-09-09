@@ -7,7 +7,8 @@
     "cancellations": "Cancellation & Retention",
     "analytics": "Analytics",
     "activityLog": "Activity Log",
-    "settings": "Subscription Settings"
+    "settings": "Subscription Settings",
+    "redemptions": "Redemption Codes"
   },
   "common": {
     "actions": {
@@ -23,6 +24,7 @@
       "variant": "Variant",
       "status": "Status",
       "frequency": "Frequency",
+      "interval": "Interval",
       "discount": "Discount",
       "nextRenewal": "Next renewal",
       "subscription": "Subscription",
@@ -1098,6 +1100,105 @@
       "updated": "Subscription settings updated",
       "updateFailed": "Failed to update subscription settings",
       "versionConflict": "Settings changed in another session. Refresh the page and try saving again."
+    }
+  },
+  "redemptions": {
+    "list": {
+      "title": "Redemption Batches",
+      "description": "Create and manage redemption code campaigns.",
+      "empty": "No redemption batches",
+      "emptyHint": "Create a batch to start distributing redemption codes.",
+      "loadError": "Failed to load redemption batches"
+    },
+    "create": {
+      "title": "Create redemption batch",
+      "description": "A batch grants a fixed entitlement: a variant, a frequency and a number of free cycles. Codes inherit the batch configuration."
+    },
+    "fields": {
+      "name": "Name",
+      "freeCycles": "Free cycles",
+      "maxRedemptionsPerCode": "Max redemptions per code",
+      "codePrefix": "Code prefix",
+      "generatedCodeCount": "Generated codes",
+      "customCodes": "Custom codes",
+      "customCodesHint": "Add memorable codes (letters, digits, hyphens).",
+      "validityWindow": "Validity window",
+      "validityWindowHint": "Codes only redeem inside the window.",
+      "startsAt": "Starts at",
+      "expiresAt": "Expires at",
+      "frequencyValue": "Frequency value"
+    },
+    "columns": {
+      "name": "Name",
+      "status": "Status",
+      "grant": "Grant",
+      "grantValue": "{cycles} free cycle(s), {interval}/{value}",
+      "codes": "Codes",
+      "redemptions": "Redemptions",
+      "frequency": "Frequency"
+    },
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "actions": {
+      "create": "Create batch",
+      "disable": "Disable",
+      "disableBatch": "Disable batch",
+      "disableCode": "Disable code",
+      "selectVariant": "Select variant",
+      "addCustomCode": "Add code"
+    },
+    "codes": {
+      "title": "Codes",
+      "description": "{count} code(s) in this batch",
+      "code": "Code",
+      "status": "Status",
+      "usage": "Usage",
+      "created": "Created"
+    },
+    "detail": {
+      "variantId": "Variant: {variantId}",
+      "noWindow": "No window",
+      "loading": "Loading batch..."
+    },
+    "placeholders": {
+      "batchName": "Summer giveaway"
+    },
+    "prompt": {
+      "disableBatchTitle": "Disable batch?",
+      "disableBatchDescription": "All codes in this batch will stop redeeming immediately.",
+      "disableCodeTitle": "Disable code?",
+      "disableCodeDescription": "Code {code} will stop redeeming immediately."
+    },
+    "toast": {
+      "created": "Redemption batch created",
+      "batchDisabled": "Batch disabled",
+      "codeDisabled": "Code disabled"
+    },
+    "errors": {
+      "createFailed": "Failed to create redemption batch",
+      "disableFailed": "Failed to disable",
+      "required": "This field is required"
+    },
+    "validation": {
+      "selectVariant": "Select a variant",
+      "atLeastOneCode": "Add at least one generated or custom code",
+      "windowOrder": "Start must be before expiry",
+      "customCodeFormat": "Letters, digits and inner hyphens only (min 2 characters)",
+      "codePrefixFormat": "1-8 letters or digits"
+    },
+    "records": {
+      "title": "Redemption records",
+      "description": "{count} redemption(s) in this batch",
+      "customer": "Customer",
+      "outcome": "Outcome",
+      "outcomeCreated": "Created",
+      "outcomeExtended": "Extended",
+      "freeCycles": "Free cycles",
+      "subscription": "Subscription",
+      "redeemedAt": "Redeemed at",
+      "empty": "No redemptions yet"
     }
   }
 }

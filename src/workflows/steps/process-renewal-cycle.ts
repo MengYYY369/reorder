@@ -86,6 +86,7 @@ type SubscriptionRecord = {
   cancelled_at: Date | null
   cancel_effective_at: Date | null
   skip_next_cycle: boolean
+  free_cycles_remaining: number | null
   is_trial: boolean
   trial_ends_at: Date | null
   customer_snapshot: {
@@ -717,7 +718,11 @@ export const processRenewalCycleStep = createStep(
       const scheduledAnchor = new Date(cycle.scheduled_for)
       let generatedOrderId: string | null = null
 
-      if (!subscription.skip_next_cycle) {
+      const isFreeCycle =
+        subscription.skip_next_cycle ||
+        (subscription.free_cycles_remaining ?? 0) > 0
+
+      if (!isFreeCycle) {
         if (!subscription.cart_id) {
           throw renewalErrors.invalidData(
             `Subscription '${subscription.id}' is missing 'cart_id' required for renewal order creation`
@@ -767,6 +772,9 @@ export const processRenewalCycleStep = createStep(
         next_renewal_at: nextRenewalAt,
         last_renewal_at: finishedAt,
         skip_next_cycle: false,
+        free_cycles_remaining: isFreeCycle && !subscription.skip_next_cycle
+          ? (subscription.free_cycles_remaining ?? 0) - 1
+          : subscription.free_cycles_remaining ?? 0,
         pending_update_data: appliedPendingChanges ? null : subscription.pending_update_data,
       })
 
