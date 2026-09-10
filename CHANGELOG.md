@@ -1,3 +1,18 @@
+## [1.4.1] - 2026-09-10
+
+### Fixes
+- **renewals:** charge renewals through a summary-independent payment collection
+  resolver (7e55d5a) — on Medusa 2.20 the core create-or-update workflow rejected
+  fresh renewal orders priced at or below the currency epsilon (0.01 for USD/CNY,
+  1 for JPY/KRW) with "Amount cannot be greater than ..." before any payment was
+  attempted, and the failure bypassed dunning classification. Auto renewal, dunning
+  retry, and manual renewal now share a resolveOrderPaymentCollection helper that
+  never reads the order summary: it reuses chargeable collections (syncing the
+  amount), cancels-and-replaces authorized ones without touching captured money,
+  and otherwise creates a collection plus the order link; helper failures in the
+  auto path open a payment_session-sourced dunning case. Epsilon-boundary (0.01)
+  regression tests pin all three paths.
+
 ## [1.4.0] - 2026-09-09
 
 ### Features
