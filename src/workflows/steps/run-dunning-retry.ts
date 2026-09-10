@@ -2,10 +2,8 @@ import { IPaymentModuleService, MedusaContainer } from "@medusajs/framework/type
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { BigNumberInput } from "@medusajs/types"
-import {
-  createOrUpdateOrderPaymentCollectionWorkflow,
-  createPaymentSessionsWorkflow,
-} from "@medusajs/medusa/core-flows"
+import { createPaymentSessionsWorkflow } from "@medusajs/medusa/core-flows"
+import { resolveOrderPaymentCollection } from "../utils/resolve-order-payment-collection"
 import { DUNNING_MODULE } from "../../modules/dunning"
 import type DunningModuleService from "../../modules/dunning/service"
 import {
@@ -82,6 +80,7 @@ type RetryTransitionSnapshot = {
 type OrderRecord = {
   id: string
   total?: number | string | null
+  currency_code?: string
 }
 
 type PaymentSessionRecord = {
@@ -218,14 +217,14 @@ async function getNextAttemptNo(
   return Math.max(dunningCase.attempt_count, highestAttemptNo) + 1
 }
 
-async function loadOrderTotal(
+async function loadOrderCharge(
   container: MedusaContainer,
   id: string
-): Promise<number> {
+): Promise<{ total: number; currency_code: string }> {
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const { data } = await query.graph({
     entity: "order",
-    fields: ["id", "total"],
+    fields: ["id", "total", "currency_code"],
     filters: {
       id: [id],
     },
@@ -237,7 +236,10 @@ async function loadOrderTotal(
     throw dunningErrors.notFound("Order", id)
   }
 
-  return Number(order.total ?? 0)
+  return {
+    total: Number(order.total ?? 0),
+    currency_code: order.currency_code ?? "",
+  }
 }
 
 function validateRetryableCase(
@@ -444,7 +446,10 @@ async function executePaymentRetry(
       )
     }
 
-    const total = await loadOrderTotal(container, renewalOrderId)
+    const { total, currency_code: currencyCode } = await loadOrderCharge(
+      container,
+      renewalOrderId
+    )
 
     if (total <= 0) {
       throw dunningErrors.invalidData(
@@ -452,21 +457,11 @@ async function executePaymentRetry(
       )
     }
 
-    const paymentCollections =
-      await createOrUpdateOrderPaymentCollectionWorkflow(container).run({
-        input: {
-          order_id: renewalOrderId,
-          amount: total,
-        },
-      })
-
-    const paymentCollection = paymentCollections.result[0]
-
-    if (!paymentCollection) {
-      throw dunningErrors.invalidData(
-        `No payment collection is available for renewal order '${renewalOrderId}'`
-      )
-    }
+    const paymentCollection = await resolveOrderPaymentCollection(container, {
+      order_id: renewalOrderId,
+      amount: total,
+      currency_code: currencyCode,
+    })
 
     const paymentSessionResult = await createPaymentSessionsWorkflow(container).run({
       input: {

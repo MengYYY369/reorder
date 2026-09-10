@@ -21,7 +21,6 @@ import {
 import { createRenewalCycleSeed, createSubscriptionSeed } from "../helpers/renewal-fixtures"
 
 const mockCreateOrderRun = jest.fn()
-const mockCreateOrUpdateOrderPaymentCollectionRun = jest.fn()
 const mockCreatePaymentSessionsRun = jest.fn()
 
 jest.mock("@medusajs/medusa/core-flows", () => {
@@ -31,9 +30,6 @@ jest.mock("@medusajs/medusa/core-flows", () => {
     ...actual,
     createOrderWorkflow: () => ({
       run: mockCreateOrderRun,
-    }),
-    createOrUpdateOrderPaymentCollectionWorkflow: () => ({
-      run: mockCreateOrUpdateOrderPaymentCollectionRun,
     }),
     createPaymentSessionsWorkflow: () => ({
       run: mockCreatePaymentSessionsRun,
@@ -129,7 +125,7 @@ medusaIntegrationTestRunner({
 
           if (input.entity === "order" && ids.includes(orderId)) {
             return {
-              data: [{ id: orderId, total: 129 }],
+              data: [{ id: orderId, total: 129, currency_code: "pln" }],
             }
           }
 
@@ -138,9 +134,6 @@ medusaIntegrationTestRunner({
 
         mockCreateOrderRun.mockResolvedValue({
           result: { id: orderId },
-        })
-        mockCreateOrUpdateOrderPaymentCollectionRun.mockResolvedValue({
-          result: [{ id: `paycol_${reference}` }],
         })
         mockCreatePaymentSessionsRun.mockResolvedValue({
           result: { id: `payses_${reference}`, context: {}, status: "pending" },

@@ -17,7 +17,6 @@ import {
   defaultRetrySchedule,
 } from "../helpers/dunning-fixtures"
 
-const mockCreateOrUpdateOrderPaymentCollectionRun = jest.fn()
 const mockCreatePaymentSessionsRun = jest.fn()
 
 jest.mock("@medusajs/medusa/core-flows", () => {
@@ -25,9 +24,6 @@ jest.mock("@medusajs/medusa/core-flows", () => {
 
   return {
     ...actual,
-    createOrUpdateOrderPaymentCollectionWorkflow: () => ({
-      run: mockCreateOrUpdateOrderPaymentCollectionRun,
-    }),
     createPaymentSessionsWorkflow: () => ({
       run: mockCreatePaymentSessionsRun,
     }),
@@ -154,9 +150,6 @@ medusaIntegrationTestRunner({
           }),
         })
 
-        mockCreateOrUpdateOrderPaymentCollectionRun.mockResolvedValue({
-          result: [{ id: "paycol_admin_flow" }],
-        })
         mockCreatePaymentSessionsRun.mockResolvedValue({
           result: { id: "payses_admin_flow", context: {}, status: "pending" },
         })
@@ -164,7 +157,13 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_admin_flow_retry", total: 250 }],
+              data: [
+                {
+                  id: "ord_dun_admin_flow_retry",
+                  total: 250,
+                  currency_code: "usd",
+                },
+              ],
             }
           }
 
@@ -260,9 +259,6 @@ medusaIntegrationTestRunner({
           next_retry_at: new Date(Date.now() + 86_400_000),
         })
 
-        mockCreateOrUpdateOrderPaymentCollectionRun.mockResolvedValue({
-          result: [{ id: "paycol_api" }],
-        })
         mockCreatePaymentSessionsRun.mockResolvedValue({
           result: { id: "payses_api", context: {}, status: "pending" },
         })
@@ -270,7 +266,9 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_api_retry", total: 250 }],
+              data: [
+                { id: "ord_dun_api_retry", total: 250, currency_code: "usd" },
+              ],
             }
           }
 

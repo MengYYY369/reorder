@@ -3,7 +3,6 @@ import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import type { RemoteQueryFunction } from "@medusajs/framework/types"
 import {
   createOrderWorkflow,
-  createOrUpdateOrderPaymentCollectionWorkflow,
   createPaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
 import { RENEWAL_MODULE } from "../../modules/renewal"
@@ -13,6 +12,7 @@ import {
   RenewalCycleStatus,
 } from "../../modules/renewal/types"
 import { renewalErrors } from "../../modules/renewal/utils/errors"
+import { resolveOrderPaymentCollection } from "../utils/resolve-order-payment-collection"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
@@ -150,14 +150,8 @@ export const createManualRenewalStep = createStep(
         existingDue.generated_order_id
       )
 
-      const existingTotal = await loadOrderTotal(
-        container,
-        existingDue.generated_order_id
-      )
-      const existingCurrency = await loadOrderCurrency(
-        container,
-        existingDue.generated_order_id
-      )
+      const { total: existingTotal, currency_code: existingCurrency } =
+        await loadOrderCharge(container, existingDue.generated_order_id)
 
       logger.warn(
         `[reorder] reusing outstanding manual renewal order '${existingDue.generated_order_id}' for subscription '${subscription.id}'`
@@ -283,7 +277,10 @@ export const createManualRenewalStep = createStep(
 
     const order = orderResult.result
 
-    const total = await loadOrderTotal(container, order.id)
+    const { total, currency_code: currencyCode } = await loadOrderCharge(
+      container,
+      order.id
+    )
 
     let redirectUrl: string | null = null
 
@@ -297,22 +294,11 @@ export const createManualRenewalStep = createStep(
         )
       }
 
-      const paymentCollections =
-        await createOrUpdateOrderPaymentCollectionWorkflow(container).run({
-          input: {
-            order_id: order.id,
-            amount: total,
-          },
-        })
-
-      const paymentCollection = paymentCollections.result[0]
-
-      if (!paymentCollection) {
-        throw renewalErrors.renewalOrderCreationFailed(
-          cycle.id,
-          `No payment collection was created for renewal order '${order.id}'`
-        )
-      }
+      const paymentCollection = await resolveOrderPaymentCollection(container, {
+        order_id: order.id,
+        amount: total,
+        currency_code: currencyCode,
+      })
 
       // Session left UNCONFIRMED: the redirect-only provider returns a
       // cashier URL; the customer pays interactively. Captured payment is
@@ -480,44 +466,32 @@ async function findOutstandingRedirectUrl(
   return null
 }
 
-async function loadOrderCurrency(
+async function loadOrderCharge(
   container: { resolve<T>(key: string): T },
   orderId: string
-): Promise<string> {
+): Promise<{ total: number; currency_code: string }> {
   const query = container.resolve<RemoteQueryFunction>(
     ContainerRegistrationKeys.QUERY
   )
 
   const { data } = await query.graph({
     entity: "order",
-    fields: ["id", "currency_code"],
+    fields: ["id", "total", "currency_code"],
     filters: { id: [orderId] },
   })
 
-  return (data as Array<{ currency_code: string }>)[0]?.currency_code ?? "usd"
-}
-
-async function loadOrderTotal(
-  container: { resolve(key: string): unknown },
-  id: string
-): Promise<number> {
-  const query = container.resolve(ContainerRegistrationKeys.QUERY) as {
-    graph: (config: Record<string, unknown>) => Promise<{
-      data: Array<{ id: string; total: number }>
-    }>
-  }
-
-  const { data } = await query.graph({
-    entity: "order",
-    fields: ["id", "total"],
-    filters: { id: [id] },
-  })
-
-  const order = data[0]
+  const order = (data as Array<{
+    id: string
+    total: number | null
+    currency_code: string | null
+  }>)[0]
 
   if (!order) {
-    throw renewalErrors.notFound("Order", id)
+    throw renewalErrors.notFound("Order", orderId)
   }
 
-  return Number(order.total ?? 0)
+  return {
+    total: Number(order.total ?? 0),
+    currency_code: order.currency_code ?? "",
+  }
 }

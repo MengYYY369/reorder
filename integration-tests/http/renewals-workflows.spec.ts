@@ -1,5 +1,13 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import path from "path"
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import type {
+  ICartModuleService,
+  IPaymentModuleService,
+  IRegionModuleService,
+  ISalesChannelModuleService,
+  MedusaContainer,
+} from "@medusajs/framework/types"
 import {
   getAdminRenewalDetail,
   listAdminRenewals,
@@ -27,6 +35,8 @@ import {
   ActivityLogActorType,
   ActivityLogEventType,
 } from "../../src/modules/activity-log/types"
+import { DUNNING_MODULE } from "../../src/modules/dunning"
+import type DunningModuleService from "../../src/modules/dunning/service"
 import { RENEWAL_MODULE } from "../../src/modules/renewal"
 import type RenewalModuleService from "../../src/modules/renewal/service"
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
@@ -37,8 +47,22 @@ import {
   createProductWithVariant,
   createSubscriptionSeed,
 } from "../helpers/renewal-fixtures"
-import { SubscriptionFrequencyInterval } from "../../src/modules/subscription/types"
+import { createCustomer } from "../helpers/plan-offer-fixtures"
+import { SubscriptionFrequencyInterval, SubscriptionStatus } from "../../src/modules/subscription/types"
 import { PlanOfferFrequencyInterval, PlanOfferScope } from "../../src/modules/plan-offer/types"
+
+async function queryLinkedPaymentCollectionIds(
+  container: MedusaContainer,
+  orderId: string
+): Promise<{ data: Array<{ payment_collection_id: string }> }> {
+  const query = container.resolve(ContainerRegistrationKeys.QUERY)
+
+  return (await query.graph({
+    entity: "order_payment_collection",
+    fields: ["payment_collection_id"],
+    filters: { order_id: orderId },
+  })) as { data: Array<{ payment_collection_id: string }> }
+}
 
 medusaIntegrationTestRunner({
   medusaConfigFile: path.resolve(process.cwd(), "integration-tests"),
@@ -48,6 +72,294 @@ medusaIntegrationTestRunner({
   },
   testSuite: ({ getContainer }) => {
     describe("renewals query and workflows", () => {
+      beforeEach(() => {
+        jest.restoreAllMocks()
+      })
+
+      const AUTO_PAYMENT_CONTEXT = {
+        payment_provider_id: "pp_system_default",
+        payment_mode: "auto",
+        source_payment_collection_id: null,
+        source_payment_session_id: null,
+        payment_method_reference: "pm_test_auto",
+        customer_payment_reference: null,
+      }
+
+      // Seeds a paid auto-renewal subscription backed by a real cart whose
+      // order total lands exactly on the currency epsilon (0.01 USD). That is
+      // the boundary where Medusa 2.20's read-time total decoration zeroes
+      // pending_difference and the core create-or-update payment collection
+      // workflow used to abort the charge.
+      async function seedEpsilonAutoSubscription(
+        container: MedusaContainer,
+        reference: string
+      ) {
+        const customer = await createCustomer(container, {
+          email: `${reference.toLowerCase()}-${Date.now()}@medusa.test`,
+        })
+
+        // A published product: renewal order line items validate their
+        // variant_id against the product module.
+        const productModule = container.resolve<any>(Modules.PRODUCT)
+        const product = await productModule.createProducts({
+          title: `Subscription Product ${Date.now()}`,
+          status: "published",
+          options: [
+            {
+              title: "Plan",
+              values: ["Default"],
+            },
+          ],
+          variants: [
+            {
+              title: "Default Variant",
+              sku: `SUB-SKU-${Date.now()}`,
+              manage_inventory: false,
+              options: {
+                Plan: "Default",
+              },
+            },
+          ],
+        })
+        const variant = product.variants?.[0]
+
+        if (!variant) {
+          throw new Error("Failed to create product variant for test")
+        }
+
+        // Renewal order line items resolve their price through the variant's
+        // price set, so seed one explicitly and link it to the variant.
+        const pricingModule = container.resolve<any>(Modules.PRICING)
+        const priceSet = await pricingModule.createPriceSets({
+          prices: [
+            {
+              amount: 0.01,
+              currency_code: "usd",
+            },
+          ],
+        })
+
+        const link = container.resolve(ContainerRegistrationKeys.LINK)
+        await link.create({
+          [Modules.PRODUCT]: {
+            variant_id: variant.id,
+          },
+          [Modules.PRICING]: {
+            price_set_id: priceSet.id,
+          },
+        })
+
+        const regionModule = container.resolve<IRegionModuleService>(
+          Modules.REGION
+        )
+        const region = await regionModule.createRegions({
+          name: `US-${Date.now()}-${Math.random()}`,
+          currency_code: "usd",
+        } as never)
+
+        // Module-level cart creation does not attach a default sales
+        // channel, and the renewal order creation requires one.
+        const salesChannelModule =
+          container.resolve<ISalesChannelModuleService>(Modules.SALES_CHANNEL)
+        const salesChannel = await salesChannelModule.createSalesChannels({
+          name: `SC-${Date.now()}-${Math.random()}`,
+        } as never)
+
+        const cartModule = container.resolve<ICartModuleService>(Modules.CART)
+        const cart = (await cartModule.createCarts({
+          currency_code: "usd",
+          email: customer.email,
+          customer_id: customer.id,
+          region_id: region.id,
+          sales_channel_id: salesChannel.id,
+          metadata: {},
+          items: [
+            {
+              title: "Subscription renewal",
+              subtitle: "Monthly plan",
+              unit_price: 0.01,
+              quantity: 1,
+              requires_shipping: false,
+            } as never,
+          ],
+          shipping_address: {
+            first_name: "Auto",
+            last_name: "Renewal",
+            address_1: "1 Renewal Way",
+            city: "Testville",
+            postal_code: "00001",
+            country_code: "us",
+          },
+        } as never)) as unknown as { id: string }
+
+        return await createSubscriptionSeed(container, {
+          reference,
+          status: SubscriptionStatus.ACTIVE,
+          customer_id: customer.id,
+          cart_id: cart.id,
+          product_id: product.id,
+          variant_id: variant.id,
+          next_renewal_at: new Date(),
+          payment_context: AUTO_PAYMENT_CONTEXT as never,
+        })
+      }
+
+      it("charges a 0.01 renewal order end-to-end at the currency epsilon boundary", async () => {
+        const container = getContainer()
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+
+        const subscription = await seedEpsilonAutoSubscription(
+          container,
+          "SUB-REN-EPSILON-001"
+        )
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+
+        const { result } = await processRenewalCycleWorkflow(container).run({
+          input: {
+            renewal_cycle_id: cycle.id,
+            trigger_type: "scheduler",
+          },
+        })
+
+        expect(result.renewal_cycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+        expect(result.generated_order_id).toBeTruthy()
+
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        expect(updatedCycle.generated_order_id).toEqual(result.generated_order_id)
+
+        const orderId = result.generated_order_id as string
+
+        const { data: links } = await queryLinkedPaymentCollectionIds(
+          container,
+          orderId
+        )
+        expect(links).toHaveLength(1)
+
+        const collections = (await paymentModule.listPaymentCollections(
+          { id: links.map((link) => link.payment_collection_id) },
+          { relations: ["payments"] }
+        )) as unknown as Array<{
+          id: string
+          amount: number
+          payments: Array<{ id: string; captured_at: string | null }>
+        }>
+
+        expect(collections).toHaveLength(1)
+        expect(collections[0].amount).toEqual(0.01)
+        expect(collections[0].payments).toHaveLength(1)
+        expect(collections[0].payments[0].captured_at).toBeTruthy()
+      })
+
+      it("opens a dunning case with source payment_session when collection resolution fails", async () => {
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+
+        const subscription = await seedEpsilonAutoSubscription(
+          container,
+          "SUB-REN-EPSILON-002"
+        )
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+
+        jest
+          .spyOn(paymentModule, "createPaymentCollections")
+          .mockRejectedValue(new Error("Payment collection backend unavailable"))
+
+        await expect(
+          processRenewalCycleWorkflow(container).run({
+            input: {
+              renewal_cycle_id: cycle.id,
+              trigger_type: "scheduler",
+            },
+          })
+        ).rejects.toMatchObject({
+          message: expect.stringContaining("Payment collection backend"),
+        })
+
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.FAILED)
+        expect(updatedCycle.generated_order_id).toBeTruthy()
+
+        const dunningCases = await dunningModule.listDunningCases({
+          subscription_id: subscription.id,
+        } as any)
+        expect(dunningCases).toHaveLength(1)
+        expect(dunningCases[0]).toMatchObject({
+          renewal_cycle_id: cycle.id,
+          renewal_order_id: updatedCycle.generated_order_id,
+          metadata: {
+            payment_failure_source: "payment_session",
+          },
+          last_payment_error_message: expect.stringContaining(
+            "Payment collection backend"
+          ),
+        })
+      })
+
+      it("opens a dunning case when the renewal charge authorization fails", async () => {
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+
+        const subscription = await seedEpsilonAutoSubscription(
+          container,
+          "SUB-REN-EPSILON-003"
+        )
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+
+        jest
+          .spyOn(paymentModule, "authorizePaymentSession")
+          .mockRejectedValue(new Error("Card declined during renewal"))
+
+        await expect(
+          processRenewalCycleWorkflow(container).run({
+            input: {
+              renewal_cycle_id: cycle.id,
+              trigger_type: "scheduler",
+            },
+          })
+        ).rejects.toMatchObject({
+          message: expect.stringContaining("declined"),
+        })
+
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.FAILED)
+        expect(updatedCycle.generated_order_id).toBeTruthy()
+
+        const dunningCases = await dunningModule.listDunningCases({
+          subscription_id: subscription.id,
+        } as any)
+        expect(dunningCases).toHaveLength(1)
+        expect(dunningCases[0]).toMatchObject({
+          renewal_cycle_id: cycle.id,
+          renewal_order_id: updatedCycle.generated_order_id,
+          metadata: {
+            payment_failure_source: "payment_provider",
+          },
+          last_payment_error_message: expect.stringContaining("declined"),
+        })
+      })
+
       it("lists renewals with filters and latest attempt status", async () => {
         const container = getContainer()
         const activeSubscription = await createSubscriptionSeed(container, {

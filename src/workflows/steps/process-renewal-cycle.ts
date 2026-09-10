@@ -4,7 +4,6 @@ import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import {
   createOrderWorkflow,
-  createOrUpdateOrderPaymentCollectionWorkflow,
   createPaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
 import { RENEWAL_MODULE } from "../../modules/renewal"
@@ -39,6 +38,9 @@ import {
 import { addSubscriptionCadence } from "../../modules/subscription/utils/effective-next-renewal"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import { startDunningWorkflow } from "../start-dunning"
+import {
+  resolveOrderPaymentCollection,
+} from "../utils/resolve-order-payment-collection"
 import { persistSubscriptionLogEvent } from "./create-subscription-log-event"
 import { toISOStringOrNull } from "../utils/date-output"
 
@@ -58,6 +60,7 @@ type CartRecord = {
 type OrderRecord = {
   id: string
   total?: number | string | null
+  currency_code?: string
 }
 
 type PaymentSessionRecord = {
@@ -234,14 +237,14 @@ async function loadCart(
   return cart
 }
 
-async function loadOrderTotal(
+async function loadOrderCharge(
   container: MedusaContainer,
   id: string
-): Promise<number> {
+): Promise<{ total: number; currency_code: string }> {
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const { data } = await query.graph({
     entity: "order",
-    fields: ["id", "total"],
+    fields: ["id", "total", "currency_code"],
     filters: {
       id: [id],
     },
@@ -253,7 +256,10 @@ async function loadOrderTotal(
     throw renewalErrors.notFound("Order", id)
   }
 
-  return Number(order.total ?? 0)
+  return {
+    total: Number(order.total ?? 0),
+    currency_code: order.currency_code ?? "",
+  }
 }
 
 async function validateSubscriptionEligibility(
@@ -455,7 +461,10 @@ async function createRenewalOrder(
   })
 
   const order = orderResult.result
-  const total = await loadOrderTotal(container, order.id)
+  const { total, currency_code: currencyCode } = await loadOrderCharge(
+    container,
+    order.id
+  )
 
   if (total > 0) {
     const paymentContext = subscription.payment_context
@@ -470,20 +479,19 @@ async function createRenewalOrder(
       )
     }
 
-    const paymentCollections =
-      await createOrUpdateOrderPaymentCollectionWorkflow(container).run({
-        input: {
-          order_id: order.id,
-          amount: total,
-        },
+    let paymentCollection: { id: string }
+
+    try {
+      paymentCollection = await resolveOrderPaymentCollection(container, {
+        order_id: order.id,
+        amount: total,
+        currency_code: currencyCode,
       })
-
-    const paymentCollection = paymentCollections.result[0]
-
-    if (!paymentCollection) {
-      throw renewalErrors.renewalOrderCreationFailed(
-        cycle.id,
-        `No payment collection was created for renewal order '${order.id}'`
+    } catch (error) {
+      throw createPaymentQualifiedRenewalError(
+        error,
+        "payment_session",
+        order.id
       )
     }
 

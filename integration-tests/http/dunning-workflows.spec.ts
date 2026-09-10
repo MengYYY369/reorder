@@ -31,7 +31,6 @@ import {
   defaultRetrySchedule,
 } from "../helpers/dunning-fixtures"
 
-const mockCreateOrUpdateOrderPaymentCollectionRun = jest.fn()
 const mockCreatePaymentSessionsRun = jest.fn()
 
 jest.mock("@medusajs/medusa/core-flows", () => {
@@ -39,9 +38,6 @@ jest.mock("@medusajs/medusa/core-flows", () => {
 
   return {
     ...actual,
-    createOrUpdateOrderPaymentCollectionWorkflow: () => ({
-      run: mockCreateOrUpdateOrderPaymentCollectionRun,
-    }),
     createPaymentSessionsWorkflow: () => ({
       run: mockCreatePaymentSessionsRun,
     }),
@@ -260,9 +256,6 @@ medusaIntegrationTestRunner({
           last_payment_error_message: "Declined",
         })
 
-        mockCreateOrUpdateOrderPaymentCollectionRun.mockResolvedValue({
-          result: [{ id: "paycol_1" }],
-        })
         mockCreatePaymentSessionsRun.mockResolvedValue({
           result: { id: "payses_1", context: {}, status: "pending" },
         })
@@ -270,7 +263,7 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_success", total: 129 }],
+              data: [{ id: "ord_dun_success", total: 129, currency_code: "usd" }],
             }
           }
 
@@ -322,6 +315,122 @@ medusaIntegrationTestRunner({
         expect(updatedCycle.status).toEqual(RenewalCycleStatus.FAILED)
       })
 
+      it("recovers a 0.01 epsilon-boundary retry reusing one payment collection", async () => {
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+        const query = container.resolve<any>(ContainerRegistrationKeys.QUERY)
+        const originalGraph = query.graph.bind(query)
+
+        // Medusa 2.20 zeroes a freshly computed pending_difference that is at
+        // or below the currency epsilon, which used to make the core
+        // create-or-update workflow throw "Amount cannot be greater than".
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-EPSILON",
+          status: SubscriptionStatus.PAST_DUE,
+        })
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.FAILED,
+          generated_order_id: "ord_dun_epsilon",
+        })
+        const dunningCase = await createDunningCaseSeed(container, {
+          subscription_id: subscription.id,
+          renewal_cycle_id: cycle.id,
+          renewal_order_id: "ord_dun_epsilon",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 0,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+          last_payment_error_code: "card_declined",
+          last_payment_error_message: "Declined",
+        })
+
+        mockCreatePaymentSessionsRun.mockResolvedValue({
+          result: { id: "payses_epsilon", context: {}, status: "pending" },
+        })
+
+        jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
+          if (input.entity === "order") {
+            return {
+              data: [
+                { id: "ord_dun_epsilon", total: 0.01, currency_code: "usd" },
+              ],
+            }
+          }
+
+          return originalGraph(input)
+        })
+        const authorizeSpy = jest
+          .spyOn(paymentModule, "authorizePaymentSession")
+          .mockRejectedValueOnce(new Error("Insufficient funds"))
+          .mockResolvedValueOnce({ id: "pay_epsilon", amount: 0.01 } as any)
+        jest
+          .spyOn(paymentModule, "capturePayment")
+          .mockResolvedValue({ id: "pay_epsilon" } as any)
+        jest.spyOn(paymentModule, "listPaymentSessions").mockResolvedValue([
+          { id: "payses_epsilon", status: "pending" },
+        ] as any)
+
+        const firstAttempt = await runDunningRetryWorkflow(container).run({
+          input: {
+            dunning_case_id: dunningCase.id,
+            now: "2026-03-30T10:00:00.000Z",
+            ignore_schedule: true,
+          },
+        })
+        expect(firstAttempt.result.outcome).toEqual("retry_scheduled")
+
+        const secondAttempt = await runDunningRetryWorkflow(container).run({
+          input: {
+            dunning_case_id: dunningCase.id,
+            now: "2026-03-30T12:00:00.000Z",
+            ignore_schedule: true,
+          },
+        })
+        expect(secondAttempt.result.outcome).toEqual("recovered")
+
+        const updatedCase = await dunningModule.retrieveDunningCase(dunningCase.id)
+        expect(updatedCase).toMatchObject({
+          status: DunningCaseStatus.RECOVERED,
+          attempt_count: 2,
+          recovery_reason: "payment_recovered",
+        })
+
+        const attempts = await dunningModule.listDunningAttempts({
+          dunning_case_id: dunningCase.id,
+        } as any)
+        expect(attempts).toHaveLength(2)
+        expect(attempts[0]).toMatchObject({
+          status: DunningAttemptStatus.FAILED,
+          payment_reference: "payses_epsilon",
+        })
+        expect(attempts[1]).toMatchObject({
+          status: DunningAttemptStatus.SUCCEEDED,
+          payment_reference: "pay_epsilon",
+        })
+
+        // Both retry attempts charged against the same collection — the first
+        // created it, the second reused it instead of minting a duplicate.
+        const { data: links } = (await query.graph({
+          entity: "order_payment_collection",
+          fields: ["payment_collection_id"],
+          filters: { order_id: "ord_dun_epsilon" },
+        })) as { data: Array<{ payment_collection_id: string }> }
+        expect(links).toHaveLength(1)
+
+        const collections = (await paymentModule.listPaymentCollections({
+          id: links.map((link) => link.payment_collection_id),
+        })) as unknown as Array<{ id: string; amount: number }>
+        expect(collections).toHaveLength(1)
+        expect(collections[0].amount).toEqual(0.01)
+
+        expect(authorizeSpy).toHaveBeenCalledTimes(2)
+      })
+
       it("reschedules retry after a temporary payment failure", async () => {
         const container = getContainer()
         const dunningModule =
@@ -351,9 +460,6 @@ medusaIntegrationTestRunner({
           next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
         })
 
-        mockCreateOrUpdateOrderPaymentCollectionRun.mockResolvedValue({
-          result: [{ id: "paycol_2" }],
-        })
         mockCreatePaymentSessionsRun.mockResolvedValue({
           result: { id: "payses_2", context: {}, status: "pending" },
         })
@@ -361,7 +467,7 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_retry", total: 129 }],
+              data: [{ id: "ord_dun_retry", total: 129, currency_code: "usd" }],
             }
           }
 
@@ -429,9 +535,6 @@ medusaIntegrationTestRunner({
           next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
         })
 
-        mockCreateOrUpdateOrderPaymentCollectionRun.mockResolvedValue({
-          result: [{ id: "paycol_3" }],
-        })
         mockCreatePaymentSessionsRun.mockResolvedValue({
           result: { id: "payses_3", context: {}, status: "pending" },
         })
@@ -439,7 +542,9 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_unrecovered", total: 129 }],
+              data: [
+                { id: "ord_dun_unrecovered", total: 129, currency_code: "usd" },
+              ],
             }
           }
 

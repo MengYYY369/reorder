@@ -3,6 +3,7 @@ import path from "path"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import type {
   ICartModuleService,
+  IPaymentModuleService,
   IRegionModuleService,
   IWorkflowEngineService,
   MedusaContainer,
@@ -39,7 +40,7 @@ type SeedResult = {
 
 async function seedManualSubscription(
   container: MedusaContainer,
-  input: { next_renewal_at?: Date } = {}
+  input: { next_renewal_at?: Date; unit_price?: number } = {}
 ): Promise<SeedResult> {
   const customer = await createCustomer(container, {
     email: `manual-renewal-${Date.now()}-${Math.random()}@medusa.test`,
@@ -66,7 +67,7 @@ async function seedManualSubscription(
       {
         title: "Subscription renewal",
         subtitle: "Monthly plan",
-        unit_price: 1800,
+        unit_price: input.unit_price ?? 1800,
         quantity: 1,
         requires_shipping: false,
       } as never,
@@ -274,7 +275,71 @@ medusaIntegrationTestRunner({
         expect(names).toContain("renewal.succeeded")
       })
 
-      it("hygiene job cancels lapsed manual subscriptions only", async () => {
+      it("resolves one payment collection through the shared helper at the 0.01 epsilon boundary", async () => {
+    const container = getContainer()
+    const engine = container.resolve<IWorkflowEngineService>(
+      Modules.WORKFLOW_ENGINE
+    )
+    const paymentModule = container.resolve<IPaymentModuleService>(
+      Modules.PAYMENT
+    )
+    const query = container.resolve<any>(ContainerRegistrationKeys.QUERY)
+
+    // 0.01 sits exactly on the USD currency epsilon where Medusa 2.20's
+    // read-time total decoration zeroes pending_difference; the shared
+    // resolve-or-create helper must not depend on the order summary.
+    const seed = await seedManualSubscription(container, { unit_price: 0.01 })
+
+    const created = await engine.run("create-manual-renewal", {
+      input: { subscription_id: seed.subscription_id },
+      throwOnError: true,
+    })
+
+    expect(created.result.renewal_order_id).toBeTruthy()
+    expect(created.result.total).toBeGreaterThan(0)
+    expect(created.result.currency_code).toEqual("usd")
+    expect(created.result.payment_provider_id).toEqual("pp_system_default")
+
+    const orderId = created.result.renewal_order_id as string
+
+    const { data: links } = (await query.graph({
+      entity: "order_payment_collection",
+      fields: ["payment_collection_id"],
+      filters: { order_id: orderId },
+    })) as { data: Array<{ payment_collection_id: string }> }
+    expect(links).toHaveLength(1)
+
+    const collections = (await paymentModule.listPaymentCollections(
+      { id: links.map((link) => link.payment_collection_id) },
+      { relations: ["payment_sessions"] }
+    )) as unknown as Array<{
+      id: string
+      amount: number
+      payment_sessions: Array<{ id: string; status: string }>
+    }>
+
+    expect(collections).toHaveLength(1)
+    expect(collections[0].amount).toEqual(0.01)
+    // Redirect-only behavior unchanged: the session stays unconfirmed.
+    expect(collections[0].payment_sessions).toHaveLength(1)
+    expect(collections[0].payment_sessions[0].status).toEqual("pending")
+
+    // The idempotent re-run reuses the outstanding order without minting a
+    // second collection.
+    await engine.run("create-manual-renewal", {
+      input: { subscription_id: seed.subscription_id },
+      throwOnError: true,
+    })
+
+    const { data: linksAfterReuse } = (await query.graph({
+      entity: "order_payment_collection",
+      fields: ["payment_collection_id"],
+      filters: { order_id: orderId },
+    })) as { data: Array<{ payment_collection_id: string }> }
+    expect(linksAfterReuse).toHaveLength(1)
+  })
+
+  it("hygiene job cancels lapsed manual subscriptions only", async () => {
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)

@@ -60,16 +60,29 @@ Checkout fails with a validation error when neither is available, because a subs
 ### 2. Renewal
 
 `process-renewal-cycle` creates the renewal order, then charges it when the order total is greater than zero:
-1. create or update the order payment collection
+1. resolve the order's payment collection through the shared `resolveOrderPaymentCollection` helper (`workflows/utils/resolve-order-payment-collection.ts`)
 2. create a payment session for `payment_provider_id` with `payment_method`, `off_session: true`, `confirm: true` and `capture_method: "automatic"`
 3. authorize the payment session
 4. capture the payment
 
 A missing `payment_provider_id` or `payment_method_reference` fails the cycle before any charge is attempted.
 
+A failure of the resolve-or-create helper is wrapped as a payment-qualified renewal error with source `payment_session`, so it opens a dunning case instead of surfacing as an unexpected error.
+
+#### The resolve-or-create payment collection helper
+
+All three charge paths (automatic renewal, dunning retry, manual renewal) resolve the renewal order's payment collection through one shared helper. It never reads the order summary.
+
+Medusa 2.20's read-time total decoration recomputes `pending_difference = total − pending_return_total − transaction_total` and zeroes it whenever it is at or below the currency epsilon (`10^-decimal_digits` of the order currency: `0.01` for USD/CNY, `1` for zero-decimal currencies such as JPY/KRW). The core `create-or-update-order-payment-collection` workflow validates the charge against that decorated value, so it rejects fresh renewal orders priced at or below the currency epsilon with `Amount cannot be greater than ...`. The helper therefore re-implements the same resolve-or-create semantics from the live order total passed in by the caller:
+
+- a linked `not_paid` / `awaiting` collection is reused and its amount synced to the charge amount
+- a linked `authorized` / `partially_authorized` collection is canceled and replaced: only authorized (non-captured) payments are released, a collection with captured money is never canceled, and the canceled collection ends up `partially_captured` when it holds captured money
+- otherwise a new collection is created in the order currency and attached to the order via the order ↔ payment collection remote link
+- a canceled, failed, or completed collection counts as missing
+
 ### 3. Dunning
 
-Failures are classified by source (`payment_session`, `payment_provider`, `payment_capture`) and open a dunning case. `run-dunning-retry` replays the same charge against the renewal order using the subscription's current payment context.
+Failures are classified by source (`payment_session`, `payment_provider`, `payment_capture`) and open a dunning case. `run-dunning-retry` replays the same charge against the renewal order using the subscription's current payment context: the retry resolves the renewal order's payment collection through the shared helper (reusing the existing chargeable collection instead of creating a duplicate), creates a new off-session session, and authorizes and captures the payment. Helper failures flow through the existing retry classification, so a temporary helper failure reschedules the retry instead of closing the case.
 
 Because retries read the payment context at retry time, changing the payment method of a subscription with an open dunning case makes the next retry use the new payment method. This is the recovery path for a declined or expired card.
 
