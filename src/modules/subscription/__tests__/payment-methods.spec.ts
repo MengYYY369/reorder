@@ -117,6 +117,30 @@ describe("toPaymentMethodSummary", () => {
     expect(summary.exp_month).toEqual(7)
     expect(summary.exp_year).toEqual(2031)
   })
+
+  it("surfaces the PayPal wallet type without card fields", () => {
+    const summary = toPaymentMethodSummary(
+      {
+        id: "vault-token-1",
+        data: {
+          type: "paypal",
+          email: "buyer@example.com",
+        },
+      },
+      "pp_paypal_paypal"
+    )
+
+    expect(summary).toEqual({
+      id: "vault-token-1",
+      provider_id: "pp_paypal_paypal",
+      type: "paypal",
+      brand: null,
+      last4: null,
+      exp_month: null,
+      exp_year: null,
+      created_at: null,
+    })
+  })
 })
 
 describe("listCustomerPaymentMethods", () => {

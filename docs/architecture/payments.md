@@ -26,7 +26,11 @@ All payment operations go through the Medusa Payment Module:
 
 Any payment provider implementing that interface works. The Stripe Module Provider (`pp_stripe_stripe`) does, and is the provider this area is primarily exercised with.
 
+[`@mengyyy369/medusa-paypal`](https://github.com/MengYYY369/medusa-paypal) (`pp_paypal_paypal`) is a second exercised provider: it vaults the buyer's PayPal wallet at checkout and charges the stored token off-session at renewal time.
+
 Provider specific requirement for Stripe: the storefront must initialize the checkout payment session with `setup_future_usage: "off_session"`, otherwise Stripe does not save the card and no reusable payment method reference exists at renewal time.
+
+Provider specific requirement for PayPal: the storefront must create the checkout payment session with `customer_id` in the session data so the provider vaults the wallet on successful capture (`store_in_vault: "ON_SUCCESS"`, usage type `MERCHANT`, associated with `customer_id` as `merchant_customer_id`). After capture the provider writes the vault token id into the session data as `payment_method`, which is exactly the reference `validate-subscription-cart` reads. Renewal sessions the scheduler creates carry that token id back to the provider, which charges it with an Orders API `payment_source.paypal.vault_id` purchase — no buyer interaction. PayPal requires RDA (risk data) on the approval flow and enables vaulting per account: reference-transaction approval, an eligibility review, and the "Save payment methods" toggle on the API application in the PayPal Developer Dashboard (sandbox included).
 
 ## Payment Context
 
@@ -85,6 +89,8 @@ Medusa 2.20's read-time total decoration recomputes `pending_difference = total 
 Failures are classified by source (`payment_session`, `payment_provider`, `payment_capture`) and open a dunning case. `run-dunning-retry` replays the same charge against the renewal order using the subscription's current payment context: the retry resolves the renewal order's payment collection through the shared helper (reusing the existing chargeable collection instead of creating a duplicate), creates a new off-session session, and authorizes and captures the payment. Helper failures flow through the existing retry classification, so a temporary helper failure reschedules the retry instead of closing the case.
 
 Because retries read the payment context at retry time, changing the payment method of a subscription with an open dunning case makes the next retry use the new payment method. This is the recovery path for a declined or expired card.
+
+Decline classification is provider agnostic and reads the `decline_code` a provider attaches to a thrown error. Codes map through the existing rules: `insufficient_funds`, `generic_decline` and `do_not_honor` are temporary; anything whose message reports a decline (PayPal's `INSTRUMENT_DECLINED` included) is permanent, because the same instrument will fail again without buyer action or a method change; unknown codes default to temporary.
 
 ## Payment Method Management
 
