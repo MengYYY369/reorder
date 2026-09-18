@@ -43,3 +43,20 @@ export type SaasBridgeConfig = {
   tenants: SaasBridgeTenantConfig[]
   subscriptions: string[]
 }
+
+/** Shape of a reorder subscription row as read by the reconcile endpoint. */
+export type SubscriptionRecord = {
+  id: string
+  reference: string
+  status: string
+  frequency_interval: string
+  frequency_value: number
+  next_renewal_at: Date | string | null
+  cancel_effective_at: Date | string | null
+  customer_id: string
+  payment_context: {
+    payment_mode?: string | null
+    payment_method_reference?: string | null
+  } | null
+  metadata: Record<string, unknown> | null
+}
