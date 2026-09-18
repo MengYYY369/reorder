@@ -19,7 +19,15 @@ module.exports = defineConfig({
   plugins: [
     {
       resolve: projectRoot,
-      options: {},
+      options: {
+        saas_bridge: {
+          // Endpoints active for the contract tests; the whitelist stays
+          // empty — the medusa-webhooks optional peer is not installed in
+          // this repo and nothing may be forwarded from the test env.
+          shared_secret: "test-bridge-secret",
+          subscriptions: [],
+        },
+      },
     },
   ],
 })

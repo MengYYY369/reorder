@@ -11,6 +11,7 @@ import { adminSubscriptionSettingsMiddlewares } from "./admin/subscription-setti
 import { storeCustomerSubscriptionsMiddlewares } from "./store/customers/me/subscriptions/middlewares"
 import { storeCustomerRedemptionsMiddlewares } from "./store/customers/me/redemptions/middlewares"
 import { storeProductMiddlewares } from "./store/products/middlewares"
+import { saasBridgeMiddlewares } from "../modules/saas-bridge/auth"
 
 export default defineMiddlewares({
   routes: [
@@ -26,5 +27,6 @@ export default defineMiddlewares({
     ...storeCustomerSubscriptionsMiddlewares,
     ...storeCustomerRedemptionsMiddlewares,
     ...storeProductMiddlewares,
+    ...saasBridgeMiddlewares,
   ],
 })
