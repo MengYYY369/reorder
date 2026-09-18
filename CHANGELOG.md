@@ -1,3 +1,24 @@
+## [1.5.0] - 2026-09-19
+
+### Features
+- **saas-bridge:** merge the medusa-saas-bridge plugin into reorder as an
+  optional, self-contained module — six shared-secret `/store/saas/*`
+  endpoints (ensure-customer, reconcile, renew, auto-renew, carts, redeem)
+  and lifecycle event forwarding into the medusa-webhooks fan-out, behind a
+  nested `saas_bridge` plugin option (`shared_secret`/`tenants` +
+  `subscriptions` whitelist). Absent option = exactly the previous behavior:
+  every `/store/saas/*` route fails closed with 401 and nothing is forwarded,
+  so adopting the merge is zero-risk for existing deployments. The wire
+  contract is byte-identical to `@mengyyy369/medusa-saas-bridge` (which
+  becomes deprecated at 1.4.0) — SaaS applications need zero changes. Workflow
+  invocations became direct typed imports (manual renewal, redemption), the
+  bridge's self-heal-from-configModule options workaround is replaced by the
+  module service capturing plugin options, and `@mengyyy369/medusa-webhooks`
+  is an optional peer dependency with boot-time fail-fast when a
+  `subscriptions` whitelist is configured without it. The carts placeholder
+  shipping address (postal `00000`, country `cn`) is load-bearing contract —
+  the SaaS never sets addresses itself. See `docs/api/saas-bridge.md`.
+
 ## [1.4.1] - 2026-09-10
 
 ### Fixes

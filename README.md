@@ -74,6 +74,7 @@ It adds recurring commerce capabilities to a Medusa store, including subscriptio
 - **Analytics** — MRR, churn rate, LTV, and active subscription counts with filterable trend charts.
 - **Self-service Store APIs** — Subscription checkout, offer selection, and customer portal endpoints for your storefront.
 - **Storefront building blocks** — Cart, checkout, and customer portal integration guides for your own frontend.
+- **Optional SaaS bridge** — Shared-secret `/store/saas/*` endpoints for an external entitlement app plus signed lifecycle event fan-out, replacing the retired medusa-saas-bridge plugin. Off by default; see [docs/api/saas-bridge.md](docs/api/saas-bridge.md).
 
 &nbsp;
 
