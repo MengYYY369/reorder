@@ -11,6 +11,12 @@ import type {
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
 import { createSubscriptionSeed } from "../helpers/subscription-fixtures"
+import {
+  createCustomer,
+  createProductWithVariant,
+} from "../helpers/subscription-fixtures"
+import { createPlanOfferSeed } from "../helpers/plan-offer-fixtures"
+import { createRedemptionBatch } from "../helpers/redemption-fixtures"
 
 jest.setTimeout(120 * 1000)
 
@@ -619,6 +625,331 @@ medusaIntegrationTestRunner({
         const response = await api.post(
           "/store/saas/renew",
           { subscription_id: subscriptionId },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(404)
+      })
+    })
+
+    describe("POST /store/saas/auto-renew", () => {
+      async function seedToggleSubscription(
+        container: MedusaContainer,
+        customer: { id: string }
+      ): Promise<string> {
+        const subscription = (await createSubscriptionSeed(container, {
+          reference: `SUB-BRIDGE-TOGGLE-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          customer_id: customer.id,
+          payment_context: {
+            payment_provider_id: "pp_system_default",
+            payment_mode: "manual",
+            payment_method_reference: null,
+          } as never,
+        })) as unknown as { id: string }
+        return subscription.id
+      }
+
+      it("toggles to auto and back with the strict { subscription_id, payment_mode } body", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedToggleSubscription(
+          container,
+          customer
+        )
+
+        const enable = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: subscriptionId, enabled: true },
+          { headers }
+        )
+        expect(enable.status).toEqual(200)
+        expect(enable.data).toEqual({
+          subscription_id: subscriptionId,
+          payment_mode: "auto",
+        })
+
+        const stored = await container
+          .resolve<any>(SUBSCRIPTION_MODULE)
+          .retrieveSubscription(subscriptionId)
+        expect(stored.payment_context.payment_mode).toEqual("auto")
+
+        const disable = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: subscriptionId, enabled: false },
+          { headers }
+        )
+        expect(disable.status).toEqual(200)
+        expect(disable.data).toEqual({
+          subscription_id: subscriptionId,
+          payment_mode: "manual",
+        })
+      })
+
+      it("400s a non-boolean enabled", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedToggleSubscription(
+          container,
+          customer
+        )
+
+        const response = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: subscriptionId, enabled: "yes" },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(400)
+      })
+
+      it("404s a foreign-tenant subscription without leaking existence", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const foreignCustomer = await createTenantCustomer(
+          container,
+          "another-tenant"
+        )
+        const subscriptionId = await seedToggleSubscription(
+          container,
+          foreignCustomer
+        )
+
+        const response = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: subscriptionId, enabled: true },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(404)
+      })
+    })
+
+    describe("POST /store/saas/carts", () => {
+      async function seedRegionAndVariant(container: MedusaContainer) {
+        const regionModule = container.resolve<any>(Modules.REGION)
+        const region = await regionModule.createRegions({
+          name: `USD-${Date.now()}`,
+          currency_code: "usd",
+          countries: ["us"],
+        } as never)
+        const { product, variant } = await createProductWithVariant(container)
+
+        // cart creation validates published products — the shared helper
+        // seeds drafts, so publish before checkout
+        const productModule = container.resolve<any>(Modules.PRODUCT)
+        await productModule.updateProducts(product.id, {
+          status: "published",
+        })
+
+        // cart creation resolves the variant price — seed a price set and
+        // link it to the variant
+        const pricingModule = container.resolve<any>(Modules.PRICING)
+        const priceSet = await pricingModule.createPriceSets({
+          prices: [{ amount: 1800, currency_code: "usd" }],
+        })
+        const link = container.resolve<ILinkModuleService>(
+          ContainerRegistrationKeys.LINK
+        )
+        await link.create({
+          [Modules.PRODUCT]: { variant_id: variant.id },
+          [Modules.PRICING]: { price_set_id: priceSet.id },
+        } as never)
+
+        return { region: region as { id: string }, variant }
+      }
+
+      it("creates a customer-attached cart with the load-bearing placeholder address", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const { region, variant } = await seedRegionAndVariant(container)
+
+        const response = await api.post(
+          "/store/saas/carts",
+          {
+            customer_id: customer.id,
+            currency_code: "usd",
+            variant_id: variant.id,
+          },
+          { headers }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(Object.keys(response.data).sort()).toEqual([
+          "cart_id",
+          "currency_code",
+          "customer_id",
+          "email",
+        ])
+        expect(response.data.cart_id).toMatch(/^cart_/)
+        expect(response.data.currency_code).toEqual("usd")
+        expect(response.data.customer_id).toEqual(customer.id)
+        expect(response.data.email).toEqual(customer.email)
+
+        // defaults: month / 1
+        const cartModule = container.resolve<any>(Modules.CART)
+        const cart = await cartModule.retrieveCart(response.data.cart_id, {
+          relations: ["items", "shipping_address"],
+        } as never)
+        expect(cart.shipping_address.postal_code).toEqual("00000")
+        expect(cart.shipping_address.country_code).toEqual("cn")
+        expect(cart.shipping_address.first_name).toEqual("Digital")
+        expect(cart.shipping_address.last_name).toEqual("Delivery")
+        expect(cart.customer_id).toEqual(customer.id)
+        const item = cart.items[0]
+        expect(item.variant_id).toEqual(variant.id)
+        expect(item.metadata.is_subscription).toEqual(true)
+        expect(item.metadata.payment_mode).toEqual("manual")
+        expect(item.metadata.frequency_interval).toEqual("month")
+        expect(item.metadata.frequency_value).toEqual(1)
+
+        void region
+      })
+
+      it("honors explicit frequency_interval and frequency_value", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const { region, variant } = await seedRegionAndVariant(container)
+
+        const response = await api.post(
+          "/store/saas/carts",
+          {
+            customer_id: customer.id,
+            currency_code: "usd",
+            variant_id: variant.id,
+            frequency_interval: "week",
+            frequency_value: 2,
+          },
+          { headers }
+        )
+
+        expect(response.status).toEqual(200)
+
+        const cartModule = container.resolve<any>(Modules.CART)
+        const cart = await cartModule.retrieveCart(response.data.cart_id, {
+          relations: ["items", "shipping_address"],
+        } as never)
+        expect(cart.items[0].metadata.frequency_interval).toEqual("week")
+        expect(cart.items[0].metadata.frequency_value).toEqual(2)
+
+        void region
+      })
+
+      it("404s a foreign-tenant customer without leaking existence", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const foreignCustomer = await createTenantCustomer(
+          container,
+          "another-tenant"
+        )
+        const { variant } = await seedRegionAndVariant(container)
+
+        const response = await api.post(
+          "/store/saas/carts",
+          {
+            customer_id: foreignCustomer.id,
+            currency_code: "usd",
+            variant_id: variant.id,
+          },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(404)
+      })
+    })
+
+    describe("POST /store/saas/redeem", () => {
+      async function seedRedeemableCode(
+        container: MedusaContainer
+      ): Promise<{ code: string; variant_id: string }> {
+        const { product, variant } = await createProductWithVariant(container)
+        await createPlanOfferSeed(container, {
+          name: `BRIDGE-REDEEM-OFFER-${Date.now()}`,
+          scope: "variant",
+          product_id: product.id,
+          variant_id: variant.id,
+          allowed_frequencies: [{ interval: "month", value: 1 }],
+        })
+        const batch = await createRedemptionBatch(container, {
+          name: `BRIDGE-REDEEM-BATCH-${Date.now()}`,
+          variant_id: variant.id,
+          free_cycles: 2,
+          max_redemptions_per_code: 3,
+          generated_code_count: 1,
+        })
+        return { code: batch.codes[0].code, variant_id: variant.id }
+      }
+
+      it("redeems into a payment-free subscription with the pinned body", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const { code } = await seedRedeemableCode(container)
+
+        const response = await api.post(
+          "/store/saas/redeem",
+          { code, customer_id: customer.id },
+          { headers }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(Object.keys(response.data).sort()).toEqual([
+          "dunning_recovered",
+          "free_cycles_remaining",
+          "outcome",
+          "redemption_record_id",
+          "subscription_id",
+          "subscription_reference",
+        ])
+        expect(response.data.subscription_id).toEqual(expect.any(String))
+        expect(response.data.subscription_reference).toEqual(
+          expect.any(String)
+        )
+        expect(response.data.redemption_record_id).toEqual(expect.any(String))
+        expect(response.data.outcome).toEqual("subscription_created")
+        // the workflow's create branch carries no free_cycles_remaining —
+        // only the extend branch does; the bridge surfaced the same null
+        expect(response.data.free_cycles_remaining).toEqual(null)
+        expect(response.data.dunning_recovered).toEqual(false)
+      })
+
+      it("enforces per-customer dedup on a second redeem with the same code", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const { code } = await seedRedeemableCode(container)
+
+        const first = await api.post(
+          "/store/saas/redeem",
+          { code, customer_id: customer.id },
+          { headers }
+        )
+        expect(first.status).toEqual(200)
+
+        const second = await api.post(
+          "/store/saas/redeem",
+          { code, customer_id: customer.id },
+          { headers, validateStatus: () => true }
+        )
+        expect(second.status).toEqual(400)
+      })
+
+      it("404s a foreign-tenant customer without leaking existence", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const foreignCustomer = await createTenantCustomer(
+          container,
+          "another-tenant"
+        )
+        const { code } = await seedRedeemableCode(container)
+
+        const response = await api.post(
+          "/store/saas/redeem",
+          { code, customer_id: foreignCustomer.id },
           { headers, validateStatus: () => true }
         )
 
