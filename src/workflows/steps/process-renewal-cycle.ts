@@ -41,7 +41,10 @@ import { startDunningWorkflow } from "../start-dunning"
 import {
   resolveOrderPaymentCollection,
 } from "../utils/resolve-order-payment-collection"
-import { persistSubscriptionLogEvent } from "./create-subscription-log-event"
+import {
+  emitSubscriptionBusEvent,
+  persistSubscriptionLogEvent,
+} from "./create-subscription-log-event"
 import { toISOStringOrNull } from "../utils/date-output"
 
 type CartRecord = {
@@ -772,6 +775,8 @@ export const processRenewalCycleStep = createStep(
 
       await subscriptionModule.updateSubscriptions({
         id: subscription.id,
+        // A successful renewal recovers a past-due subscription.
+        status: SubscriptionStatus.ACTIVE,
         variant_id:
           appliedPendingChanges?.variant_id ?? subscription.variant_id,
         frequency_interval: nextInterval,
@@ -821,7 +826,7 @@ export const processRenewalCycleStep = createStep(
         },
       })
 
-      await persistSubscriptionLogEvent(container, normalizeActivityLogEvent({
+      const renewalLogEvent = normalizeActivityLogEvent({
         subscription_id: subscription.id,
         customer_id: subscription.customer_id,
         event_type: ActivityLogEventType.RENEWAL_SUCCEEDED,
@@ -864,7 +869,14 @@ export const processRenewalCycleStep = createStep(
           target_id: cycle.id,
           qualifier: toISOStringOrNull(updatedCycle.processed_at),
         },
-      }))
+      })
+
+      await persistSubscriptionLogEvent(container, renewalLogEvent)
+
+      // The scheduler path has no checkout-time order to settle auto-renewals
+      // (renewal orders carry no plan in metadata), so renewal.succeeded is
+      // the only signal the SaaS site mirrors into its D1 entitlement.
+      await emitSubscriptionBusEvent(container, renewalLogEvent)
 
       return new StepResponse({
         renewal_cycle: updatedCycle,

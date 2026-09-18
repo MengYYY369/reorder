@@ -76,8 +76,9 @@ export default async function paymentCapturedSavePaymentMethodHandler({
       entity: "payment_collection",
       fields: [
         "id",
-        "orders.id",
-        "orders.cart_id",
+        // The checkout cart is linked to the collection via cart_payment_collection
+        // (orders created from a standalone payment collection are NOT cart-linked).
+        "cart.id",
         "payment_sessions.id",
         "payment_sessions.provider_id",
         "payment_sessions.data",
@@ -85,17 +86,17 @@ export default async function paymentCapturedSavePaymentMethodHandler({
       filters: { id: paymentCollectionId },
     })
 
-    const order = (data as Array<{
-      orders?: Array<{ id: string; cart_id?: string | null }>
+    const record = (data as Array<{
+      cart?: { id?: string | null } | null
       payment_sessions?: Array<{
         provider_id?: string | null
         data?: Record<string, unknown> | null
       }>
     }>)[0]
 
-    const cartId = order?.orders?.[0]?.cart_id ?? null
+    const cartId = record?.cart?.id ?? null
     if (!cartId) {
-      // Manual-renewal orders and non-checkout orders carry no cart.
+      // No linked cart (non-checkout orders) — nothing to attribute.
       return
     }
 
@@ -115,7 +116,7 @@ export default async function paymentCapturedSavePaymentMethodHandler({
     }
 
     const providerId = subscription.payment_context?.payment_provider_id
-    const session = order?.payment_sessions?.find(
+    const session = record?.payment_sessions?.find(
       (entry) => entry.provider_id === providerId
     )
     const token =
