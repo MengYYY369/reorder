@@ -519,7 +519,7 @@ const SubscriptionsPage = () => {
             <div className="flex flex-wrap items-center gap-2">
               {statusFilters.length ? (
                 <FilterChip
-                  label={statusFilter.label}
+                  label={t("common.fields.status")}
                   value={activeStatusLabels.join(", ")}
                   onRemove={() => {
                     setFiltering((current) => removeFilter(current, "status"));
@@ -528,7 +528,7 @@ const SubscriptionsPage = () => {
               ) : null}
               {activeTrialLabel ? (
                 <FilterChip
-                  label={trialFilter.label}
+                  label={t("subscriptions.filters.trial")}
                   value={activeTrialLabel}
                   onRemove={() => {
                     setFiltering((current) => removeFilter(current, "is_trial"));
@@ -537,7 +537,7 @@ const SubscriptionsPage = () => {
               ) : null}
               {activeSkipNextCycleLabel ? (
                 <FilterChip
-                  label={skipNextCycleFilter.label}
+                  label={t("subscriptions.filters.skipNextCycle")}
                   value={activeSkipNextCycleLabel}
                   onRemove={() => {
                     setFiltering((current) =>
@@ -548,7 +548,7 @@ const SubscriptionsPage = () => {
               ) : null}
               {activeNextRenewalLabel ? (
                 <FilterChip
-                  label={nextRenewalFilter.label}
+                  label={t("common.fields.nextRenewal")}
                   value={activeNextRenewalLabel}
                   onRemove={() => {
                     setFiltering((current) => removeFilter(current, "next_renewal"));
@@ -564,7 +564,7 @@ const SubscriptionsPage = () => {
                 <DropdownMenu.Content align="start">
                   <DropdownMenu.SubMenu>
                     <DropdownMenu.SubMenuTrigger>
-                      {statusFilter.label}
+                      {t("common.fields.status")}
                     </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent>
                       {statusFilterOptions.map((option) => {
@@ -616,7 +616,7 @@ const SubscriptionsPage = () => {
                   </DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenu>
                     <DropdownMenu.SubMenuTrigger>
-                      {trialFilter.label}
+                      {t("subscriptions.filters.trial")}
                     </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent>
                       {booleanFilterOptions.map((option) => (
@@ -646,7 +646,7 @@ const SubscriptionsPage = () => {
                   </DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenu>
                     <DropdownMenu.SubMenuTrigger>
-                      {skipNextCycleFilter.label}
+                      {t("subscriptions.filters.skipNextCycle")}
                     </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent>
                       {booleanFilterOptions.map((option) => (
@@ -676,7 +676,7 @@ const SubscriptionsPage = () => {
                   </DropdownMenu.SubMenu>
                   <DropdownMenu.SubMenu>
                     <DropdownMenu.SubMenuTrigger>
-                      {nextRenewalFilter.label}
+                      {t("common.fields.nextRenewal")}
                     </DropdownMenu.SubMenuTrigger>
                     <DropdownMenu.SubMenuContent>
                       {nextRenewalFilterOptions.map((option) => (
