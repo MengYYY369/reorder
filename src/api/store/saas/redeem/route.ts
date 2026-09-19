@@ -100,6 +100,8 @@ export async function POST(
     outcome?: string
     free_cycles_remaining?: number
     dunning_recovered?: boolean
+    is_trial?: boolean
+    trial_ends_at?: string | null
   }
 
   if (!redemption.subscription_id) {
@@ -116,5 +118,7 @@ export async function POST(
     outcome: redemption.outcome ?? null,
     free_cycles_remaining: redemption.free_cycles_remaining ?? null,
     dunning_recovered: redemption.dunning_recovered ?? false,
+    is_trial: redemption.is_trial ?? false,
+    trial_ends_at: redemption.trial_ends_at ?? null,
   })
 }
