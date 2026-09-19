@@ -729,6 +729,97 @@ export const processRenewalCycleStep = createStep(
       const scheduledAnchor = new Date(cycle.scheduled_for)
       let generatedOrderId: string | null = null
 
+      // v1 trial clean finish (trial wave 工单 05): an OFF-mode trial whose
+      // cycle is at/after trial_ends_at ends the subscription cleanly — no
+      // order, no charge, and NO renewal.succeeded bus event (the SaaS site
+      // must not mirror an extension; entitlements expire naturally). ON-mode
+      // conversion is deferred (trial spike 2026-09-19) and would branch
+      // here instead. The eligibility gate above already rejected cycles
+      // still inside the trial period.
+      if (subscription.is_trial) {
+        const endedAt = new Date()
+        const endedAtAnchor = subscription.trial_ends_at ?? endedAt
+
+        await subscriptionModule.updateSubscriptions({
+          id: subscription.id,
+          status: SubscriptionStatus.CANCELLED,
+          cancelled_at: endedAt,
+          cancel_effective_at: endedAtAnchor,
+          next_renewal_at: endedAtAnchor,
+        })
+
+        const finishedCycle = await renewalModule.updateRenewalCycles({
+          id: cycle.id,
+          status: RenewalCycleStatus.SUCCEEDED,
+          processed_at: endedAt,
+          generated_order_id: null,
+          last_error: null,
+        })
+
+        await renewalModule.updateRenewalAttempts({
+          id: attempt.id,
+          status: RenewalAttemptStatus.SUCCEEDED,
+          finished_at: endedAt,
+          order_id: null,
+          error_code: null,
+          error_message: null,
+        })
+
+        await persistSubscriptionLogEvent(
+          container,
+          normalizeActivityLogEvent({
+            subscription_id: subscription.id,
+            customer_id: subscription.customer_id,
+            event_type: ActivityLogEventType.SUBSCRIPTION_EXPIRED,
+            actor_type: getRenewalActivityLogActorType(input.trigger_type),
+            actor_id: input.triggered_by ?? null,
+            display: {
+              subscription_reference: subscription.reference,
+              customer_name: subscription.customer_snapshot?.full_name ?? null,
+              product_title:
+                subscription.product_snapshot.product_title ?? null,
+              variant_title:
+                subscription.product_snapshot.variant_title ?? null,
+            },
+            previous_state: {
+              status: cycle.status,
+              attempt_count: cycle.attempt_count,
+              processed_at: toISOStringOrNull(cycle.processed_at),
+              generated_order_id: cycle.generated_order_id,
+              last_error: cycle.last_error,
+            },
+            new_state: {
+              status: finishedCycle.status,
+              attempt_count: finishedCycle.attempt_count,
+              processed_at: toISOStringOrNull(finishedCycle.processed_at),
+              generated_order_id: finishedCycle.generated_order_id,
+              last_error: finishedCycle.last_error,
+            },
+            metadata: {
+              source: input.trigger_type === "manual" ? "admin" : "scheduler",
+              renewal_cycle_id: cycle.id,
+              order_id: null,
+              trigger_type: input.trigger_type,
+              scheduled_for: toISOStringOrNull(cycle.scheduled_for),
+              trial_ended_at: toISOStringOrNull(endedAtAnchor),
+            },
+            correlation_id: correlationId,
+            dedupe: {
+              scope: "renewal",
+              target_id: cycle.id,
+              qualifier: toISOStringOrNull(finishedCycle.processed_at),
+            },
+          })
+        )
+
+        return new StepResponse({
+          renewal_cycle: finishedCycle,
+          subscription_id: subscription.id,
+          attempt_id: attempt.id,
+          generated_order_id: null,
+        })
+      }
+
       const isFreeCycle =
         subscription.skip_next_cycle ||
         (subscription.free_cycles_remaining ?? 0) > 0
