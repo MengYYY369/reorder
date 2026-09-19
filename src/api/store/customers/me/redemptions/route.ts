@@ -46,6 +46,9 @@ export const POST = async (
     subscription_reference: result.subscription_reference,
     redemption_record_id: result.record_id,
     outcome: (result as { outcome?: string }).outcome,
+    is_trial: (result as { is_trial?: boolean }).is_trial ?? false,
+    trial_ends_at: (result as { trial_ends_at?: string | null })
+      .trial_ends_at ?? null,
     free_cycles_remaining: (result as { free_cycles_remaining?: number })
       .free_cycles_remaining,
     dunning_recovered: (result as { dunning_recovered?: boolean })

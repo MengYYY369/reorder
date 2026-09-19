@@ -8,6 +8,7 @@ import {
 } from "../../modules/redemption/types"
 import { redemptionErrors } from "../../modules/redemption/utils/errors"
 import { normalizeRedemptionCode } from "../../modules/redemption/utils/code-generator"
+import { resolveProductSubscriptionConfig } from "../../modules/plan-offer/utils/effective-config"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
@@ -40,11 +41,19 @@ export type RedemptionGrantSnapshot = {
   free_cycles: number
 }
 
+export type RedemptionTrialInfo = {
+  is_enabled: boolean
+  days: number | null
+  requires_payment_method: boolean
+}
+
 export type RedemptionResolution = {
   kind: "create" | "extend"
   batch: RedemptionBatchDTO
   code: RedemptionCodeDTO
   grant: RedemptionGrantSnapshot
+  /** Inherited from the batch variant's effective plan-offer rules. */
+  trial: RedemptionTrialInfo
   target_subscription_id: string | null
   customer_id: string
   customer: {
@@ -131,6 +140,25 @@ export const resolveRedemptionCodeStep = createStep(
       throw redemptionErrors.batchNotFound(batch.id)
     }
 
+    // Trial semantics are inherited from the batch variant's effective
+    // plan-offer rules (batch itself carries no trial config). Batch creation
+    // already requires an enabled plan-offer on the target variant, so the
+    // config resolves; a defensive null fallback disables trial if absent.
+    const effectiveConfig = await resolveProductSubscriptionConfig(container, {
+      product_id: variant.product.id,
+      variant_id: variant.id,
+    }).catch(() => null)
+    const trial: RedemptionTrialInfo = {
+      is_enabled:
+        !!effectiveConfig?.is_enabled &&
+        !!effectiveConfig.rules?.trial_enabled,
+      days: effectiveConfig?.rules?.trial_enabled
+        ? effectiveConfig.rules.trial_days ?? null
+        : null,
+      requires_payment_method:
+        effectiveConfig?.rules?.trial_requires_payment_method ?? false,
+    }
+
     const { data: customers } = await query.graph({
       entity: "customer",
       fields: ["id", "email", "first_name", "last_name"],
@@ -164,6 +192,30 @@ export const resolveRedemptionCodeStep = createStep(
       )
     })
 
+    // Trial codes are new-user-only: an existing subscription for the target
+    // variant (paid, free-cycle, or another trial) or any prior paid order
+    // containing the variant disqualifies the customer.
+    if (trial.is_enabled && extendable.length > 0) {
+      throw redemptionErrors.trialOnlyForNewUsers()
+    }
+    if (trial.is_enabled) {
+      const { data: customerOrders } = await query.graph({
+        entity: "order",
+        fields: ["id", "items.variant_id"],
+        filters: { customer_id: input.customer_id },
+      })
+      const hasVariantOrder = (
+        customerOrders as unknown as Array<{
+          items?: Array<{ variant_id?: string | null }>
+        }>
+      ).some((order) =>
+        (order.items ?? []).some((item) => item.variant_id === variant.id)
+      )
+      if (hasVariantOrder) {
+        throw redemptionErrors.trialOnlyForNewUsers()
+      }
+    }
+
     let targetSubscriptionId: string | null = null
     let kind: "create" | "extend" = "create"
 
@@ -195,6 +247,7 @@ export const resolveRedemptionCodeStep = createStep(
       batch,
       code,
       grant,
+      trial,
       target_subscription_id: targetSubscriptionId,
       customer_id: input.customer_id,
       customer: {
@@ -214,6 +267,8 @@ export type RedeemCreateStepOutput = {
   subscription_id: string
   subscription_reference: string
   record_id: string
+  is_trial: boolean
+  trial_ends_at: string | null
 }
 
 const REDEMPTION_SHIPPING_PLACEHOLDER: SubscriptionShippingAddress = {
@@ -238,6 +293,14 @@ const REDEMPTION_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
   source_payment_session_id: null,
   payment_method_reference: null,
   customer_payment_reference: null,
+}
+
+const REDEMPTION_TRIAL_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
+  ...REDEMPTION_PAYMENT_CONTEXT,
+  // v1 trials are OFF-mode: no payment method, manual mode so the renewal
+  // engine never attempts a charge — the trial-end clean finish (ticket 05)
+  // ends the subscription instead.
+  payment_mode: "manual",
 }
 
 function buildRedemptionReference(redemptionRecordId: string): string {
@@ -274,13 +337,19 @@ export const redeemCreateSubscriptionStep = createStep(
     } as any)
 
     const startedAt = new Date()
+    const isTrial = resolution.trial.is_enabled && resolution.trial.days !== null
+    const trialEndsAt = isTrial
+      ? new Date(startedAt.getTime() + resolution.trial.days! * 86_400_000)
+      : null
     const cadenceMs = cadenceToMillis(
       resolution.grant.frequency_interval,
       resolution.grant.frequency_value
     )
-    const cancelEffectiveAt = new Date(
-      startedAt.getTime() + cadenceMs * resolution.grant.free_cycles
-    )
+    const cancelEffectiveAt = isTrial
+      ? null
+      : new Date(
+          startedAt.getTime() + cadenceMs * resolution.grant.free_cycles
+        )
 
     const subscription = await subscriptionModuleService.createSubscriptions({
       reference: buildRedemptionReference(record.id),
@@ -292,15 +361,18 @@ export const redeemCreateSubscriptionStep = createStep(
       frequency_interval: resolution.grant.frequency_interval,
       frequency_value: resolution.grant.frequency_value,
       started_at: startedAt,
-      next_renewal_at: startedAt,
+      // Trial subscriptions anchor the first renewal cycle at trial end so
+      // the clean-end branch (ticket 05) picks it up; free-period ones stay
+      // on the startedAt anchor as before.
+      next_renewal_at: isTrial ? trialEndsAt! : startedAt,
       last_renewal_at: null,
       paused_at: null,
       cancelled_at: null,
       cancel_effective_at: cancelEffectiveAt,
       skip_next_cycle: false,
-      free_cycles_remaining: resolution.grant.free_cycles,
-      is_trial: false,
-      trial_ends_at: null,
+      free_cycles_remaining: isTrial ? 0 : resolution.grant.free_cycles,
+      is_trial: isTrial,
+      trial_ends_at: trialEndsAt,
       customer_snapshot: {
         email: resolution.customer.email,
         full_name: resolution.customer.full_name,
@@ -314,12 +386,15 @@ export const redeemCreateSubscriptionStep = createStep(
       },
       pricing_snapshot: null,
       shipping_address: REDEMPTION_SHIPPING_PLACEHOLDER,
-      payment_context: REDEMPTION_PAYMENT_CONTEXT,
+      payment_context: isTrial
+        ? REDEMPTION_TRIAL_PAYMENT_CONTEXT
+        : REDEMPTION_PAYMENT_CONTEXT,
       pending_update_data: null,
       metadata: {
         source: "redemption",
         redemption_batch_id: resolution.batch.id,
         redemption_code_id: resolution.code.id,
+        ...(isTrial ? { trial: true } : {}),
       },
     } as any)
 
@@ -341,6 +416,8 @@ export const redeemCreateSubscriptionStep = createStep(
         subscription_id: subscription.id,
         subscription_reference: subscription.reference,
         record_id: record.id,
+        is_trial: isTrial,
+        trial_ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,
       },
       {
         subscription_id: subscription.id,

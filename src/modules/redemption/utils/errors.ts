@@ -49,4 +49,9 @@ export const redemptionErrors = {
       "invalid_data",
       "Extending an existing subscription via redemption is not yet supported"
     ),
+  trialOnlyForNewUsers: () =>
+    new RedemptionError(
+      "invalid_data",
+      "Trial codes are for new users only"
+    ),
 }
