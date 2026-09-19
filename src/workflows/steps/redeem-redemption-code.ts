@@ -297,10 +297,11 @@ const REDEMPTION_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
 
 const REDEMPTION_TRIAL_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
   ...REDEMPTION_PAYMENT_CONTEXT,
-  // v1 trials are OFF-mode: no payment method, manual mode so the renewal
-  // engine never attempts a charge — the trial-end clean finish (ticket 05)
-  // ends the subscription instead.
-  payment_mode: "manual",
+  // No payment method is collected for v1 trials; payment_mode stays "auto"
+  // exactly like the free-cycles path so the trial-end renewal cycle lands in
+  // the scheduler's due set. The clean-end branch (process-renewal-cycle,
+  // ticket 05) intercepts the trial-end cycle BEFORE any order/payment logic,
+  // so an "auto" mode here never results in a charge.
 }
 
 function buildRedemptionReference(redemptionRecordId: string): string {
