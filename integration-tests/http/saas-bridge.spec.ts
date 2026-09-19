@@ -900,10 +900,14 @@ medusaIntegrationTestRunner({
         expect(Object.keys(response.data).sort()).toEqual([
           "dunning_recovered",
           "free_cycles_remaining",
+          // additive since the plan-offer trial rules landed: the created
+          // subscription's trial state, mirrored for the SaaS entitlement
+          "is_trial",
           "outcome",
           "redemption_record_id",
           "subscription_id",
           "subscription_reference",
+          "trial_ends_at",
         ])
         expect(response.data.subscription_id).toEqual(expect.any(String))
         expect(response.data.subscription_reference).toEqual(
@@ -915,6 +919,9 @@ medusaIntegrationTestRunner({
         // only the extend branch does; the bridge surfaced the same null
         expect(response.data.free_cycles_remaining).toEqual(null)
         expect(response.data.dunning_recovered).toEqual(false)
+        // no trial rule on this batch → non-trial grant
+        expect(response.data.is_trial).toEqual(false)
+        expect(response.data.trial_ends_at).toEqual(null)
       })
 
       it("enforces per-customer dedup on a second redeem with the same code", async () => {

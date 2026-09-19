@@ -150,12 +150,15 @@ frequency fields).
 
 `{ code, customer_id, subscription_id? }` → `{ subscription_id,
 subscription_reference, redemption_record_id, outcome, free_cycles_remaining,
-dunning_recovered }`. `outcome` is `subscription_created`,
-`subscription_extended`, or null; `dunning_recovered` defaults false; on the
-create branch the workflow carries no `free_cycles_remaining` (it surfaces as
-null). Runs the same redeem-redemption-code workflow as the customer-scoped
-store route (direct typed import), so the code lock, per-customer dedup and
-quota checks apply unchanged.
+dunning_recovered, is_trial, trial_ends_at }`. `outcome` is
+`subscription_created`, `subscription_extended`, or null;
+`dunning_recovered` defaults false; on the create branch the workflow carries
+no `free_cycles_remaining` (it surfaces as null). `is_trial` /
+`trial_ends_at` mirror the created subscription's trial state (additive since
+the plan-offer trial rules landed; both neutral — false/null — for non-trial
+grants). Runs the same redeem-redemption-code workflow as the
+customer-scoped store route (direct typed import), so the code lock,
+per-customer dedup and quota checks apply unchanged.
 
 ## Event forwarding
 
