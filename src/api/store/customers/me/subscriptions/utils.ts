@@ -762,6 +762,8 @@ export async function getStoreProductSubscriptionOfferResponse(
         ? {
             is_enabled: config.rules.trial_enabled,
             days: config.rules.trial_days ?? null,
+            requires_payment_method:
+              config.rules.trial_requires_payment_method ?? false,
           }
         : null,
     },

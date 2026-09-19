@@ -52,6 +52,7 @@ const createPlanOfferSchema = z
     minimum_cycles: z.number().int().positive().nullable(),
     trial_enabled: z.boolean(),
     trial_days: z.number().int().nullable(),
+    trial_requires_payment_method: z.boolean(),
     stacking_policy: z.enum([
       "allowed",
       "disallow_all",
@@ -131,6 +132,7 @@ const defaultValues: CreatePlanOfferFormValues = {
   minimum_cycles: null,
   trial_enabled: false,
   trial_days: null,
+  trial_requires_payment_method: false,
   stacking_policy: "allowed",
   frequency_rows: [
     {
@@ -176,6 +178,10 @@ export const CreatePlanOfferModal = ({
     }
 
     form.setValue("trial_days", null, {
+      shouldValidate: false,
+      shouldDirty: true,
+    })
+    form.setValue("trial_requires_payment_method", false, {
       shouldValidate: false,
       shouldDirty: true,
     })
@@ -239,6 +245,9 @@ export const CreatePlanOfferModal = ({
         minimum_cycles: values.minimum_cycles,
         trial_enabled: values.trial_enabled,
         trial_days: values.trial_enabled ? values.trial_days : null,
+        trial_requires_payment_method: values.trial_enabled
+          ? values.trial_requires_payment_method
+          : false,
         stacking_policy: values.stacking_policy,
       },
     }
@@ -568,6 +577,11 @@ export const CreatePlanOfferModal = ({
                                     form.setValue("trial_days", null, {
                                       shouldValidate: true,
                                     })
+                                    form.setValue(
+                                      "trial_requires_payment_method",
+                                      false,
+                                      { shouldValidate: true },
+                                    )
                                   }
                                 }}
                               />
@@ -599,6 +613,32 @@ export const CreatePlanOfferModal = ({
                           />
                           <FieldError
                             message={form.formState.errors.trial_days?.message}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
+                          <div className="flex flex-col">
+                            <Text size="small" leading="compact" weight="plus">
+                              {t("planOffers.form.trialRequiresPaymentMethod")}
+                            </Text>
+                            <Text
+                              size="small"
+                              leading="compact"
+                              className="text-ui-fg-subtle"
+                            >
+                              {t("planOffers.form.trialRequiresPaymentMethodHint")}
+                            </Text>
+                          </div>
+                          <Controller
+                            control={form.control}
+                            name="trial_requires_payment_method"
+                            render={({ field }) => (
+                              <Switch
+                                checked={field.value}
+                                disabled={!trialEnabled}
+                                onCheckedChange={field.onChange}
+                              />
+                            )}
                           />
                         </div>
                       </div>

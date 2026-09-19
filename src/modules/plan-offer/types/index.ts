@@ -36,6 +36,10 @@ export type PlanOfferRules = {
   minimum_cycles: number | null
   trial_enabled: boolean
   trial_days: number | null
+  /** v1 stores only (default false): requiring an auto-renewable payment
+   *  method to claim the trial is deferred — PayPal rejected both the
+   *  ON_APPROVE vault and the standalone vault API (trial spike 2026-09-19). */
+  trial_requires_payment_method: boolean
   stacking_policy: PlanOfferStackingPolicy
 }
 

@@ -46,6 +46,7 @@ export type PlanOfferAdminRules = {
   minimum_cycles: number | null
   trial_enabled: boolean
   trial_days: number | null
+  trial_requires_payment_method: boolean
   stacking_policy: "allowed" | "disallow_all" | "disallow_subscription_discounts"
 }
 

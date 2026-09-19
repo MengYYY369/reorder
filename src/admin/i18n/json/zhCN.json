@@ -159,6 +159,8 @@
       "trialEnabled": "启用试用",
       "trialEnabledHint": "允许此优惠包含试用期。",
       "trialDays": "试用天数",
+      "trialRequiresPaymentMethod": "要求支付方式",
+      "trialRequiresPaymentMethodHint": "领取试用前需绑定可自动续费的支付方式。仅存储供将来使用——当前未强制(v1 试用到期不扣款)。",
       "frequencies": "频率",
       "frequenciesHint": "定义允许的频率与可选折扣。",
       "frequenciesEditHint": "更新允许的频率及其折扣。",

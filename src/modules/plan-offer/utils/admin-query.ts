@@ -175,6 +175,7 @@ function mapRules(rules: PlanOfferRules | null): PlanOfferAdminRules | null {
     minimum_cycles: rules.minimum_cycles,
     trial_enabled: rules.trial_enabled,
     trial_days: rules.trial_days,
+    trial_requires_payment_method: rules.trial_requires_payment_method ?? false,
     stacking_policy: rules.stacking_policy,
   }
 }

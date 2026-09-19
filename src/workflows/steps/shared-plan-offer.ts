@@ -33,6 +33,7 @@ export type UpsertPlanOfferInput = {
     minimum_cycles: number | null
     trial_enabled: boolean
     trial_days: number | null
+    trial_requires_payment_method?: boolean
     stacking_policy:
       | PlanOfferStackingPolicy
       | "allowed"
@@ -287,6 +288,12 @@ function normalizeRules(
         "'rules.trial_days' must be null when trial is disabled"
       )
     }
+
+    if (rules.trial_requires_payment_method) {
+      throw planOfferErrors.invalidTrialConfiguration(
+        "'rules.trial_requires_payment_method' cannot be true when trial is disabled"
+      )
+    }
   } else {
     if (rules.trial_days === null || rules.trial_days === undefined) {
       throw planOfferErrors.invalidTrialConfiguration(
@@ -301,6 +308,7 @@ function normalizeRules(
     minimum_cycles: rules.minimum_cycles ?? null,
     trial_enabled: rules.trial_enabled,
     trial_days: rules.trial_days ?? null,
+    trial_requires_payment_method: rules.trial_requires_payment_method ?? false,
     stacking_policy: normalizeStackingPolicy(rules.stacking_policy),
   }
 }

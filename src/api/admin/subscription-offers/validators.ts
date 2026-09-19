@@ -40,6 +40,7 @@ const planOfferRulesSchema = z.object({
   minimum_cycles: z.number().int().positive().nullable(),
   trial_enabled: z.boolean(),
   trial_days: z.number().int().positive().nullable(),
+  trial_requires_payment_method: z.boolean().optional(),
   stacking_policy: planOfferStackingPolicySchema,
 }).superRefine((rules, ctx) => {
   if (!rules.trial_enabled && rules.trial_days !== null) {
@@ -55,6 +56,15 @@ const planOfferRulesSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: "'rules.trial_days' is required when trial is enabled",
       path: ["trial_days"],
+    })
+  }
+
+  if (!rules.trial_enabled && rules.trial_requires_payment_method === true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "'rules.trial_requires_payment_method' must be false when trial is disabled",
+      path: ["trial_requires_payment_method"],
     })
   }
 })

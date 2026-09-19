@@ -159,6 +159,8 @@
       "trialEnabled": "Trial enabled",
       "trialEnabledHint": "Allow a trial period for this offer.",
       "trialDays": "Trial days",
+      "trialRequiresPaymentMethod": "Require payment method",
+      "trialRequiresPaymentMethodHint": "Require an auto-renewable payment method to claim the trial. Stored for future use — not enforced yet (PayPal mechanism pending, v1 trials end without charging).",
       "frequencies": "Frequencies",
       "frequenciesHint": "Define allowed frequencies and optional discounts.",
       "frequenciesEditHint": "Update allowed frequencies and their discounts.",
