@@ -1,40 +1,81 @@
-## [Unreleased] — 1.6.0 序列（planned #01-#10：doc-first 条目，代码未落地，勿视为已交付；发布时改号为 [1.6.0]）
+## [1.6.0] - 2026-09-22
 
-**要求 Medusa 2.20 / mikro-orm 6.6.14**
+**Requires Medusa 2.20 / mikro-orm 6.6.14**
 
 ### Features
 
-- **relationship model:** unify the three payment tracks under one entitlement
-  row per (customer × product). One-time purchases extend the existing row in
-  place (`extend-in-place`) instead of creating a second subscription, with a
-  configurable stacking cap (`rules.max_stacking_cycles`, default unlimited).
-  Auto-renew and native PayPal subscriptions are mutually-exclusive billing
-  mechanisms on that row: checkout consent (`rules.consent_from_session`)
-  flips `manual → auto` in the same update as the payment method is saved; an
-  active native subscription rejects both a new one-time + auto-renew
-  combination and a repeated native purchase until the current one is cancelled.
-  Configuration is
-  opt-in — unconfigured offers keep the previous behavior. See
-  `docs/architecture/subscription-relationship-model.md`.
-- **native mirror rows:** consume the emitted `paypal.subscription.*` events
-  and keep read-only `mechanism:"native"` rows in the subscription table
-  (state and `next_renewal_at` synced from events; renewal / dunning engines
-  skip them), with a one-time backfill for existing native subscriptions.
+- **relationship model:** one entitlement row per (customer × product), across all
+  three payment tracks (#05, #07, #08, #09, #12).
+  - Three new plan-offer rules — `consent_from_session`, `row_stacking_policy`,
+    `max_stacking_cycles`. All three default to the behavior that shipped before, so
+    an offer that is not reconfigured is unaffected, and `rules` is a jsonb column
+    so no migration is involved. The discount-stacking `stacking_policy` is
+    unchanged and is *not* the row-stacking setting.
+  - **Extend in place** (#08): a repeat purchase of the same product pushes the
+    existing active row's `next_renewal_at` forward from its current period end
+    instead of creating a second row, which removes the structural cause of two
+    live rows charging twice in overlapping windows. Accumulated cycles are counted
+    in `metadata.cycles_purchased`, and `max_stacking_cycles` refuses a purchase
+    over the cap during cart validation, before anything is written.
+    `row_stacking_policy: "allow_multiple"` opts an offer out.
+  - **Consent flip** (#07): where the offer declares
+    `consent_from_session: "customer_id"` and the checkout payment session carries
+    that field, the row moves `payment_mode: manual → auto` with
+    `mechanism → reorder_auto` in the same update that persists the payment method,
+    and the flip is recorded on the activity log naming the proof. The storefront
+    no longer has to poll and re-issue the change.
+  - **Mutual exclusion** (#09, #12): while a native recurrence for the product is
+    `active` or `paused`, a purchase from the other track is refused with the
+    product named; `cancelled` and `past_due` are let through so a customer whose
+    provider charge just failed can still buy that period themselves. This needs two
+    enforcement points because the two purchase paths share no validation step: the
+    subscription track is refused in cart validation, and a plain one-time purchase
+    — which never reaches this plugin at all — by a method-level middleware on the
+    core `POST /store/carts/:id/complete`.
+- **Native mirror rows** (#06): `paypal.subscription.*` events upsert
+  `NATIVE-{paypal_subscription_id}` rows into the subscription table so "does this
+  customer already pay for this product" is an indexed local read, and an hourly
+  reconcile pass covers provider subscriptions that predate the plugin. Mirror rows
+  are excluded from every path that could charge, extend or dun them — the
+  scheduler, the manual-renewal hygiene job, dunning retry, manual renewal
+  creation, forced renewal — and from the two sites that rewrite
+  `payment_context` (`POST /store/saas/auto-renew`, payment-method update), since
+  one call there would otherwise turn an ignored row into a chargeable one.
+  Recognition is by `reference` prefix, never by the `mechanism` key inside jsonb.
+  Consuming `paypal.subscription.revised` awaits medusa-paypal 0.5.0; the reconcile
+  pass notices plan drift meanwhile.
+- **Store subscription list** (#04): `frequency_interval`, `frequency_value`,
+  `payment_mode` and `has_payment_method` are returned by
+  `GET /store/customers/me/subscriptions`, so a benefit card can render the plan
+  tier and the auto-renew state without a detail request per row.
+- **Peer dependencies** (`74167f4`): `react` and `react-dom` `^18.2.0` are declared
+  as peers so the admin bundle resolves against the host's single React copy
+  instead of vendoring a second one.
 
 ### Fixes
 
-- **observability:** subscription-creation failures serialize the full workflow
-  error chain and record a structured `subscription_log` event (idempotent via
-  `dedupe_key`) instead of `[object Object]`.
-- **address validation:** completeness-based check — a country-only shipping
-  stub auto-created by the region is treated as a digital-goods checkout and
-  gets a placeholder snapshot instead of failing.
-- **saas-bridge:** single shared tenant-ownership helper; customers without
-  `metadata.tenant_id` are owned by the sole configured tenant (multi-tenant
-  stays strict); the customer branch no longer returns a silent empty list.
-- **list serializer:** `frequency_interval` / `frequency_value`, `payment_mode`
-  and `has_payment_method` are now returned by the store subscription list
-  route, matching the detail route.
+- **Observability** (#01): a failed subscription creation is now a structured
+  `subscription.creation_failed` activity-log event carrying the serialized
+  workflow error chain and the failing step, instead of `error.message` (which
+  truncated the chain and printed `[object Object]` for non-`Error` rejections).
+  `subscription_id` and `subscription_reference` became nullable, since this
+  failure happens before any subscription row exists.
+- **Address validation** (#02): the shipping-address snapshot is decided by
+  completeness. A region-seeded country-only stub, or no address at all, produces a
+  recognizable digital-goods placeholder instead of failing the purchase; a
+  complete address still produces the strict snapshot.
+- **saas-bridge** (#03): tenant ownership is decided once, with the two rules it
+  actually needs — visibility, and `ensure-customer`'s adoption of unstamped
+  customers — replacing five drifted inline comparisons. An unstamped customer
+  belongs to the sole tenant on a single-tenant host and to nobody on a
+  multi-tenant one. `reconcile` no longer answers a tenant mismatch with an empty
+  subscription list, which was indistinguishable from "nothing to reconcile".
+
+### Chores
+
+- All migrations now import `Migration` from `@medusajs/framework/mikro-orm/migrations`,
+  removing four direct imports of a package the plugin does not declare; the host
+  resolves mikro-orm once.
 
 ## [1.5.0] - 2026-09-19
 

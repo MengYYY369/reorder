@@ -83,6 +83,10 @@ Use these documents depending on what you need:
   Admin UI behavior, screens, actions, filters, and UX conventions.
 - `testing/`
   How tests are structured, what is covered, and how to run them.
+- `releases/`
+  Per-version upgrade notes for applications already running the plugin, including
+  migrations, host-side follow-up work and the regression checks that matter.
+  Current: `releases/1.6.0-host-upgrade.md`.
 
 Runtime source-of-truth documents currently exist for:
 

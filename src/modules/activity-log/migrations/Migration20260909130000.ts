@@ -1,4 +1,4 @@
-import { Migration } from "@mikro-orm/migrations"
+import { Migration } from "@medusajs/framework/mikro-orm/migrations"
 
 const PREVIOUS_EVENT_TYPES =
   "'subscription.created', 'subscription.paused', 'subscription.resumed', 'subscription.canceled', 'subscription.plan_change_scheduled', 'subscription.shipping_address_updated', 'subscription.next_delivery_skipped', 'subscription.payment_method_updated', 'renewal.cycle_created', 'renewal.approval_approved', 'renewal.approval_rejected', 'renewal.force_requested', 'renewal.succeeded', 'renewal.failed', 'dunning.started', 'dunning.retry_executed', 'dunning.recovered', 'dunning.unrecovered', 'dunning.retry_schedule_updated', 'cancellation.case_started', 'cancellation.offer_applied', 'cancellation.reason_updated', 'cancellation.finalized'"
