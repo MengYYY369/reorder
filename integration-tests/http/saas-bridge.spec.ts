@@ -50,13 +50,13 @@ async function bridgeHeaders(
 
 async function createTenantCustomer(
   container: MedusaContainer,
-  tenantId = "default"
+  tenantId: string | null = "default"
 ) {
   const customerModule = container.resolve<any>(Modules.CUSTOMER)
   return customerModule.createCustomers({
     email: `saas-bridge-${Date.now()}-${Math.random()}@medusa.test`,
     first_name: "Bridge",
-    metadata: { tenant_id: tenantId },
+    metadata: tenantId === null ? {} : { tenant_id: tenantId },
   })
 }
 
@@ -470,7 +470,7 @@ medusaIntegrationTestRunner({
         expect(subscription.orderId).toEqual(seed.order_id)
       })
 
-      it("lists subscriptions for a tenant customer and empties for foreign customers", async () => {
+      it("lists subscriptions for a tenant customer and 404s for foreign customers", async () => {
         const container = getContainer()
         const headers = await bridgeHeaders(container)
         const customer = await createTenantCustomer(container)
@@ -495,8 +495,25 @@ medusaIntegrationTestRunner({
           { customer_id: foreignCustomer.id },
           { headers, validateStatus: () => true }
         )
-        expect(foreign.status).toEqual(200)
-        expect(foreign.data).toEqual({ subscriptions: [] })
+        // Not an empty list: that is also what a customer with no subscriptions
+        // gets, so it would hide "you may not see this customer".
+        expect(foreign.status).toEqual(404)
+      })
+
+      it("treats an unstamped customer as this tenant's on a single-tenant host", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container, null)
+        await seedBridgeOrder(container, customer, true)
+
+        const response = await api.post(
+          "/store/saas/reconcile",
+          { customer_id: customer.id },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(response.data.subscriptions.length).toEqual(1)
       })
 
       it("rejects a body with camelCase keys (snake_case enforced) with 400", async () => {

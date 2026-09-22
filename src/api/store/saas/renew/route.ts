@@ -4,7 +4,7 @@ import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { currentTenant } from "../../../../modules/saas-bridge/auth"
+import { assertTenantVisible } from "../lib/tenant-ownership"
 import { createManualRenewalWorkflow } from "../../../../workflows/create-manual-renewal"
 
 type CustomerModule = {
@@ -31,8 +31,6 @@ export async function POST(
   req: MedusaRequest,
   res: MedusaResponse
 ) {
-  const tenant = currentTenant(req)
-
   const { subscription_id, triggered_by, reason } = (req.body ?? {}) as {
     subscription_id?: string
     triggered_by?: string | null
@@ -70,15 +68,8 @@ export async function POST(
   }
 
   const customer = await customerModule.retrieveCustomer(customerId)
-  const ownerTenant = (customer.metadata as Record<string, unknown> | null)
-    ?.tenant_id
 
-  if (ownerTenant !== tenant.tenant_id) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_FOUND,
-      "subscription not found for this tenant"
-    )
-  }
+  assertTenantVisible(req, customer?.metadata, "subscription")
 
   const { result, errors } = await createManualRenewalWorkflow(
     req.scope

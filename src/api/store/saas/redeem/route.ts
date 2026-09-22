@@ -4,7 +4,7 @@ import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { currentTenant } from "../../../../modules/saas-bridge/auth"
+import { assertTenantVisible } from "../lib/tenant-ownership"
 import { redeemRedemptionCodeWorkflow } from "../../../../workflows/redeem-redemption-code"
 
 type CustomerModule = {
@@ -38,8 +38,6 @@ export async function POST(
   req: MedusaRequest,
   res: MedusaResponse
 ) {
-  const tenant = currentTenant(req)
-
   const { code, customer_id, subscription_id } = (req.body ?? {}) as {
     code?: string
     customer_id?: string
@@ -64,15 +62,8 @@ export async function POST(
   const customerModule = req.scope.resolve<CustomerModule>(Modules.CUSTOMER)
 
   const customer = await customerModule.retrieveCustomer(customer_id)
-  const ownerTenant = (customer.metadata as Record<string, unknown> | null)
-    ?.tenant_id
 
-  if (!customer || ownerTenant !== tenant.tenant_id) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_FOUND,
-      "customer not found for this tenant"
-    )
-  }
+  assertTenantVisible(req, customer?.metadata, "customer")
 
   const { result, errors } = await redeemRedemptionCodeWorkflow(
     req.scope

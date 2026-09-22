@@ -2,7 +2,7 @@ import { MedusaError } from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { createCartWorkflow } from "@medusajs/medusa/core-flows"
-import { currentTenant } from "../../../../modules/saas-bridge/auth"
+import { assertTenantVisible } from "../lib/tenant-ownership"
 
 type CustomerModule = {
   retrieveCustomer: (
@@ -52,8 +52,6 @@ export async function POST(
   req: MedusaRequest,
   res: MedusaResponse
 ) {
-  const tenant = currentTenant(req)
-
   const body = (req.body ?? {}) as {
     customer_id?: string
     currency_code?: string
@@ -77,16 +75,8 @@ export async function POST(
 
   const customerModule = req.scope.resolve<CustomerModule>(Modules.CUSTOMER)
   const customer = await customerModule.retrieveCustomer(customerId)
-  const ownerTenant = (customer.metadata as Record<string, unknown> | null)
-    ?.tenant_id
 
-  if (ownerTenant !== tenant.tenant_id) {
-    // Deliberately 404 — do not leak the existence of foreign customers.
-    throw new MedusaError(
-      MedusaError.Types.NOT_FOUND,
-      "customer not found for this tenant"
-    )
-  }
+  assertTenantVisible(req, customer?.metadata, "customer")
 
   const query = req.scope.resolve<RemoteQueryFunction>("query")
   const { data: regions } = await query.graph({

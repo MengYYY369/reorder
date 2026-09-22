@@ -4,7 +4,7 @@ import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { currentTenant } from "../../../../modules/saas-bridge/auth"
+import { assertTenantVisible } from "../lib/tenant-ownership"
 
 type CustomerModule = {
   retrieveCustomer: (
@@ -51,8 +51,6 @@ export async function POST(
   req: MedusaRequest,
   res: MedusaResponse
 ) {
-  const tenant = currentTenant(req)
-
   const { subscription_id, enabled } = (req.body ?? {}) as {
     subscription_id?: string
     enabled?: boolean
@@ -89,15 +87,8 @@ export async function POST(
   }
 
   const customer = await customerModule.retrieveCustomer(subscription.customer_id)
-  const ownerTenant = (customer.metadata as Record<string, unknown> | null)
-    ?.tenant_id
 
-  if (ownerTenant !== tenant.tenant_id) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_FOUND,
-      "subscription not found for this tenant"
-    )
-  }
+  assertTenantVisible(req, customer?.metadata, "subscription")
 
   const currentMode = subscription.payment_context?.payment_mode ?? "manual"
 

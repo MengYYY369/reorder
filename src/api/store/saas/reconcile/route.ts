@@ -1,10 +1,12 @@
 import { MedusaError } from "@medusajs/framework/utils"
-import { Modules } from "@medusajs/framework/utils"
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import type { RemoteQueryFunction } from "@medusajs/framework/types"
-import { currentTenant } from "../../../../modules/saas-bridge/auth"
 import { snapshot } from "../../../../modules/saas-bridge/snapshot"
 import type { SubscriptionRecord } from "../../../../modules/saas-bridge/types"
+import {
+  assertCustomerTenantVisible,
+  assertTenantVisible,
+} from "../lib/tenant-ownership"
 
 type OrderRecord = {
   id: string
@@ -12,13 +14,6 @@ type OrderRecord = {
   total: number
   customer_id: string | null
   metadata: Record<string, unknown> | null
-}
-
-type CustomerModule = {
-  retrieveCustomer: (
-    id: string,
-    config?: Record<string, unknown>
-  ) => Promise<{ id: string; metadata?: Record<string, unknown> | null }>
 }
 
 /**
@@ -38,9 +33,6 @@ export async function POST(
   req: MedusaRequest,
   res: MedusaResponse
 ) {
-  const tenant = currentTenant(req)
-  const customerModule = req.scope.resolve<CustomerModule>(Modules.CUSTOMER)
-
   const body = (req.body ?? {}) as {
     order_id?: string
     subscription_id?: string
@@ -61,28 +53,6 @@ export async function POST(
   }
 
   const query = req.scope.resolve<RemoteQueryFunction>("query")
-
-  /** Tenant check via the resource's customer metadata. */
-  async function assertTenantOwned(customerId: string | null): Promise<void> {
-    if (!customerId) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        "resource has no customer"
-      )
-    }
-
-    const customer = await customerModule.retrieveCustomer(customerId)
-    const ownerTenant = (customer.metadata as Record<string, unknown> | null)
-      ?.tenant_id
-
-    if (ownerTenant !== tenant.tenant_id) {
-      // Deliberately 404 — do not leak the existence of foreign resources.
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        "resource not found for this tenant"
-      )
-    }
-  }
 
   if (body.order_id) {
     // NOTE: v2.20 dropped the payment_status column on the order entity —
@@ -110,7 +80,7 @@ export async function POST(
       )
     }
 
-    await assertTenantOwned(order.customer_id)
+    await assertCustomerTenantVisible(req, order.customer_id, "order")
 
     const paymentCollectionId = (
       payLink.data as Array<{ payment_collection_id?: string }>
@@ -232,14 +202,17 @@ export async function POST(
       )
     }
 
-    await assertTenantOwned(subscription.customer_id)
+    await assertCustomerTenantVisible(req, subscription.customer_id, "subscription")
 
     res.json({ subscription: snapshot(subscription) })
     return
   }
 
   // customer_id branch: the requested customer itself must belong to the
-  // tenant, otherwise its subscription list would leak across tenants.
+  // tenant, otherwise its subscription list would leak across tenants. A
+  // mismatch is a 404, not an empty list — an empty list is also what a caller
+  // with no subscriptions gets, so answering with it would hide "you may not
+  // see this customer" behind "this customer has nothing".
   const { data: customerData } = await query.graph({
     entity: "customer",
     fields: ["id", "metadata"],
@@ -250,14 +223,14 @@ export async function POST(
     | { id: string; metadata?: Record<string, unknown> | null }
     | undefined
 
-  if (
-    !customer ||
-    (customer.metadata as Record<string, unknown> | null)?.tenant_id !==
-      tenant.tenant_id
-  ) {
-    res.json({ subscriptions: [] })
-    return
+  if (!customer) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Customer '${body.customer_id}' not found`
+    )
   }
+
+  assertTenantVisible(req, customer.metadata, "customer")
 
   const { data } = await query.graph({
     entity: "subscription",

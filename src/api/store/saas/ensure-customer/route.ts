@@ -2,6 +2,8 @@ import { MedusaError } from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { currentTenant } from "../../../../modules/saas-bridge/auth"
+import { isTenantAdoptable } from "../../../../modules/saas-bridge/tenant-ownership"
+import { isOwnedByRequestTenant } from "../lib/tenant-ownership"
 
 type CustomerModule = {
   listCustomers: (
@@ -74,10 +76,8 @@ export async function POST(
       { take: 20 }
     )
 
-    const owned = candidates.find(
-      (customer) =>
-        (customer.metadata as Record<string, unknown> | null)?.tenant_id ===
-        tenant.tenant_id
+    const owned = candidates.find((candidate) =>
+      isOwnedByRequestTenant(req, candidate.metadata)
     )
 
     if (owned) {
@@ -97,10 +97,8 @@ export async function POST(
       { take: 20 }
     )
 
-    const owned = candidates.find(
-      (customer) =>
-        (customer.metadata as Record<string, unknown> | null)?.tenant_id ===
-        tenant.tenant_id
+    const owned = candidates.find((candidate) =>
+      isOwnedByRequestTenant(req, candidate.metadata)
     )
 
     if (owned) {
@@ -108,8 +106,8 @@ export async function POST(
       return
     }
 
-    const unclaimed = candidates.find(
-      (customer) => !(customer.metadata as Record<string, unknown> | null)?.tenant_id
+    const unclaimed = candidates.find((customer) =>
+      isTenantAdoptable(customer.metadata)
     )
     if (unclaimed) {
       const adopted = await customerModule.updateCustomers(unclaimed.id, {

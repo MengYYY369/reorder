@@ -70,8 +70,15 @@ Semantics:
   and looks up per tenant (the same email can exist under two tenants as two
   records; unstamped customers sharing the email are *adopted*). `reconcile`,
   `renew`, `auto-renew`, `carts` and `redeem` resolve the owning customer and
-  answer **404** (existence never leaked) when `metadata.tenant_id` does not
-  match the caller.
+  answer **404** (existence never leaked) when the customer is stamped for a
+  different tenant.
+  A customer with **no** stamp is treated as this tenant's when the deployment
+  configures exactly one tenant — that is what keeps pre-bridge customers
+  visible under the implicit default above — and is invisible to every tenant
+  when several are configured (claim it with `ensure-customer` first).
+  The rule is implemented once, in `src/modules/saas-bridge/tenant-ownership.ts`
+  behind `src/api/store/saas/lib/tenant-ownership.ts`; routes must not re-type
+  the comparison.
 
 ## Auth
 
@@ -112,8 +119,11 @@ webhook-loss recovery:
 - subscription snapshot `id`, `reference`, `status`, `frequencyInterval`,
   `frequencyValue`, `nextRenewalAt`, `cancelEffectiveAt`, `paymentMode`,
   `hasPaymentMethod`, `orderId`
-- `customer_id` queries return `{ subscriptions: [ ...snapshots ] }` (empty
-  list for foreign-tenant customers)
+- `customer_id` queries return `{ subscriptions: [ ...snapshots ] }` (an empty
+  list means the customer genuinely has no subscriptions; a customer belonging
+  to another tenant, or an unknown id, answers **404** instead — this endpoint
+  changed from returning an empty list for both, which the webhook receiver
+  could not tell apart from "nothing to reconcile")
 
 ### `POST /store/saas/renew`
 
