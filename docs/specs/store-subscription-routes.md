@@ -110,9 +110,18 @@ Current pricing semantics:
   - `status`
   - `product_title`
   - `variant_title`
+  - `frequency_interval`
+  - `frequency_value`
   - `next_renewal_at`
   - `effective_next_renewal_at`
+  - `payment_mode`
+  - `has_payment_method`
   - `active_cancellation_case`
+  - `frequency_*` and the two payment fields are what a benefit card needs to
+    render the plan tier and the "renewal will/won't charge automatically" line
+    without a per-row detail request; `payment_mode` is `null` when the row
+    carries no payment context at all, and `has_payment_method` is derived from
+    the presence of a stored reference, never from its value
 - subscription detail:
   - `id`
   - `reference`

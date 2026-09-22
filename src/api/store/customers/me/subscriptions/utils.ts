@@ -17,6 +17,7 @@ import {
   listCustomerPaymentMethods,
   resolveCustomerPaymentMethod,
 } from "../../../../../modules/subscription/utils/payment-methods"
+import { serializeStoreSubscriptionListItem } from "../../../../../modules/subscription/utils/store-list-serialization"
 
 const ACTIVE_CANCELLATION_STATUSES = [
   CancellationCaseStatus.REQUESTED,
@@ -37,6 +38,7 @@ type SubscriptionStoreListItem = {
     product_title?: string | null
     variant_title?: string | null
   } | null
+  payment_context?: Record<string, unknown> | null
 }
 
 type ActiveCancellationRecord = {
@@ -143,6 +145,7 @@ export async function listStoreCustomerSubscriptions(
       "frequency_value",
       "skip_next_cycle",
       "product_snapshot",
+      "payment_context",
     ],
     filters: {
       customer_id: customerId,
@@ -180,30 +183,12 @@ export async function listStoreCustomerSubscriptions(
   }
 
   return {
-    subscriptions: subscriptions.map((subscription) => ({
-      id: subscription.id,
-      reference: subscription.reference,
-      status: subscription.status,
-      created_at: toIsoStringOrNull(subscription.created_at),
-      product_title: subscription.product_snapshot?.product_title ?? null,
-      variant_title: subscription.product_snapshot?.variant_title ?? null,
-      next_renewal_at: toIsoStringOrNull(subscription.next_renewal_at),
-      effective_next_renewal_at: toIsoStringOrNull(
-        getEffectiveNextRenewalAt({
-          next_renewal_at: subscription.next_renewal_at,
-          skip_next_cycle: subscription.skip_next_cycle,
-          frequency_interval:
-            subscription.frequency_interval as SubscriptionFrequencyInterval,
-          frequency_value: subscription.frequency_value,
-        })
-      ),
-      active_cancellation_case: activeCases.get(subscription.id)
-        ? {
-            id: activeCases.get(subscription.id)!.id,
-            status: activeCases.get(subscription.id)!.status,
-          }
-        : null,
-    })),
+    subscriptions: subscriptions.map((subscription) =>
+      serializeStoreSubscriptionListItem(
+        subscription,
+        activeCases.get(subscription.id) ?? null
+      )
+    ),
   }
 }
 
