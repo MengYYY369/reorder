@@ -1,3 +1,41 @@
+## [Unreleased] — 1.6.0 序列（planned #01-#10：doc-first 条目，代码未落地，勿视为已交付；发布时改号为 [1.6.0]）
+
+**要求 Medusa 2.20 / mikro-orm 6.6.14**
+
+### Features
+
+- **relationship model:** unify the three payment tracks under one entitlement
+  row per (customer × product). One-time purchases extend the existing row in
+  place (`extend-in-place`) instead of creating a second subscription, with a
+  configurable stacking cap (`rules.max_stacking_cycles`, default unlimited).
+  Auto-renew and native PayPal subscriptions are mutually-exclusive billing
+  mechanisms on that row: checkout consent (`rules.consent_from_session`)
+  flips `manual → auto` in the same update as the payment method is saved; an
+  active native subscription rejects both a new one-time + auto-renew
+  combination and a repeated native purchase until the current one is cancelled.
+  Configuration is
+  opt-in — unconfigured offers keep the previous behavior. See
+  `docs/architecture/subscription-relationship-model.md`.
+- **native mirror rows:** consume the emitted `paypal.subscription.*` events
+  and keep read-only `mechanism:"native"` rows in the subscription table
+  (state and `next_renewal_at` synced from events; renewal / dunning engines
+  skip them), with a one-time backfill for existing native subscriptions.
+
+### Fixes
+
+- **observability:** subscription-creation failures serialize the full workflow
+  error chain and record a structured `subscription_log` event (idempotent via
+  `dedupe_key`) instead of `[object Object]`.
+- **address validation:** completeness-based check — a country-only shipping
+  stub auto-created by the region is treated as a digital-goods checkout and
+  gets a placeholder snapshot instead of failing.
+- **saas-bridge:** single shared tenant-ownership helper; customers without
+  `metadata.tenant_id` are owned by the sole configured tenant (multi-tenant
+  stays strict); the customer branch no longer returns a silent empty list.
+- **list serializer:** `frequency_interval` / `frequency_value`, `payment_mode`
+  and `has_payment_method` are now returned by the store subscription list
+  route, matching the detail route.
+
 ## [1.5.0] - 2026-09-19
 
 ### Features

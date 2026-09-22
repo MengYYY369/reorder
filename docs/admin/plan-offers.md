@@ -208,9 +208,23 @@ The rules area supports:
 - minimum cycles: optional positive integer defining the minimum subscription period before cancellation; empty input evaluates to `null` (no minimum period)
 - trial enabled / disabled
 - trial days
-- stacking policy
+- stacking policy: whether the offer's discount may combine with other discounts
+- auto-renew consent: `Never flip automatically` (default) or `From the session
+  customer id`. With the default, saving a payment method never starts charging
+  on its own; with the consent option, a checkout whose payment session carries
+  that field flips the subscription from manual to automatic renewal in the same
+  update that stores the payment method.
+- repeat purchase: `Extend existing subscription` (default) folds a second
+  purchase of the same product into the customer's live subscription by pushing
+  its next renewal date forward; `Allow separate rows` keeps one row per purchase,
+  each billing independently.
+- maximum stacked cycles: optional non-negative integer refusing a purchase that
+  would push the accumulated cycle count past that ceiling; empty input evaluates
+  to `null` (no limit).
 
-Client-side validation enforces rule consistency before submission.
+Every default above is the behavior from before these fields existed, so an offer
+that is not reconfigured is unaffected. Client-side validation enforces rule
+consistency before submission.
 
 ### Modal Behavior
 

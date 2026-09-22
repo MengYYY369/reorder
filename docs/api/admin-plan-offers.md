@@ -182,7 +182,11 @@ Shape:
           "minimum_cycles": 1,
           "trial_enabled": false,
           "trial_days": null,
-          "stacking_policy": "allowed"
+          "stacking_policy": "allowed",
+          "trial_requires_payment_method": false,
+          "consent_from_session": null,
+          "row_stacking_policy": "extend",
+          "max_stacking_cycles": null
         }
       },
       "updated_at": "2026-03-29T12:00:00.000Z"
@@ -278,7 +282,11 @@ Shape:
         "minimum_cycles": 1,
         "trial_enabled": false,
         "trial_days": null,
-        "stacking_policy": "allowed"
+        "stacking_policy": "allowed",
+        "trial_requires_payment_method": false,
+        "consent_from_session": null,
+        "row_stacking_policy": "extend",
+        "max_stacking_cycles": null
       }
     },
     "created_at": "2026-03-29T10:00:00.000Z",
@@ -287,7 +295,11 @@ Shape:
       "minimum_cycles": 1,
       "trial_enabled": false,
       "trial_days": null,
-      "stacking_policy": "allowed"
+      "stacking_policy": "allowed",
+      "trial_requires_payment_method": false,
+      "consent_from_session": null,
+      "row_stacking_policy": "extend",
+      "max_stacking_cycles": null
     },
     "metadata": {
       "source": "admin"
@@ -345,7 +357,11 @@ This endpoint currently behaves as a create-or-upsert mutation:
     "minimum_cycles": 1,
     "trial_enabled": false,
     "trial_days": null,
-    "stacking_policy": "allowed"
+    "stacking_policy": "allowed",
+    "trial_requires_payment_method": false,
+    "consent_from_session": null,
+    "row_stacking_policy": "extend",
+    "max_stacking_cycles": null
   },
   "metadata": {
     "source": "admin"
@@ -445,7 +461,11 @@ All fields are optional, but at least one field must be provided.
     "minimum_cycles": 2,
     "trial_enabled": true,
     "trial_days": 14,
-    "stacking_policy": "disallow_subscription_discounts"
+    "stacking_policy": "disallow_subscription_discounts",
+    "trial_requires_payment_method": false,
+    "consent_from_session": null,
+    "row_stacking_policy": "extend",
+    "max_stacking_cycles": null
   },
   "metadata": {
     "revision": 2

@@ -13,7 +13,7 @@ The current implementation supports:
 - configuring variant-level subscription offers
 - defining allowed billing frequencies
 - defining discount rules per frequency
-- defining additional offer rules such as trial policy and stacking policy
+- defining additional offer rules such as trial policy and discount-stacking policy (`stacking_policy`) plus the new subscription-relationship fields `consent_from_session`, `row_stacking_policy` (subscription-row stacking), `max_stacking_cycles`
 - listing, inspecting, creating, editing, and toggling plan offers in Admin
 - resolving effective subscription configuration with `variant > product` priority
 - enforcing active offer configuration during subscription plan-change flows
@@ -72,6 +72,11 @@ Core fields include:
 - `discount_per_frequency`
 - `rules`
 - `metadata`
+
+The offer `rules` object holds the offer-policy rules validated by the plan-offer
+rules schema; the subscription *relationship* rules (R1-R5) and the three new rule
+fields (`consent_from_session`, `row_stacking_policy`,
+`max_stacking_cycles`) are defined in [Subscription Relationship Model](./subscription-relationship-model.md).
 
 ### Scope Model
 
@@ -371,6 +376,7 @@ It does not yet own:
 
 ## Related Documents
 
+- [Subscription Relationship Model](./subscription-relationship-model.md)
 - [Docs Overview](../README.md)
 - [Plans & Offers Admin API](../api/admin-plan-offers.md)
 - [Plans & Offers Admin UI](../admin/plan-offers.md)
