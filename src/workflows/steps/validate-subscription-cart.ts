@@ -15,6 +15,10 @@ import {
   type SubscriptionShippingAddress,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import {
+  findBlockingNativeSubscription,
+  readProductTitle,
+} from "../../modules/subscription/utils/native-exclusivity"
 import { resolveConsentFlip } from "../../modules/subscription/utils/consent-flip"
 import {
   resolveStackingDecision,
@@ -239,6 +243,17 @@ export const validateSubscriptionCartStep = createStep(
     }
 
     const checkoutSession = findCheckoutSession(cart)
+
+    // R3 on the subscription track: while a provider recurrence for this
+    // product is running, this track is closed. Strict mutual exclusion is the
+    // ruling — two live recurrences on one product charge twice on dates that
+    // differ, and no storefront wording makes that legible to the customer. The
+    // one-time-purchase track is guarded elsewhere (the checkout-completion
+    // middleware), because a plain purchase never reaches this step at all.
+    await assertNoNativeRecurrence(container, {
+      customer_id: cart.customer_id,
+      product_id: productId,
+    })
 
     const paymentContext = await buildPaymentContext(
       container,
@@ -515,6 +530,24 @@ async function buildPaymentContext(
       readNullableString(session.data?.customer_id) ??
       null,
   }
+}
+
+async function assertNoNativeRecurrence(
+  container: MedusaContainer,
+  input: { customer_id: string; product_id: string }
+): Promise<void> {
+  const blocking = await findBlockingNativeSubscription(container, input)
+
+  if (!blocking) {
+    return
+  }
+
+  throw subscriptionErrors.invalidData(
+    `You already have an active subscription for '${await readProductTitle(
+      container,
+      input.product_id
+    )}' managed by your payment provider. Change or cancel that subscription instead of subscribing again here.`
+  )
 }
 
 function findCheckoutSession(cart: CartRecord): CartPaymentSession | null {

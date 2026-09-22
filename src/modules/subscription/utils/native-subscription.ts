@@ -1,3 +1,5 @@
+import { SubscriptionStatus } from "../types"
+
 /**
  * The one definition of "this subscription row mirrors a provider-owned
  * recurrence".
@@ -54,4 +56,51 @@ export function nativeSubscriptionReferenceFilter() {
       $like: NATIVE_SUBSCRIPTION_REFERENCE_PATTERN,
     },
   }
+}
+
+/**
+ * A provider recurrence only occupies the billing track while it is running or
+ * deliberately paused.
+ *
+ * `cancelled` and `past_due` are let through on purpose: a customer whose PayPal
+ * charge just failed must keep the door open to buy the period themselves and
+ * not lose their entitlement, and a subscription that ended months ago should
+ * not lock the customer out for the rest of its nominal term.
+ */
+export const TRACK_OCCUPYING_NATIVE_STATUSES = [
+  SubscriptionStatus.ACTIVE,
+  SubscriptionStatus.PAUSED,
+] as const
+
+export type NativeRowCandidate = {
+  id: string
+  reference: string
+  status: string
+  product_id: string
+}
+
+/**
+ * The one rule both checkout gates ask: does this customer have a live provider
+ * recurrence for any of these products?
+ *
+ * @param productIds the products being purchased; a mixed cart is rejected as a
+ *   whole, but the caller needs to name the colliding product in the message.
+ */
+export function findBlockingNativeRow<T extends NativeRowCandidate>(
+  rows: T[],
+  productIds: Iterable<string>
+): T | null {
+  const wanted = new Set(productIds)
+
+  for (const row of rows) {
+    if (
+      isNativeSubscriptionReference(row.reference) &&
+      (TRACK_OCCUPYING_NATIVE_STATUSES as readonly string[]).includes(row.status) &&
+      wanted.has(row.product_id)
+    ) {
+      return row
+    }
+  }
+
+  return null
 }

@@ -51,3 +51,27 @@ Checkout sequencing:
 - the cart is refreshed before completion so payment collection and order totals use the discounted amount
 - after order creation, the order adjustment may be labeled with `subscription_discount` for Medusa Admin display
 - when the subscription record is created for the first time, the plugin also appends a `subscription.created` activity-log entry for that subscription and records the storefront customer as the actor
+
+## Mutual exclusion with a provider-managed subscription
+
+While the customer has a live subscription for the same product **at the payment
+provider** (a `NATIVE-…` mirror row in status `active` or `paused`), this route
+returns `400` naming the product and tells the customer to change or cancel that
+subscription instead.
+
+Two guards, because the two purchase paths share no validation step:
+
+| purchase | guarded by |
+| --- | --- |
+| subscription checkout (this route) | cart validation in `validate-subscription-cart`, before the payment-mode branch |
+| plain one-time checkout | a method-level middleware on the core `POST /store/carts/:id/complete`, see `docs/architecture/subscriptions.md` |
+
+A one-time purchase never reaches the validation step above — it has no
+subscription line item, so that step is not even invoked for it. Guarding only
+there would pass every plain purchase through in production while still passing
+its own tests.
+
+`cancelled` and `past_due` provider subscriptions are deliberately **not**
+blocked: a customer whose provider charge just failed keeps the option of buying
+that period themselves, and a subscription that ended long ago must not lock them
+out for the rest of its nominal term.
