@@ -192,6 +192,9 @@ export const createSubscriptionFromOrderWorkflow = createWorkflow(
           trial_ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,
           next_renewal_at: nextRenewalAt.toISOString(),
           metadata_source: "store_order_placed",
+          extend_subscription_id: validatedCart.stacking.extend_subscription_id,
+          total_cycles: validatedCart.stacking.total_cycles,
+          consent_flip: validatedCart.consent_flip,
         } satisfies CreateSubscriptionRecordStepInput
       }
     )
@@ -245,7 +248,9 @@ export const createSubscriptionFromOrderWorkflow = createWorkflow(
               metadata: {
                 order_id: createSubscriptionInput.order_id,
                 source: "store",
-                trigger_type: "order_placed",
+                trigger_type: createdSubscription.extended
+                  ? "order_placed_extend"
+                  : "order_placed",
               },
               dedupe: {
                 scope: "order",

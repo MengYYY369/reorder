@@ -3,9 +3,11 @@ import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import type { PlanOfferDiscountPerFrequency } from "../../modules/plan-offer/types"
 import { resolveProductSubscriptionConfig } from "../../modules/plan-offer/utils/effective-config"
+import { resolvePlanOfferRules } from "../../modules/plan-offer/utils/rules"
 import {
   SubscriptionFrequencyInterval,
   type SubscriptionPaymentContext,
+  type SubscriptionPaymentMechanism,
   type SubscriptionPaymentMethodRecord,
   type SubscriptionPaymentMode,
   type SubscriptionPricingSnapshot,
@@ -13,6 +15,11 @@ import {
   type SubscriptionShippingAddress,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { resolveConsentFlip } from "../../modules/subscription/utils/consent-flip"
+import {
+  resolveStackingDecision,
+  type StackingDecision,
+} from "../../modules/subscription/utils/stacking"
 import { resolveShippingAddress } from "../../modules/subscription/utils/shipping-address"
 import {
   sortPaymentMethodSummaries,
@@ -50,6 +57,12 @@ type CartLineItemRecord = {
   } | null
 }
 
+type CartPaymentSession = {
+  id: string
+  provider_id?: string | null
+  data?: Record<string, unknown> | null
+}
+
 type CartRecord = {
   id: string
   completed_at: Date | null
@@ -76,11 +89,7 @@ type CartRecord = {
   } | null
   payment_collection?: {
     id: string
-    payment_sessions?: Array<{
-      id: string
-      provider_id?: string | null
-      data?: Record<string, unknown> | null
-    }> | null
+    payment_sessions?: CartPaymentSession[] | null
   } | null
   items?: CartLineItemRecord[] | null
 }
@@ -99,6 +108,22 @@ export type ValidatedSubscriptionCart = {
   shipping_address: SubscriptionShippingAddress
   payment_context: SubscriptionPaymentContext
   trial_days: number
+  /**
+   * Repeat-purchase decision (R1/R4), resolved here because this is the only
+   * step that has both the offer rules and the cart: an existing active row for
+   * the same customer and product is folded into instead of a second row being
+   * created, unless the offer opts into separate rows.
+   */
+  stacking: StackingDecision
+  /**
+   * Consent proven by this checkout that should flip the row being extended.
+   * Kept separate from `payment_context` because the extend path must not
+   * rewrite the stored payment method of the row it folds into.
+   */
+  consent_flip: {
+    payment_mode: SubscriptionPaymentMode
+    mechanism: SubscriptionPaymentMechanism
+  } | null
 }
 
 export const validateSubscriptionCartStep = createStep(
@@ -197,11 +222,47 @@ export const validateSubscriptionCartStep = createStep(
       frequencyValue
     )
 
+    const offerRules = resolvePlanOfferRules(effectiveConfig.rules)
+    const stacking = await resolveStackingDecision(container, {
+      customer_id: cart.customer_id,
+      product_id: productId,
+      purchased_cycles: frequencyValue,
+      row_stacking_policy: offerRules.row_stacking_policy,
+      max_stacking_cycles: offerRules.max_stacking_cycles,
+    })
+
+    if (stacking.ceiling_exceeded) {
+      throw subscriptionErrors.invalidData(
+        `This subscription can be stacked up to ${offerRules.max_stacking_cycles} cycles ` +
+          `and this purchase would take it to ${stacking.total_cycles}`
+      )
+    }
+
+    const checkoutSession = findCheckoutSession(cart)
+
     const paymentContext = await buildPaymentContext(
       container,
       cart,
-      paymentMode
+      paymentMode,
+      checkoutSession
     )
+
+    // A repeat purchase that proves consent starts charging automatically —
+    // but only onto a row that already holds a chargeable method. Flipping a
+    // fresh manual row here would leave the scheduler with a mode it can act on
+    // and nothing to charge; that case is handled at payment.captured instead,
+    // where the vaulted method arrives.
+    const consentFlip =
+      stacking.extend_subscription_id &&
+      hasStoredPaymentMethod(stacking.existing_payment_context)
+        ? consentFlipFrom(
+            resolveConsentFlip({
+              consent_from_session: offerRules.consent_from_session,
+              payment_context: stacking.existing_payment_context,
+              session_data: checkoutSession?.data,
+            })
+          )
+        : null
 
     return new StepResponse<ValidatedSubscriptionCart>({
       cart_id: cart.id,
@@ -226,10 +287,12 @@ export const validateSubscriptionCartStep = createStep(
         region_country_code: cart.region?.countries?.[0]?.iso_2 ?? null,
       }),
       payment_context: paymentContext,
+      consent_flip: consentFlip,
       trial_days:
         effectiveConfig.rules?.trial_enabled && effectiveConfig.rules.trial_days
           ? effectiveConfig.rules.trial_days
           : 0,
+      stacking,
     })
   }
 )
@@ -392,17 +455,10 @@ function readCustomerEmail(cart: CartRecord) {
 async function buildPaymentContext(
   container: MedusaContainer,
   cart: CartRecord,
-  paymentMode: SubscriptionPaymentMode
+  paymentMode: SubscriptionPaymentMode,
+  session: CartPaymentSession | null
 ): Promise<SubscriptionPaymentContext> {
   const paymentCollectionId = cart.payment_collection?.id ?? null
-  const session =
-    cart.payment_collection?.payment_sessions?.find((entry) => {
-      const data = entry.data ?? {}
-
-      return typeof data.payment_method === "string" && !!data.payment_method
-    }) ??
-    cart.payment_collection?.payment_sessions?.[0] ??
-    null
 
   if (!paymentCollectionId || !session?.id || !session.provider_id) {
     throw subscriptionErrors.invalidData(
@@ -418,6 +474,10 @@ async function buildPaymentContext(
     return {
       payment_provider_id: session.provider_id,
       payment_mode: "manual",
+      // Which system owns the recurrence is decided at creation and only
+      // changes through the consent flip; native mirror rows are written
+      // elsewhere and labelled there.
+      mechanism: "manual",
       source_payment_collection_id: paymentCollectionId,
       source_payment_session_id: session.id,
       payment_method_reference: null,
@@ -445,6 +505,8 @@ async function buildPaymentContext(
   return {
     payment_provider_id: session.provider_id,
     payment_mode: "auto",
+    // An auto context built at checkout is charged by this plugin's scheduler.
+    mechanism: "reorder_auto",
     source_payment_collection_id: paymentCollectionId,
     source_payment_session_id: session.id,
     payment_method_reference: paymentMethodReference,
@@ -453,6 +515,38 @@ async function buildPaymentContext(
       readNullableString(session.data?.customer_id) ??
       null,
   }
+}
+
+function findCheckoutSession(cart: CartRecord): CartPaymentSession | null {
+  return (
+    cart.payment_collection?.payment_sessions?.find((entry) => {
+      const data = entry.data ?? {}
+
+      return typeof data.payment_method === "string" && !!data.payment_method
+    }) ??
+    cart.payment_collection?.payment_sessions?.[0] ??
+    null
+  )
+}
+
+function hasStoredPaymentMethod(
+  context: Record<string, unknown> | null
+): boolean {
+  return typeof context?.payment_method_reference === "string"
+    ? !!context.payment_method_reference.trim()
+    : false
+}
+
+function consentFlipFrom(decision: ReturnType<typeof resolveConsentFlip>): {
+  payment_mode: SubscriptionPaymentMode
+  mechanism: SubscriptionPaymentMechanism
+} | null {
+  return decision.flip
+    ? {
+        payment_mode: decision.payment_mode,
+        mechanism: decision.mechanism ?? "reorder_auto",
+      }
+    : null
 }
 
 function readPaymentMode(

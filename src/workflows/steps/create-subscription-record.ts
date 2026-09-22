@@ -4,11 +4,18 @@ import type SubscriptionModuleService from "../../modules/subscription/service"
 import type {
   SubscriptionFrequencyInterval,
   SubscriptionPaymentContext,
+  SubscriptionPaymentMechanism,
+  SubscriptionPaymentMode,
   SubscriptionPricingSnapshot,
   SubscriptionProductSnapshot,
   SubscriptionShippingAddress,
 } from "../../modules/subscription/types"
 import { SubscriptionStatus } from "../../modules/subscription/types"
+import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import {
+  extendSubscriptionRenewalDate,
+  withStackedCycles,
+} from "../../modules/subscription/utils/stacking"
 
 export type CreateSubscriptionRecordStepInput = {
   customer_id: string
@@ -35,10 +42,36 @@ export type CreateSubscriptionRecordStepInput = {
    * passes "store_order_placed".
    */
   metadata_source?: string
+  /**
+   * When set, this purchase folds into that existing row instead of creating a
+   * second one (resolved by `resolveStackingDecision` during cart validation).
+   */
+  extend_subscription_id?: string | null
+  /** Accumulated cycles after this purchase, written to metadata. */
+  total_cycles?: number
+  /**
+   * Consent proven by this checkout, to be applied to the row being extended.
+   * Merged into that row's stored context rather than replacing it, so the
+   * method reference collected earlier survives.
+   */
+  consent_flip?: {
+    payment_mode: SubscriptionPaymentMode
+    mechanism: SubscriptionPaymentMechanism
+  } | null
 }
 
 type CreatedSubscriptionRecord = {
   id: string
+  extended: boolean
+}
+
+type ExtendCompensation = {
+  id: string
+  previous: {
+    next_renewal_at: Date | null
+    metadata: Record<string, unknown> | null
+    payment_context: Record<string, unknown> | null
+  }
 }
 
 export const createSubscriptionRecordStep = createStep(
@@ -49,6 +82,22 @@ export const createSubscriptionRecordStep = createStep(
   ) {
     const subscriptionModule =
       container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+
+    const metadata = withStackedCycles(
+      {
+        source: input.metadata_source ?? "store_cart_subscribe",
+        source_order_id: input.order_id,
+      },
+      input.total_cycles ?? input.frequency_value
+    )
+
+    if (input.extend_subscription_id) {
+      return await extendSubscriptionRecord(
+        subscriptionModule,
+        input,
+        metadata
+      )
+    }
 
     const created = await subscriptionModule.createSubscriptions({
       reference: buildSubscriptionReference(input.order_display_id, input.order_id),
@@ -76,30 +125,114 @@ export const createSubscriptionRecordStep = createStep(
       shipping_address: input.shipping_address,
       payment_context: input.payment_context,
       pending_update_data: null,
-      metadata: {
-        source: input.metadata_source ?? "store_cart_subscribe",
-        source_order_id: input.order_id,
-      },
+      metadata,
     } as any)
 
     return new StepResponse<CreatedSubscriptionRecord, string>(
       {
         id: created.id,
+        extended: false,
       },
       created.id
     )
   },
-  async function (subscriptionId, { container }) {
-    if (!subscriptionId) {
+  async function (
+    compensation: string | ExtendCompensation,
+    { container }
+  ) {
+    if (!compensation) {
       return
     }
 
     const subscriptionModule =
       container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
 
-    await subscriptionModule.deleteSubscriptions([subscriptionId])
+    if (typeof compensation === "string") {
+      await subscriptionModule.deleteSubscriptions([compensation])
+
+      return
+    }
+
+    // An extension must roll back to the previous period end; deleting the row
+    // would erase a subscription the customer already paid for.
+    await subscriptionModule.updateSubscriptions({
+      id: compensation.id,
+      next_renewal_at: compensation.previous.next_renewal_at,
+      metadata: compensation.previous.metadata,
+      payment_context: compensation.previous.payment_context,
+    } as never)
   }
 )
+
+async function extendSubscriptionRecord(
+  subscriptionModule: SubscriptionModuleService,
+  input: CreateSubscriptionRecordStepInput,
+  metadata: Record<string, unknown>
+) {
+  const existing = (await subscriptionModule.listSubscriptions({
+    id: [input.extend_subscription_id!],
+  } as never)) as unknown as Array<{
+    id: string
+    next_renewal_at: Date | null
+    metadata: Record<string, unknown> | null
+    payment_context: Record<string, unknown> | null
+  }>
+
+  const target = existing[0]
+
+  if (!target) {
+    throw subscriptionErrors.notFound(
+      "Subscription",
+      input.extend_subscription_id!
+    )
+  }
+
+  const previousPaymentContext = target.payment_context ?? null
+  const paymentContext = input.consent_flip
+    ? {
+        ...previousPaymentContext,
+        payment_mode: input.consent_flip.payment_mode,
+        mechanism: input.consent_flip.mechanism,
+      }
+    : undefined
+
+  const purchasedAt = new Date(input.started_at)
+  const nextRenewalAt = extendSubscriptionRenewalDate(
+    target.next_renewal_at,
+    purchasedAt,
+    input.frequency_interval,
+    input.frequency_value
+  )
+
+  await subscriptionModule.updateSubscriptions({
+    id: target.id,
+    next_renewal_at: nextRenewalAt,
+    // The new purchase may use a different variant of the same product; the row
+    // keeps charging at the cadence just bought, and its snapshots follow it.
+    frequency_interval: input.frequency_interval,
+    frequency_value: input.frequency_value,
+    variant_id: input.product_snapshot.variant_id,
+    product_snapshot: input.product_snapshot,
+    pricing_snapshot: input.pricing_snapshot,
+    metadata,
+    ...(paymentContext ? { payment_context: paymentContext } : {}),
+  } as never)
+
+  return new StepResponse<
+    CreatedSubscriptionRecord,
+    ExtendCompensation
+  >(
+    { id: target.id, extended: true },
+    {
+      id: target.id,
+      previous: {
+        next_renewal_at: target.next_renewal_at ?? null,
+        metadata: target.metadata ?? null,
+        payment_context: previousPaymentContext,
+      },
+    }
+  )
+}
 
 function buildSubscriptionReference(
   orderDisplayId: string | number | null,

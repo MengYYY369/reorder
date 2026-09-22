@@ -158,6 +158,11 @@ export const createSubscriptionFromCartWorkflow = createWorkflow(
           is_trial: validatedCart.trial_days > 0,
           trial_ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,
           next_renewal_at: nextRenewalAt.toISOString(),
+          // Same repeat-purchase folding as the order-driven flow: the decision
+          // is made during cart validation, both flows act on it here.
+          extend_subscription_id: validatedCart.stacking.extend_subscription_id,
+          total_cycles: validatedCart.stacking.total_cycles,
+          consent_flip: validatedCart.consent_flip,
         } satisfies CreateSubscriptionRecordStepInput
       }
     )

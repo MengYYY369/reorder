@@ -12,6 +12,7 @@ import type {
   IRegionModuleService,
   IWorkflowEngineService,
   MedusaContainer,
+  RemoteQueryFunction,
 } from "@medusajs/framework/types"
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
 import type SubscriptionModuleService from "../../src/modules/subscription/service"
@@ -29,7 +30,9 @@ import {
 } from "../helpers/plan-offer-fixtures"
 import {
   PlanOfferFrequencyInterval,
+  PlanOfferRules,
   PlanOfferScope,
+  PlanOfferStackingPolicy,
 } from "../../src/modules/plan-offer/types"
 
 jest.setTimeout(120 * 1000)
@@ -38,6 +41,7 @@ type SeedResult = {
   order_id: string
   cart_id: string
   customer_id: string
+  product_id: string
   variant_id: string
 }
 
@@ -47,11 +51,24 @@ async function seedSubscriptionOrder(
     withSubscriptionItem?: boolean
     withPlanOffer?: boolean
     addressMode?: "complete" | "stub" | "none"
+    /** Offer rules for the seeded product; defaults are the conservative ones. */
+    planOfferRules?: Partial<PlanOfferRules>
+    /** Put customer_id into the payment session, as a consent-collecting
+     *  storefront does. */
+    sessionCarriesConsent?: boolean
+    /** Reuse an existing customer + product to model a repeat purchase. */
+    existing?: {
+      customer_id: string
+      email: string
+      product_id: string
+      variant_id: string
+    }
   } = {}
 ): Promise<SeedResult> {
   const withSubscriptionItem = options.withSubscriptionItem ?? true
   const withPlanOffer = options.withPlanOffer ?? true
   const addressMode = options.addressMode ?? "complete"
+  const existing = options.existing ?? null
 
   const cartModule = container.resolve<ICartModuleService>(Modules.CART)
   const orderModule = container.resolve<IOrderModuleService>(Modules.ORDER)
@@ -60,11 +77,13 @@ async function seedSubscriptionOrder(
     ContainerRegistrationKeys.LINK
   )
 
-  const customer = await createCustomer(container, {
-    email: `from-order-${Date.now()}-${Math.random()}@medusa.test`,
-    first_name: "Order",
-    last_name: "Driven",
-  })
+  const customer = existing
+    ? { id: existing.customer_id, email: existing.email }
+    : await createCustomer(container, {
+        email: `from-order-${Date.now()}-${Math.random()}@medusa.test`,
+        first_name: "Order",
+        last_name: "Driven",
+      })
 
   // The placeholder snapshot falls back to the cart region for the country, so
   // the addressless case needs a region that actually carries one.
@@ -95,9 +114,14 @@ async function seedSubscriptionOrder(
         ? { country_code: "us" }
         : undefined
 
-  const { product, variant } = await createProductWithVariant(container)
+  const { product, variant } = existing
+    ? {
+        product: { id: existing.product_id },
+        variant: { id: existing.variant_id },
+      }
+    : await createProductWithVariant(container)
 
-  if (withPlanOffer) {
+  if (withPlanOffer && !existing) {
     await createPlanOfferSeed(container, {
       name: `from-order-plan-${Date.now()}`,
       scope: PlanOfferScope.VARIANT,
@@ -106,7 +130,15 @@ async function seedSubscriptionOrder(
       is_enabled: true,
       allowed_frequencies: [
         { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
+        { interval: PlanOfferFrequencyInterval.MONTH, value: 3 },
       ],
+      rules: {
+        minimum_cycles: 1,
+        trial_enabled: false,
+        trial_days: null,
+        stacking_policy: PlanOfferStackingPolicy.ALLOWED,
+        ...(options.planOfferRules ?? {}),
+      },
     })
   }
 
@@ -147,7 +179,7 @@ async function seedSubscriptionOrder(
     provider_id: "pp_system_default",
     currency_code: "usd",
     amount: 1800,
-    data: {},
+    data: options.sessionCarriesConsent ? { customer_id: customer.id } : {},
   } as never)
 
   const order = await orderModule.createOrders({
@@ -198,6 +230,7 @@ async function seedSubscriptionOrder(
     order_id: order.id,
     cart_id: cart.id,
     customer_id: customer.id,
+    product_id: product.id,
     variant_id: variant.id,
   }
 }
@@ -326,6 +359,233 @@ medusaIntegrationTestRunner({
 
         expect(persisted).toHaveLength(1)
       })
+      it("folds a repeat purchase of the same product into the existing row", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const engine = container.resolve<IWorkflowEngineService>(
+          Modules.WORKFLOW_ENGINE
+        )
+
+        const first = await seedSubscriptionOrder(container)
+
+        await engine.run("create-subscription-from-order", {
+          input: { order_id: first.order_id },
+          throwOnError: true,
+        })
+
+        const [before] = await subscriptionModule.listSubscriptions({
+          customer_id: first.customer_id,
+        })
+
+        const second = await seedSubscriptionOrder(container, {
+          existing: {
+            customer_id: first.customer_id,
+            email: "repeat@medusa.test",
+            product_id: first.product_id,
+            variant_id: first.variant_id,
+          },
+        })
+
+        await engine.run("create-subscription-from-order", {
+          input: { order_id: second.order_id },
+          throwOnError: true,
+        })
+
+        const rows = await subscriptionModule.listSubscriptions({
+          customer_id: first.customer_id,
+        })
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0].metadata).toMatchObject({ cycles_purchased: 2 })
+        expect(new Date(rows[0].next_renewal_at as string).getTime()).toBeGreaterThan(
+          new Date(before.next_renewal_at as string).getTime()
+        )
+
+        // F7: the second order has to be linked to the row it extended, or a
+        // replay of it would fall into the create branch and split the row.
+        const query = container.resolve<RemoteQueryFunction>(
+          ContainerRegistrationKeys.QUERY
+        )
+        const { data: links } = await query.graph({
+          entity: "subscription_order",
+          fields: ["order_id"],
+          filters: { subscription_id: [rows[0].id] },
+        })
+
+        expect(
+          (links as Array<{ order_id: string }>).map((entry) => entry.order_id)
+        ).toEqual(expect.arrayContaining([first.order_id, second.order_id]))
+      })
+
+
+      it("keeps separate rows when the offer allows multiple rows", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const engine = container.resolve<IWorkflowEngineService>(
+          Modules.WORKFLOW_ENGINE
+        )
+
+        const first = await seedSubscriptionOrder(container, {
+          planOfferRules: { row_stacking_policy: "allow_multiple" },
+        })
+
+        await engine.run("create-subscription-from-order", {
+          input: { order_id: first.order_id },
+          throwOnError: true,
+        })
+
+        const second = await seedSubscriptionOrder(container, {
+          planOfferRules: { row_stacking_policy: "allow_multiple" },
+          existing: {
+            customer_id: first.customer_id,
+            email: "multi@medusa.test",
+            product_id: first.product_id,
+            variant_id: first.variant_id,
+          },
+        })
+
+        await engine.run("create-subscription-from-order", {
+          input: { order_id: second.order_id },
+          throwOnError: true,
+        })
+
+        const rows = await subscriptionModule.listSubscriptions({
+          customer_id: first.customer_id,
+        })
+
+        expect(rows).toHaveLength(2)
+      })
+
+      it("refuses a purchase that would stack past the ceiling", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const engine = container.resolve<IWorkflowEngineService>(
+          Modules.WORKFLOW_ENGINE
+        )
+
+        const ceiling = { max_stacking_cycles: 2 }
+        const first = await seedSubscriptionOrder(container, {
+          planOfferRules: ceiling,
+        })
+
+        await engine.run("create-subscription-from-order", {
+          input: { order_id: first.order_id },
+          throwOnError: true,
+        })
+
+        for (let purchase = 2; purchase <= 3; purchase += 1) {
+          const next = await seedSubscriptionOrder(container, {
+            planOfferRules: ceiling,
+            existing: {
+              customer_id: first.customer_id,
+              email: "ceiling@medusa.test",
+              product_id: first.product_id,
+              variant_id: first.variant_id,
+            },
+          })
+
+          const { errors } = await engine.run("create-subscription-from-order", {
+            input: { order_id: next.order_id },
+            throwOnError: false,
+          })
+
+          if (purchase === 2) {
+            expect(errors ?? []).toHaveLength(0)
+            continue
+          }
+
+          expect((errors?.[0]?.error as Error)?.message ?? "").toContain(
+            "stacked up to 2 cycles"
+          )
+        }
+
+        const rows = await subscriptionModule.listSubscriptions({
+          customer_id: first.customer_id,
+        })
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0].metadata).toMatchObject({ cycles_purchased: 2 })
+      })
+
+      it("starts charging an extended row automatically when consent is proven", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const engine = container.resolve<IWorkflowEngineService>(
+          Modules.WORKFLOW_ENGINE
+        )
+
+        const customer = await createCustomer(container)
+        const { product, variant } = await createProductWithVariant(container)
+
+        await createPlanOfferSeed(container, {
+          name: "consent-extend-" + Date.now(),
+          scope: PlanOfferScope.VARIANT,
+          product_id: product.id,
+          variant_id: variant.id,
+          is_enabled: true,
+          allowed_frequencies: [
+            { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
+          ],
+          rules: {
+            minimum_cycles: null,
+            trial_enabled: false,
+            trial_days: null,
+            stacking_policy: PlanOfferStackingPolicy.ALLOWED,
+            consent_from_session: "customer_id",
+          },
+        })
+
+        // The row the repeat purchase folds into: manual mode, but it already
+        // holds a chargeable method, so consent can take effect immediately.
+        await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          product_id: product.id,
+          variant_id: variant.id,
+          status: SubscriptionStatus.ACTIVE,
+          payment_context: {
+            payment_provider_id: "pp_system_default",
+            payment_mode: "manual",
+            payment_method_reference: "pm_stored_123",
+          },
+        })
+
+        const purchase = await seedSubscriptionOrder(container, {
+          existing: {
+            customer_id: customer.id,
+            email: "consent-extend@medusa.test",
+            product_id: product.id,
+            variant_id: variant.id,
+          },
+          sessionCarriesConsent: true,
+        })
+
+        await engine.run("create-subscription-from-order", {
+          input: { order_id: purchase.order_id },
+          throwOnError: true,
+        })
+
+        const rows = await subscriptionModule.listSubscriptions({
+          customer_id: customer.id,
+        })
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0].payment_context).toMatchObject({
+          payment_mode: "auto",
+          mechanism: "reorder_auto",
+          // The method collected by the first purchase has to survive.
+          payment_method_reference: "pm_stored_123",
+        })
+        expect(rows[0].metadata).toMatchObject({ cycles_purchased: 2 })
+      })
+
       it("rejects orders without a subscription line item", async () => {
         const container = getContainer()
         const engine = container.resolve<IWorkflowEngineService>(

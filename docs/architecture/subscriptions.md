@@ -229,6 +229,35 @@ The store create flow uses:
 
 The flow validates subscription metadata on the line item, synchronizes the cart pricing for the selected cadence, blocks mixed cart usage, completes the cart into a standard Medusa `order`, checks idempotency through the `subscription-order` link, creates the `subscription`, records a `subscription.created` activity-log event for newly created subscriptions with the storefront customer as the actor, links it to `customer`, `cart`, and `order`, and creates the first upcoming `renewal_cycle`.
 
+### Repeat purchase of the same product
+
+Buying a product the customer is already subscribed to **extends the existing
+row** rather than opening a second one (`src/modules/subscription/utils/stacking.ts`):
+
+- merge key `customer_id + product_id`, status `active`, excluding provider
+  mirrors — keyed on the product, not the variant, so moving between variants of
+  one product continues the same relationship
+- `next_renewal_at` advances by the purchased cadence **from the current period
+  end**, so a purchase made mid-period is added to the end rather than restarting
+  the clock
+- accumulated periods are counted in `metadata.cycles_purchased`, and
+  `rules.max_stacking_cycles` is checked during cart validation, so a purchase
+  that would exceed the ceiling is refused before any row is written
+- `rules.row_stacking_policy: allow_multiple` opts an offer out of all of the
+  above and keeps one row per purchase
+
+The extension links the new order to the row it extended, which is what keeps a
+replayed order from stacking the row a second time. The row keeps its **original
+source cart**: the manual renewal flow builds renewal orders from that cart, and
+the subscription↔cart link is one-to-one, so a repeat purchase adds an order link
+and leaves the cart link alone.
+
+An extension that proves auto-renew consent (`rules.consent_from_session`) also
+switches the row to automatic charging — but only when that row **already holds a
+chargeable payment method**. On a fresh row the method has not come back from a
+redirect provider yet, and a mode the scheduler can act on with nothing to charge
+is worse than staying manual; that case is flipped later, at `payment.captured`.
+
 Pricing synchronization is handled by a dedicated workflow:
 - load subscription line items from the cart
 - resolve effective `Plans & Offers` config for the selected cadence
