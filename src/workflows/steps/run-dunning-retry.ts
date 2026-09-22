@@ -24,9 +24,11 @@ import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 
 type SubscriptionRecord = {
   id: string
+  reference: string
   status: SubscriptionStatus
   customer_id: string
   payment_context: {
@@ -424,6 +426,22 @@ async function executePaymentRetry(
 
   try {
     const paymentContext = subscription.payment_context
+
+    if (isNativeSubscriptionReference(subscription.reference)) {
+      // Dunning is not a shared queue here: PayPal retries its own failed
+      // recurrence, and a retry from this side would double-charge. The
+      // `payment_mode === "manual"` short-circuit below is what currently
+      // keeps native rows out of this path — this guard makes that explicit so
+      // the immunity does not depend on how the mirror row happens to be
+      // labelled.
+      return {
+        kind: "permanent_failure",
+        payment_reference: null,
+        error_code: "native_subscription",
+        error_message:
+          "Subscription mirrors a provider-owned recurrence; the provider retries it",
+      }
+    }
 
     if (paymentContext?.payment_mode === "manual") {
       // Manual subscriptions are paid via the interactive manual renewal flow;

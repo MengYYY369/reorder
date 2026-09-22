@@ -2,9 +2,11 @@ import { MedusaContainer } from "@medusajs/framework/types"
 import { SUBSCRIPTION_MODULE } from "../modules/subscription"
 import type SubscriptionModuleService from "../modules/subscription/service"
 import { SubscriptionStatus } from "../modules/subscription/types"
+import { isNativeSubscriptionReference } from "../modules/subscription/utils/native-subscription"
 
 type HygieneSubscription = {
   id: string
+  reference: string
   status: SubscriptionStatus
   payment_context: { payment_mode?: string | null } | null
   next_renewal_at: Date | null
@@ -40,6 +42,7 @@ export default async function manualRenewalHygieneJob(
 
   const manualLapsed = lapsed.filter(
     (subscription) =>
+      !isNativeSubscriptionReference(subscription.reference) &&
       (subscription.payment_context?.payment_mode ?? "auto") === "manual"
   )
 

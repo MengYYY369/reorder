@@ -5,6 +5,7 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 import { assertTenantVisible } from "../lib/tenant-ownership"
+import { isNativeSubscriptionReference } from "../../../../modules/subscription/utils/native-subscription"
 
 type CustomerModule = {
   retrieveCustomer: (
@@ -17,6 +18,7 @@ type SubscriptionModule = {
   listSubscriptions: (f: Record<string, unknown>) => Promise<
     Array<{
       id: string
+      reference: string
       customer_id: string
       status: string
       next_renewal_at: Date | string | null
@@ -89,6 +91,16 @@ export async function POST(
   const customer = await customerModule.retrieveCustomer(subscription.customer_id)
 
   assertTenantVisible(req, customer?.metadata, "subscription")
+
+  if (isNativeSubscriptionReference(subscription.reference)) {
+    // The read-side exclusions in the scheduler are not enough: this call
+    // rewrites payment_context, so one request could turn a mirror row into a
+    // row the scheduler considers chargeable.
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "subscription is a mirror of a PayPal-managed recurrence; manage it at the provider"
+    )
+  }
 
   const currentMode = subscription.payment_context?.payment_mode ?? "manual"
 

@@ -12,6 +12,7 @@ import {
   RenewalCycleStatus,
 } from "../../modules/renewal/types"
 import { renewalErrors } from "../../modules/renewal/utils/errors"
+import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import { resolveOrderPaymentCollection } from "../utils/resolve-order-payment-collection"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
@@ -38,6 +39,7 @@ export type CreateManualRenewalStepOutput = {
 
 type SubscriptionRecord = {
   id: string
+  reference: string
   status: SubscriptionStatus
   customer_id: string
   cart_id: string | null
@@ -115,6 +117,12 @@ export const createManualRenewalStep = createStep(
 
     if (!subscription) {
       throw renewalErrors.notFound("Subscription", input.subscription_id)
+    }
+
+    if (isNativeSubscriptionReference(subscription.reference)) {
+      throw renewalErrors.invalidData(
+        `Subscription '${subscription.id}' is a mirror of a PayPal-managed recurrence and cannot be renewed here`
+      )
     }
 
     if ((subscription.payment_context?.payment_mode ?? "auto") !== "manual") {

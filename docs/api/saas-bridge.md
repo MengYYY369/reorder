@@ -139,7 +139,11 @@ workflow by direct typed import; payment confirmation stays with the
 payment_mode }` (`"auto" | "manual"`); the SaaS treats any body deviation as
 an error. Non-boolean `enabled` or malformed ids → 400. Enabling auto on an
 overdue subscription (renewal date more than 24h in the past, or `past_due`)
-is rejected — the scheduler would charge immediately.
+is rejected — the scheduler would charge immediately. A subscription whose
+reference marks it as a mirror of a provider-owned recurrence (`NATIVE-…`) is
+rejected with 400 as well: this call rewrites `payment_context`, and one
+request would otherwise turn a row the schedulers ignore into a chargeable one.
+See *Native mirror rows* in `docs/architecture/subscriptions.md`.
 
 ### `POST /store/saas/carts`
 

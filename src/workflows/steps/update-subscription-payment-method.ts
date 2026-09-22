@@ -8,6 +8,7 @@ import {
   type SubscriptionPaymentMethodSummary,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import { resolveCustomerPaymentMethod } from "../../modules/subscription/utils/payment-methods"
 import {
   asSubscriptionUpdateInput,
@@ -60,6 +61,12 @@ export const updateSubscriptionPaymentMethodStep = createStep(
       throw subscriptionErrors.invalidData("payment_method_id is required")
     }
 
+    if (isNativeSubscriptionReference(subscription.reference)) {
+      throw subscriptionErrors.invalidData(
+        `Subscription '${input.id}' is a mirror of a PayPal-managed recurrence; its payment method belongs to the provider`
+      )
+    }
+
     const paymentContext = (subscription.payment_context ??
       null) as SubscriptionPaymentContext | null
     const providerId =
@@ -85,11 +92,19 @@ export const updateSubscriptionPaymentMethodStep = createStep(
 
     const updatedAt = new Date().toISOString()
 
+    const nextPaymentMode = paymentContext?.payment_mode ?? "auto"
+
     const updated = await subscriptionModuleService.updateSubscriptions({
       id: input.id,
       payment_context: {
         payment_provider_id: providerId,
-        payment_mode: paymentContext?.payment_mode ?? "auto",
+        payment_mode: nextPaymentMode,
+        // Carried forward: this step rebuilds the whole jsonb object, and
+        // dropping the discriminator here would un-label a row that was
+        // labelled by the consent flip.
+        mechanism:
+          paymentContext?.mechanism ??
+          (nextPaymentMode === "auto" ? "reorder_auto" : "manual"),
         source_payment_collection_id:
           paymentContext?.source_payment_collection_id ?? null,
         source_payment_session_id:

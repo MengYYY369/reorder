@@ -121,6 +121,44 @@ not be silently sold a subscription with no deliverable address. If neither the
 address nor the region yields a country, checkout fails with an explicit error
 instead of inventing one.
 
+### Native mirror rows
+
+A subscription the customer set up **at the payment provider** (PayPal) is not
+managed by this plugin, but it must still be visible locally: checkout has to
+know that the customer already pays for this product, and that question has to be
+answered by an indexed local read before money moves.
+
+Those rows are upserted by the `paypal-subscription-mirror` subscriber from
+`paypal.subscription.*` events, keyed on the unique reference
+`NATIVE-{paypal_subscription_id}`, and refreshed hourly by the
+`native-subscription-backfill` job (which also covers provider subscriptions
+that predate the plugin, and plan swaps until `paypal.subscription.revised`
+exists).
+
+A mirror row is **never** charged, extended or dunned by reorder:
+
+| path | exclusion |
+| --- | --- |
+| off-session scheduler | `excludeNonChargeableCycles` in `src/modules/renewal/utils/scheduler-query.ts` |
+| manual-renewal hygiene job | filtered out before lapsed manual rows are cancelled |
+| dunning retry | permanent failure with `native_subscription`, before any charge |
+| manual renewal creation | rejected |
+| forced renewal (Admin) | rejected |
+| `POST /store/saas/auto-renew` | rejected with 400, because it rewrites `payment_context` |
+| payment method update | rejected, for the same reason |
+
+Recognition is `reference LIKE 'NATIVE-%'`, defined once in
+`src/modules/subscription/utils/native-subscription.ts`. It is deliberately not
+`payment_context->>'mechanism'`: that column is JSON, rows predating the field
+have no such key, and in SQL `NULL != 'native'` is NULL rather than true, so an
+exclusion filter built on it silently drops every existing row. `mechanism` is
+still written to new rows as human-readable context.
+
+Mirror rows carry no renewal cycle, no cart link, and an inert shipping-address
+placeholder whose `N/A` country marks the row as a mirror. Their
+`next_renewal_at` is whatever PayPal last reported and may be null; nothing
+infers a date from the event type.
+
 ## 3. Read Path
 
 The read path is optimized for Admin list and detail views.

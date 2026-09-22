@@ -6,6 +6,7 @@ import {
 } from "../types"
 import { SUBSCRIPTION_MODULE } from "../../subscription"
 import type SubscriptionModuleService from "../../subscription/service"
+import { isNativeSubscriptionReference } from "../../subscription/utils/native-subscription"
 
 export type ListDueRenewalCyclesInput = {
   limit: number
@@ -76,10 +77,10 @@ export async function listDueRenewalCyclesForProcessing(
 
   const cycles = (data as DueRenewalCycleRecord[]).filter(isApprovalEligible)
 
-  const withoutManual = await excludeManualPaymentModeCycles(container, cycles)
+  const chargeable = await excludeNonChargeableCycles(container, cycles)
 
   return {
-    cycles: withoutManual,
+    cycles: chargeable,
     count,
     limit: take,
     offset: skip,
@@ -87,17 +88,23 @@ export async function listDueRenewalCyclesForProcessing(
 }
 
 /**
- * Manual-mode subscriptions are renewed through the interactive manual renewal
- * flow, not by the off-session scheduler. Their due cycles stay SCHEDULED (so
- * the manual flow can mark them succeeded on payment) and are excluded here to
- * keep the scheduler from charging or failing them.
+ * Two kinds of row must never reach the off-session scheduler:
+ *
+ * - manual-mode subscriptions, which are renewed through the interactive manual
+ *   renewal flow instead
+ * - native mirror rows, whose recurrence PayPal charges itself — picking one up
+ *   would charge the customer a second time for the same period
+ *
+ * Their due cycles stay SCHEDULED (so the manual flow can mark them succeeded on
+ * payment) and are excluded here to keep the scheduler from charging or failing
+ * them.
  *
  * Note: the filter runs after pagination, so a page consisting solely of
- * manual cycles returns an empty batch until the next offset pass. Volume for
+ * excluded cycles returns an empty batch until the next offset pass. Volume for
  * manual subscriptions is expected to be small; the manual renewal rework
  * (dedicated cycle lifecycle) supersedes this filter.
  */
-async function excludeManualPaymentModeCycles(
+async function excludeNonChargeableCycles(
   container: MedusaContainer,
   cycles: DueRenewalCycleRecord[]
 ): Promise<DueRenewalCycleRecord[]> {
@@ -117,10 +124,11 @@ async function excludeManualPaymentModeCycles(
     id: subscriptionIds,
   })
 
-  const manualSubscriptionIds = new Set(
+  const excludedSubscriptionIds = new Set(
     subscriptions
       .filter(
         (subscription) =>
+          isNativeSubscriptionReference(subscription.reference) ||
           (subscription.payment_context as
             | { payment_mode?: string }
             | null
@@ -129,10 +137,10 @@ async function excludeManualPaymentModeCycles(
       .map((subscription) => subscription.id)
   )
 
-  if (!manualSubscriptionIds.size) {
+  if (!excludedSubscriptionIds.size) {
     return cycles
   }
 
-  return cycles.filter((cycle) => !manualSubscriptionIds.has(cycle.subscription_id))
+  return cycles.filter((cycle) => !excludedSubscriptionIds.has(cycle.subscription_id))
 }
 
