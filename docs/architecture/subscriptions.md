@@ -159,6 +159,36 @@ placeholder whose `N/A` country marks the row as a mirror. Their
 `next_renewal_at` is whatever PayPal last reported and may be null; nothing
 infers a date from the event type.
 
+### Checkout completion gate
+
+The mutual-exclusion rule has to hold for a **plain one-time purchase** too, and
+such a purchase never enters this plugin's validation step (there is no
+subscription line item to validate). The only place it can be refused before money
+moves is the core `POST /store/carts/:id/complete` route, so the plugin registers
+a method-level middleware for it:
+
+```ts
+{ matcher: "/store/carts/:id/complete", methods: ["POST"], middlewares: [rejectConflictingPurchase] }
+```
+
+Why this form and not the alternatives:
+
+- **not a `route.ts` on the same path** — for a given `(matcher, method)` only one
+  registration survives, so a plugin route there would replace the core handler
+  outright.
+- **not a workflow hook** — the core route runs `completeCartWorkflow` without
+  hooks, and a hook can only be subscribed by the workflow that declares it.
+- method-scoped middlewares land in the static bucket that preserves insertion
+  order, which is registered ahead of the route for the same path, so this runs
+  first and can answer before anything is written.
+
+Behavior: an unauthenticated request, an unreadable cart, or a cart whose products
+match none of the customer's live `NATIVE-` rows is passed through untouched. A
+collision answers `400` with `{ message, type, data: { product_id,
+subscription_id } }` for the **whole cart** — the plugin never edits the cart to
+drop the offending line, because that would move totals, shipping and promo
+thresholds behind the customer's back.
+
 ## 3. Read Path
 
 The read path is optimized for Admin list and detail views.

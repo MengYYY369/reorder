@@ -12,6 +12,7 @@ import { storeCustomerSubscriptionsMiddlewares } from "./store/customers/me/subs
 import { storeCustomerRedemptionsMiddlewares } from "./store/customers/me/redemptions/middlewares"
 import { storeProductMiddlewares } from "./store/products/middlewares"
 import { saasBridgeMiddlewares } from "../modules/saas-bridge/auth"
+import { rejectConflictingPurchase } from "./store/carts/completion-gate"
 
 export default defineMiddlewares({
   routes: [
@@ -28,5 +29,14 @@ export default defineMiddlewares({
     ...storeCustomerRedemptionsMiddlewares,
     ...storeProductMiddlewares,
     ...saasBridgeMiddlewares,
+    {
+      // Guard on a core route, appended after the plugin's own groups so the
+      // existing 13 matcher sets stay untouched. Method-scoped middlewares are
+      // registered ahead of the route for the same path, so this runs before
+      // the core cart-completion handler and can refuse the order.
+      matcher: "/store/carts/:id/complete",
+      methods: ["POST"],
+      middlewares: [rejectConflictingPurchase],
+    },
   ],
 })
