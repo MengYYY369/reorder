@@ -48,6 +48,9 @@ export type PlanOfferAdminRules = {
   trial_days: number | null
   trial_requires_payment_method: boolean
   stacking_policy: "allowed" | "disallow_all" | "disallow_subscription_discounts"
+  consent_from_session: "customer_id" | null
+  row_stacking_policy: "extend" | "allow_multiple"
+  max_stacking_cycles: number | null
 }
 
 export type PlanOfferAdminEffectiveConfigSummary = {

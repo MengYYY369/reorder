@@ -8,10 +8,16 @@ import type {
 import {
   PlanOfferDiscountType,
   PlanOfferFrequencyInterval,
+  PlanOfferRowStackingPolicy,
   PlanOfferScope,
   PlanOfferStackingPolicy,
 } from "../../modules/plan-offer/types"
 import { planOfferErrors } from "../../modules/plan-offer/utils/errors"
+import {
+  normalizeConsentFromSession,
+  normalizeMaxStackingCycles,
+  normalizeRowStackingPolicy,
+} from "../../modules/plan-offer/utils/rules"
 
 export type UpsertPlanOfferInput = {
   name: string
@@ -39,6 +45,9 @@ export type UpsertPlanOfferInput = {
       | "allowed"
       | "disallow_all"
       | "disallow_subscription_discounts"
+    consent_from_session?: "customer_id" | null
+    row_stacking_policy?: PlanOfferRowStackingPolicy | "extend" | "allow_multiple"
+    max_stacking_cycles?: number | null
   } | null
   metadata?: Record<string, unknown> | null
 }
@@ -310,6 +319,11 @@ function normalizeRules(
     trial_days: rules.trial_days ?? null,
     trial_requires_payment_method: rules.trial_requires_payment_method ?? false,
     stacking_policy: normalizeStackingPolicy(rules.stacking_policy),
+    consent_from_session: normalizeConsentFromSession(
+      rules.consent_from_session
+    ),
+    row_stacking_policy: normalizeRowStackingPolicy(rules.row_stacking_policy),
+    max_stacking_cycles: normalizeMaxStackingCycles(rules.max_stacking_cycles),
   }
 }
 

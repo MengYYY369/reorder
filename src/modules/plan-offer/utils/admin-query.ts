@@ -21,6 +21,7 @@ import type {
   ProductSubscriptionConfig,
 } from "../types"
 import { planOfferErrors } from "./errors"
+import { resolvePlanOfferRules } from "./rules"
 import {
   getInactiveEffectiveConfig,
   mapRecordToEffectiveConfig,
@@ -166,7 +167,7 @@ function mapDiscountValue(
   }
 }
 
-function mapRules(rules: PlanOfferRules | null): PlanOfferAdminRules | null {
+export function mapRules(rules: PlanOfferRules | null): PlanOfferAdminRules | null {
   if (!rules) {
     return null
   }
@@ -177,6 +178,7 @@ function mapRules(rules: PlanOfferRules | null): PlanOfferAdminRules | null {
     trial_days: rules.trial_days,
     trial_requires_payment_method: rules.trial_requires_payment_method ?? false,
     stacking_policy: rules.stacking_policy,
+    ...resolvePlanOfferRules(rules),
   }
 }
 

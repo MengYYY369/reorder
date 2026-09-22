@@ -50,6 +50,9 @@ const editPlanOfferSchema = z
       "disallow_all",
       "disallow_subscription_discounts",
     ]),
+    consent_from_session: z.literal("customer_id").nullable(),
+    row_stacking_policy: z.enum(["extend", "allow_multiple"]),
+    max_stacking_cycles: z.number().int().nonnegative().nullable(),
     frequency_rows: z.array(frequencyRowSchema).min(1),
   })
   .superRefine((values, ctx) => {
@@ -130,6 +133,9 @@ export const EditPlanOfferDrawer = ({
       trial_days: null,
       trial_requires_payment_method: false,
       stacking_policy: "allowed",
+      consent_from_session: null,
+      row_stacking_policy: "extend",
+      max_stacking_cycles: null,
       frequency_rows: [],
     },
   })
@@ -173,6 +179,9 @@ export const EditPlanOfferDrawer = ({
       trial_requires_payment_method:
         detail.rules?.trial_requires_payment_method ?? false,
       stacking_policy: detail.rules?.stacking_policy ?? "allowed",
+      consent_from_session: detail.rules?.consent_from_session ?? null,
+      row_stacking_policy: detail.rules?.row_stacking_policy ?? "extend",
+      max_stacking_cycles: detail.rules?.max_stacking_cycles ?? null,
       frequency_rows: nextRows,
     })
     replace(nextRows)
@@ -247,6 +256,9 @@ export const EditPlanOfferDrawer = ({
           ? values.trial_requires_payment_method
           : false,
         stacking_policy: values.stacking_policy,
+        consent_from_session: values.consent_from_session,
+        row_stacking_policy: values.row_stacking_policy,
+        max_stacking_cycles: values.max_stacking_cycles,
       },
     })
   })
@@ -486,6 +498,108 @@ export const EditPlanOfferDrawer = ({
                         >
                           {t("planOffers.form.stackingPolicyHint")}
                         </Text>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="edit-consent-from-session">
+                          {t("planOffers.form.consentFromSession")}
+                        </Label>
+                        <Controller
+                          control={form.control}
+                          name="consent_from_session"
+                          render={({ field }) => (
+                            <Select
+                              value={field.value ?? "none"}
+                              onValueChange={(value) =>
+                                field.onChange(value === "none" ? null : value)
+                              }
+                            >
+                              <Select.Trigger id="edit-consent-from-session">
+                                <Select.Value />
+                              </Select.Trigger>
+                              <Select.Content>
+                                <Select.Item value="none">
+                                  {t("planOffers.form.consentNone")}
+                                </Select.Item>
+                                <Select.Item value="customer_id">
+                                  {t("planOffers.form.consentCustomerId")}
+                                </Select.Item>
+                              </Select.Content>
+                            </Select>
+                          )}
+                        />
+                        <Text
+                          size="small"
+                          leading="compact"
+                          className="text-ui-fg-subtle"
+                        >
+                          {t("planOffers.form.consentFromSessionHint")}
+                        </Text>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="edit-row-stacking-policy">
+                          {t("planOffers.form.rowStackingPolicy")}
+                        </Label>
+                        <Controller
+                          control={form.control}
+                          name="row_stacking_policy"
+                          render={({ field }) => (
+                            <Select
+                              value={field.value}
+                              onValueChange={field.onChange}
+                            >
+                              <Select.Trigger id="edit-row-stacking-policy">
+                                <Select.Value />
+                              </Select.Trigger>
+                              <Select.Content>
+                                <Select.Item value="extend">
+                                  {t("planOffers.form.rowStackingExtend")}
+                                </Select.Item>
+                                <Select.Item value="allow_multiple">
+                                  {t("planOffers.form.rowStackingAllowMultiple")}
+                                </Select.Item>
+                              </Select.Content>
+                            </Select>
+                          )}
+                        />
+                        <Text
+                          size="small"
+                          leading="compact"
+                          className="text-ui-fg-subtle"
+                        >
+                          {t("planOffers.form.rowStackingPolicyHint")}
+                        </Text>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="edit-max-stacking-cycles">
+                          {t("planOffers.form.maxStackingCycles")}
+                        </Label>
+                        <Input
+                          id="edit-max-stacking-cycles"
+                          type="number"
+                          min={0}
+                          step={1}
+                          {...form.register("max_stacking_cycles", {
+                            setValueAs: (value) =>
+                              value === "" || value === null || value === undefined
+                                ? null
+                                : Number(value),
+                          })}
+                        />
+                        <Text
+                          size="small"
+                          leading="compact"
+                          className="text-ui-fg-subtle"
+                        >
+                          {t("planOffers.form.maxStackingCyclesHint")}
+                        </Text>
+                        <FieldError
+                          message={
+                            form.formState.errors.max_stacking_cycles?.message
+                          }
+                        />
                       </div>
                     </div>
 

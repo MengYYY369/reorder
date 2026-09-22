@@ -42,6 +42,9 @@ const planOfferRulesSchema = z.object({
   trial_days: z.number().int().positive().nullable(),
   trial_requires_payment_method: z.boolean().optional(),
   stacking_policy: planOfferStackingPolicySchema,
+  consent_from_session: z.literal("customer_id").nullable().optional(),
+  row_stacking_policy: z.enum(["extend", "allow_multiple"]).optional(),
+  max_stacking_cycles: z.number().int().nonnegative().nullable().optional(),
 }).superRefine((rules, ctx) => {
   if (!rules.trial_enabled && rules.trial_days !== null) {
     ctx.addIssue({
