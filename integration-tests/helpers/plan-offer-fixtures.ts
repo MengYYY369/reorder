@@ -4,6 +4,7 @@ import type PlanOfferModuleService from "../../src/modules/plan-offer/service"
 import {
   PlanOfferDiscountType,
   PlanOfferFrequencyInterval,
+  PlanOfferRules,
   PlanOfferScope,
   PlanOfferStackingPolicy,
 } from "../../src/modules/plan-offer/types"
@@ -32,12 +33,7 @@ type PlanOfferSeedInput = {
     discount_type: PlanOfferDiscountType
     discount_value: number
   }> | null
-  rules?: {
-    minimum_cycles: number | null
-    trial_enabled: boolean
-    trial_days: number | null
-    stacking_policy: PlanOfferStackingPolicy
-  } | null
+  rules?: Partial<PlanOfferRules> | null
   metadata?: Record<string, unknown> | null
 }
 

@@ -9,6 +9,18 @@ import type {
 } from "@medusajs/framework/types"
 import { SUBSCRIPTION_MODULE } from "../modules/subscription"
 import type SubscriptionModuleService from "../modules/subscription/service"
+import { resolveProductSubscriptionConfig } from "../modules/plan-offer/utils/effective-config"
+import { resolvePlanOfferRules } from "../modules/plan-offer/utils/rules"
+import {
+  applyConsentFlip,
+  resolveConsentFlip,
+} from "../modules/subscription/utils/consent-flip"
+import { normalizeActivityLogEvent } from "../modules/activity-log/utils/normalize-log-event"
+import { persistSubscriptionLogEvent } from "../modules/activity-log/utils/persist-log-event"
+import {
+  ActivityLogActorType,
+  ActivityLogEventType,
+} from "../modules/activity-log/types"
 
 type PaymentCapturedPayload = {
   id: string
@@ -16,7 +28,11 @@ type PaymentCapturedPayload = {
 
 type SubscriptionRecord = {
   id: string
+  reference: string
   cart_id: string | null
+  product_id: string
+  variant_id: string
+  customer_id: string
   payment_context: Record<string, unknown> | null
 }
 
@@ -137,21 +153,52 @@ export default async function paymentCapturedSavePaymentMethodHandler({
         ? (subscription.payment_context.payment_method_reference as string)
         : null
 
-    if (current === token) {
+    const effectiveConfig = await resolveProductSubscriptionConfig(container, {
+      product_id: subscription.product_id,
+      variant_id: subscription.variant_id,
+    })
+    const decision = resolveConsentFlip({
+      consent_from_session: resolvePlanOfferRules(effectiveConfig.rules)
+        .consent_from_session,
+      payment_context: subscription.payment_context,
+      session_data: session?.data,
+    })
+
+    const paymentContext = applyConsentFlip(
+      {
+        ...(subscription.payment_context ?? {}),
+        payment_method_reference: token,
+      },
+      decision
+    )
+
+    if (
+      current === token &&
+      !decision.flip &&
+      subscription.payment_context?.payment_mode ===
+        paymentContext.payment_mode &&
+      subscription.payment_context?.mechanism === paymentContext.mechanism
+    ) {
       return
     }
 
     await subscriptionModule.updateSubscriptions({
       id: subscription.id,
-      payment_context: {
-        ...(subscription.payment_context ?? {}),
-        payment_method_reference: token,
-      },
+      payment_context: paymentContext,
     })
 
     logger.info(
-      `[reorder] saved PayPal payment method '${token}' on subscription '${subscription.id}' (cart '${cartId}'); mode stays manual until the auto-renew switch opts in`
+      `[reorder] saved payment method on subscription '${subscription.id}' (cart '${cartId}'); ` +
+        (decision.flip
+          ? `payment_mode flipped to auto via consent field '${decision.consent_field}'`
+          : `mode stays ${decision.payment_mode}${
+              decision.skip_reason ? ` (${decision.skip_reason})` : ""
+            } until the auto-renew switch opts in`)
     )
+
+    if (decision.flip) {
+      await recordConsentFlip(container, logger, subscription, decision)
+    }
   } catch (error) {
     logger.warn(
       `[reorder] failed to save payment method from capture '${paymentId}': ${
@@ -163,4 +210,52 @@ export default async function paymentCapturedSavePaymentMethodHandler({
 
 export const config: SubscriberConfig = {
   event: "payment.captured",
+}
+
+/**
+ * The flip has to be visible in the audit trail: "why is this subscription
+ * charging automatically" is the first question support gets, and the answer is
+ * a specific offer rule plus a specific session field, not a storefront call.
+ */
+async function recordConsentFlip(
+  container: SubscriberArgs<PaymentCapturedPayload>["container"],
+  logger: { warn: (msg: string) => void },
+  subscription: SubscriptionRecord,
+  decision: ReturnType<typeof resolveConsentFlip>
+) {
+  try {
+    await persistSubscriptionLogEvent(
+      container,
+      normalizeActivityLogEvent({
+        subscription_id: subscription.id,
+        customer_id: subscription.customer_id,
+        event_type: ActivityLogEventType.SUBSCRIPTION_PAYMENT_METHOD_UPDATED,
+        actor_type: ActivityLogActorType.SYSTEM,
+        display: {
+          subscription_reference: subscription.reference,
+        },
+        new_state: {
+          payment_mode: decision.payment_mode,
+          mechanism: decision.mechanism,
+        },
+        reason: `Auto-renew consent proven by checkout session field '${decision.consent_field}'`,
+        metadata: {
+          source: "payment_captured",
+          trigger_type: "consent_flip",
+          reason_code: decision.consent_field,
+        },
+        dedupe: {
+          scope: "subscription",
+          target_id: subscription.id,
+          qualifier: "consent_flip",
+        },
+      })
+    )
+  } catch (error) {
+    logger.warn(
+      `[reorder] consent flip recorded on subscription '${subscription.id}' but the audit event failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  }
 }

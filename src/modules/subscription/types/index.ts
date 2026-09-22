@@ -53,9 +53,28 @@ export type SubscriptionShippingAddress = {
  */
 export type SubscriptionPaymentMode = "manual" | "auto"
 
+/**
+ * Which system actually charges this subscription.
+ *
+ * - `"manual"`: nothing charges on its own; renewals are paid through the
+ *   interactive manual-renewal flow. Written when a row is created without any
+ *   stored consent.
+ * - `"reorder_auto"`: this plugin's off-session scheduler charges
+ *   `payment_method_reference`.
+ * - `"native"`: an external provider (PayPal) owns the recurrence and this row
+ *   is a mirror of it. Reorder must never charge it, extend it, or put it into
+ *   dunning.
+ *
+ * Optional because `payment_context` is a jsonb column: rows persisted before
+ * this discriminator exists simply have no `mechanism` key. Nothing may filter
+ * on it — see `src/modules/subscription/utils/native-subscription.ts`.
+ */
+export type SubscriptionPaymentMechanism = "manual" | "reorder_auto" | "native"
+
 export type SubscriptionPaymentContext = {
   payment_provider_id: string | null
   payment_mode: SubscriptionPaymentMode
+  mechanism?: SubscriptionPaymentMechanism
   source_payment_collection_id: string | null
   source_payment_session_id: string | null
   payment_method_reference: string | null

@@ -42,6 +42,18 @@ Provider specific requirement for PayPal: the storefront must create the checkou
   the reusable payment method identifier charged off-session at renewal time
 - `customer_payment_reference`
   the customer identifier in the payment service, derived from the account holder
+- `payment_mode`
+  `"auto"` (charged by this plugin's off-session scheduler) or `"manual"`
+  (renewals are paid through an interactive cashier link; the scheduler skips
+  the row). Defaults to `"auto"` for carts that declare no mode.
+- `mechanism`
+  which system owns the recurrence: `"manual"`, `"reorder_auto"`, or `"native"`
+  (a provider-owned subscription this row only mirrors). Written as context for
+  anyone reading the record. It is **never** a query predicate: the column is
+  JSON, rows predating it have no `mechanism` key, and `NULL != 'native'` is
+  NULL rather than true, so filtering on it silently drops every existing row.
+  Mirror rows are identified by their `NATIVE-` reference instead
+  (`src/modules/subscription/utils/native-subscription.ts`).
 - `source_payment_collection_id`
   the payment collection of the original checkout
 - `source_payment_session_id`
@@ -60,6 +72,27 @@ The reusable payment method reference is resolved in this order:
 2. the most recently saved payment method of the customer's account holder for that provider
 
 Checkout fails with a validation error when neither is available, because a subscription that cannot be renewed must not be created.
+
+#### Consent to automatic renewals
+
+A checkout that settles through a redirect provider is created in `"manual"`
+mode, and the vaulted payment method only becomes visible on `payment.captured`.
+The `payment-captured-save-payment-method` subscriber stores that token and, when
+the offer declares `rules.consent_from_session`, decides there and then whether
+the customer consented:
+
+- rule off (`null`, the default) → the mode stays manual; the customer opts in
+  later through `POST /store/saas/auto-renew`
+- rule on and the payment session carries a non-empty value in the named field
+  (`customer_id` today) → `payment_mode` becomes `"auto"` and `mechanism` becomes
+  `"reorder_auto"` **in the same update** as the token, so no observer can see a
+  row with a stored method but a mode that still says manual
+- the row mirrors a provider-owned recurrence (`mechanism: "native"`) → never
+  flipped; that would put two systems on one product
+
+Every flip writes a `subscription.payment_method_updated` activity-log event
+naming the session field the proof came from, deduped per subscription, so
+"why is this charging automatically" is answerable from the audit trail.
 
 ### 2. Renewal
 

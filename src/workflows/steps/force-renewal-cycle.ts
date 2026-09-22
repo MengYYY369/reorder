@@ -16,6 +16,7 @@ import {
   logRenewalEvent,
 } from "../../modules/renewal/utils/observability"
 import { normalizeActivityLogEvent } from "../../modules/activity-log/utils/normalize-log-event"
+import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import {
   ActivityLogActorType,
   ActivityLogEventType,
@@ -63,6 +64,15 @@ export const forceRenewalCycleStep = createStep(
     const subscription = (await subscriptionModule.retrieveSubscription(
       cycle.subscription_id
     )) as unknown as ForceRenewalSubscriptionDisplayRecord
+
+    if (isNativeSubscriptionReference(subscription.reference)) {
+      // Operator-triggered, so this is the one renewal entry with no
+      // payment_mode filter upstream to protect a mirror row.
+      throw renewalErrors.subscriptionNotEligible(
+        cycle.subscription_id,
+        "subscription is a mirror of a provider-owned recurrence; reorder must not charge it"
+      )
+    }
 
     logRenewalEvent(logger, "info", {
       event: "renewal.force",
