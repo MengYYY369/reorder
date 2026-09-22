@@ -9,6 +9,7 @@ import type {
   ILinkModuleService,
   IOrderModuleService,
   IPaymentModuleService,
+  IRegionModuleService,
   IWorkflowEngineService,
   MedusaContainer,
 } from "@medusajs/framework/types"
@@ -45,10 +46,12 @@ async function seedSubscriptionOrder(
   options: {
     withSubscriptionItem?: boolean
     withPlanOffer?: boolean
+    addressMode?: "complete" | "stub" | "none"
   } = {}
 ): Promise<SeedResult> {
   const withSubscriptionItem = options.withSubscriptionItem ?? true
   const withPlanOffer = options.withPlanOffer ?? true
+  const addressMode = options.addressMode ?? "complete"
 
   const cartModule = container.resolve<ICartModuleService>(Modules.CART)
   const orderModule = container.resolve<IOrderModuleService>(Modules.ORDER)
@@ -62,6 +65,35 @@ async function seedSubscriptionOrder(
     first_name: "Order",
     last_name: "Driven",
   })
+
+  // The placeholder snapshot falls back to the cart region for the country, so
+  // the addressless case needs a region that actually carries one.
+  let regionId: string | undefined
+
+  if (addressMode === "none") {
+    const regionModule = container.resolve<IRegionModuleService>(Modules.REGION)
+    const region = await regionModule.createRegions({
+      name: `from-order-region-${Date.now()}`,
+      currency_code: "usd",
+      countries: ["de"],
+    } as never)
+
+    regionId = region.id
+  }
+
+  const cartAddress =
+    addressMode === "complete"
+      ? {
+          first_name: "Order",
+          last_name: "Driven",
+          address_1: "1 Test Way",
+          city: "Testville",
+          postal_code: "00001",
+          country_code: "us",
+        }
+      : addressMode === "stub"
+        ? { country_code: "us" }
+        : undefined
 
   const { product, variant } = await createProductWithVariant(container)
 
@@ -91,15 +123,9 @@ async function seedSubscriptionOrder(
     currency_code: "usd",
     email: customer.email,
     customer_id: customer.id,
+    ...(regionId ? { region_id: regionId } : {}),
     metadata: {},
-    shipping_address: {
-      first_name: "Order",
-      last_name: "Driven",
-      address_1: "1 Test Way",
-      city: "Testville",
-      postal_code: "00001",
-      country_code: "us",
-    },
+    shipping_address: cartAddress,
     items: [
       {
         title: "Subscription item",
@@ -227,6 +253,55 @@ medusaIntegrationTestRunner({
         expect(persisted).toHaveLength(1)
       })
 
+      it("snapshots a country-only region stub as a digital-goods placeholder", async () => {
+        const container = getContainer()
+        const engine = container.resolve<IWorkflowEngineService>(
+          Modules.WORKFLOW_ENGINE
+        )
+
+        const seed = await seedSubscriptionOrder(container, {
+          addressMode: "stub",
+        })
+
+        const { result } = await engine.run("create-subscription-from-order", {
+          input: { order_id: seed.order_id },
+          throwOnError: true,
+        })
+
+        expect(result.subscription?.shipping_address).toMatchObject({
+          first_name: "Order",
+          last_name: "Driven",
+          address_1: "N/A",
+          city: "N/A",
+          postal_code: "00000",
+          country_code: "US",
+        })
+      })
+
+      it("snapshots a cart without any address from the region country", async () => {
+        const container = getContainer()
+        const engine = container.resolve<IWorkflowEngineService>(
+          Modules.WORKFLOW_ENGINE
+        )
+
+        const seed = await seedSubscriptionOrder(container, {
+          addressMode: "none",
+        })
+
+        const { result } = await engine.run("create-subscription-from-order", {
+          input: { order_id: seed.order_id },
+          throwOnError: true,
+        })
+
+        expect(result.subscription?.shipping_address).toMatchObject({
+          first_name: "Order",
+          last_name: "Driven",
+          address_1: "N/A",
+          postal_code: "00000",
+          country_code: "DE",
+        })
+      })
+
       it("is idempotent when re-run against the same order", async () => {
         const container = getContainer()
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
@@ -251,7 +326,6 @@ medusaIntegrationTestRunner({
 
         expect(persisted).toHaveLength(1)
       })
-
       it("rejects orders without a subscription line item", async () => {
         const container = getContainer()
         const engine = container.resolve<IWorkflowEngineService>(

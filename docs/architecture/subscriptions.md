@@ -101,6 +101,26 @@ Why snapshots are used:
 - future renewal logic needs operational data local to the subscription
 - current Admin read models use snapshot fallback when linked records are missing or unresolved
 
+### `shipping_address` snapshot rule
+
+`shipping_address` is NOT NULL, so every subscription carries one, but a
+digital-goods purchase has nothing to fulfil. Checkout therefore decides by
+**completeness** (`src/modules/subscription/utils/shipping-address.ts`):
+
+- the cart address holds `first_name`, `last_name`, `address_1`, `city`,
+  `postal_code` and `country_code` → strict snapshot, values trimmed and the
+  country upper-cased
+- otherwise (a region-seeded stub carrying only `country_code`, or no address at
+  all) → placeholder: names from the customer record falling back to
+  `Digital Delivery`, `address_1`/`city` `N/A`, `postal_code` `00000` (same
+  placeholder this plugin writes for SaaS carts in `src/api/store/saas/carts/route.ts`),
+  and the country from the stub or the cart region's first country
+
+The placeholder is deliberately recognizable: a fulfillment-enabled product must
+not be silently sold a subscription with no deliverable address. If neither the
+address nor the region yields a country, checkout fails with an explicit error
+instead of inventing one.
+
 ## 3. Read Path
 
 The read path is optimized for Admin list and detail views.

@@ -13,6 +13,7 @@ import {
   type SubscriptionShippingAddress,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { resolveShippingAddress } from "../../modules/subscription/utils/shipping-address"
 import {
   sortPaymentMethodSummaries,
   toPaymentMethodSummary,
@@ -69,6 +70,9 @@ type CartRecord = {
       data?: Record<string, unknown>
       metadata?: Record<string, unknown> | null
     }> | null
+  } | null
+  region?: {
+    countries?: Array<{ iso_2?: string | null }> | null
   } | null
   payment_collection?: {
     id: string
@@ -216,7 +220,11 @@ export const validateSubscriptionCartStep = createStep(
         sku: subscriptionItem.variant?.sku ?? null,
       },
       pricing_snapshot: pricingSnapshot,
-      shipping_address: buildShippingAddress(cart.shipping_address),
+      shipping_address: resolveShippingAddress({
+        shipping_address: cart.shipping_address,
+        customer: cart.customer,
+        region_country_code: cart.region?.countries?.[0]?.iso_2 ?? null,
+      }),
       payment_context: paymentContext,
       trial_days:
         effectiveConfig.rules?.trial_enabled && effectiveConfig.rules.trial_days
@@ -245,6 +253,7 @@ async function loadCart(
       "customer.last_name",
       "customer.account_holders.*",
       "shipping_address.*",
+      "region.countries.iso_2",
       "payment_collection.id",
       "payment_collection.payment_sessions.*",
       "items.*",
@@ -380,29 +389,6 @@ function readCustomerEmail(cart: CartRecord) {
   return email
 }
 
-function buildShippingAddress(
-  shippingAddress?: Record<string, unknown> | null
-): SubscriptionShippingAddress {
-  if (!shippingAddress) {
-    throw subscriptionErrors.invalidData(
-      "Subscription checkout requires a shipping address"
-    )
-  }
-
-  return {
-    first_name: readString(shippingAddress.first_name),
-    last_name: readString(shippingAddress.last_name),
-    company: readNullableString(shippingAddress.company),
-    address_1: readString(shippingAddress.address_1),
-    address_2: readNullableString(shippingAddress.address_2),
-    city: readString(shippingAddress.city),
-    postal_code: readString(shippingAddress.postal_code),
-    province: readNullableString(shippingAddress.province),
-    country_code: readString(shippingAddress.country_code).toUpperCase(),
-    phone: readNullableString(shippingAddress.phone),
-  }
-}
-
 async function buildPaymentContext(
   container: MedusaContainer,
   cart: CartRecord,
@@ -527,14 +513,6 @@ async function resolveSavedPaymentMethodReference(
   }
 
   return latestPaymentMethod.id
-}
-
-function readString(value: unknown) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw subscriptionErrors.invalidData("Subscription checkout requires complete address data")
-  }
-
-  return value.trim()
 }
 
 function readNullableString(value: unknown) {
