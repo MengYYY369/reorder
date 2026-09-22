@@ -15,6 +15,8 @@ import type {
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
 import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
+import { ACTIVITY_LOG_MODULE } from "../../src/modules/activity-log"
+import type ActivityLogModuleService from "../../src/modules/activity-log/service"
 import { listDueRenewalCyclesForProcessing } from "../../src/modules/renewal/utils/scheduler-query"
 import orderPlacedSubscriptionHandler from "../../src/subscribers/order-placed-create-subscription"
 import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
@@ -40,9 +42,13 @@ type SeedResult = {
 
 async function seedSubscriptionOrder(
   container: MedusaContainer,
-  options: { withSubscriptionItem?: boolean } = {}
+  options: {
+    withSubscriptionItem?: boolean
+    withPlanOffer?: boolean
+  } = {}
 ): Promise<SeedResult> {
   const withSubscriptionItem = options.withSubscriptionItem ?? true
+  const withPlanOffer = options.withPlanOffer ?? true
 
   const cartModule = container.resolve<ICartModuleService>(Modules.CART)
   const orderModule = container.resolve<IOrderModuleService>(Modules.ORDER)
@@ -59,16 +65,18 @@ async function seedSubscriptionOrder(
 
   const { product, variant } = await createProductWithVariant(container)
 
-  await createPlanOfferSeed(container, {
-    name: `from-order-plan-${Date.now()}`,
-    scope: PlanOfferScope.VARIANT,
-    product_id: product.id,
-    variant_id: variant.id,
-    is_enabled: true,
-    allowed_frequencies: [
-      { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
-    ],
-  })
+  if (withPlanOffer) {
+    await createPlanOfferSeed(container, {
+      name: `from-order-plan-${Date.now()}`,
+      scope: PlanOfferScope.VARIANT,
+      product_id: product.id,
+      variant_id: variant.id,
+      is_enabled: true,
+      allowed_frequencies: [
+        { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
+      ],
+    })
+  }
 
   const itemMetadata: Record<string, unknown> = withSubscriptionItem
     ? {
@@ -288,6 +296,92 @@ medusaIntegrationTestRunner({
         expect(persisted[0].payment_context).toMatchObject({
           payment_mode: "manual",
         })
+      })
+
+      it("records one creation_failed activity log row per failing step", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const activityLogModule = container.resolve<ActivityLogModuleService>(
+          ACTIVITY_LOG_MODULE
+        )
+
+        const seed = await seedSubscriptionOrder(container, {
+          withPlanOffer: false,
+        })
+
+        const runSubscriber = () =>
+          orderPlacedSubscriptionHandler({
+            event: {
+              name: "order.placed",
+              data: { id: seed.order_id },
+              broadcast: false,
+            },
+            container,
+            pluginOptions: {},
+          })
+
+        await runSubscriber()
+        await runSubscriber()
+
+        const logs = await activityLogModule.listSubscriptionLogs({
+          event_type: "subscription.creation_failed",
+        })
+
+        expect(logs).toHaveLength(1)
+        expect(logs[0]).toMatchObject({
+          subscription_id: null,
+          subscription_reference: null,
+          customer_id: seed.customer_id,
+          actor_type: "system",
+        })
+        expect(logs[0].reason).toContain(
+          "No active subscription offer is configured"
+        )
+        expect(logs[0].dedupe_key).toBe(
+          `subscription.creation_failed:order:${seed.order_id}:validate-subscription-cart`
+        )
+        expect(logs[0].metadata).toMatchObject({
+          order_id: seed.order_id,
+          source: "store",
+          trigger_type: "order_placed",
+          reason_code: "validate-subscription-cart",
+        })
+
+        const persisted = await subscriptionModule.listSubscriptions({
+          customer_id: seed.customer_id,
+        })
+
+        expect(persisted).toHaveLength(0)
+      })
+
+      it("does not log a creation failure for plain orders", async () => {
+        const container = getContainer()
+        const activityLogModule = container.resolve<ActivityLogModuleService>(
+          ACTIVITY_LOG_MODULE
+        )
+
+        const seed = await seedSubscriptionOrder(container, {
+          withSubscriptionItem: false,
+          withPlanOffer: false,
+        })
+
+        await orderPlacedSubscriptionHandler({
+          event: {
+            name: "order.placed",
+            data: { id: seed.order_id },
+            broadcast: false,
+          },
+          container,
+          pluginOptions: {},
+        })
+
+        const logs = await activityLogModule.listSubscriptionLogs({
+          event_type: "subscription.creation_failed",
+        })
+
+        expect(logs).toHaveLength(0)
       })
 
       it("excludes manual-mode subscriptions from the renewal scheduler", async () => {

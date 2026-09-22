@@ -7,12 +7,14 @@ import {
 const SubscriptionLog = model
   .define("subscription_log", {
     id: model.id().primaryKey(),
-    subscription_id: model.text(),
+    // Nullable so failures that happen before a subscription row exists
+    // (cart validation, order-driven creation) can still be recorded.
+    subscription_id: model.text().nullable(),
     customer_id: model.text().nullable(),
     event_type: model.enum(ActivityLogEventType),
     actor_type: model.enum(ActivityLogActorType),
     actor_id: model.text().nullable(),
-    subscription_reference: model.text(),
+    subscription_reference: model.text().nullable(),
     customer_name: model.text().nullable(),
     product_title: model.text().nullable(),
     variant_title: model.text().nullable(),

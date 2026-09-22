@@ -1,0 +1,47 @@
+import { Migration } from "@medusajs/framework/mikro-orm/migrations"
+
+const PREVIOUS_EVENT_TYPES =
+  "'subscription.created', 'subscription.paused', 'subscription.resumed', 'subscription.canceled', 'subscription.plan_change_scheduled', 'subscription.shipping_address_updated', 'subscription.next_delivery_skipped', 'subscription.payment_method_updated', 'subscription.expired', 'redemption.redeemed', 'renewal.cycle_created', 'renewal.approval_approved', 'renewal.approval_rejected', 'renewal.force_requested', 'renewal.succeeded', 'renewal.failed', 'dunning.started', 'dunning.retry_executed', 'dunning.recovered', 'dunning.unrecovered', 'dunning.retry_schedule_updated', 'cancellation.case_started', 'cancellation.offer_applied', 'cancellation.reason_updated', 'cancellation.finalized'"
+
+const NEXT_EVENT_TYPES = `${PREVIOUS_EVENT_TYPES}, 'subscription.creation_failed'`
+
+export class Migration20260922120000 extends Migration {
+  override async up(): Promise<void> {
+    this.addSql(
+      `alter table if exists "subscription_log" drop constraint if exists "subscription_log_event_type_check";`
+    )
+    this.addSql(
+      `alter table if exists "subscription_log" add constraint "subscription_log_event_type_check" check("event_type" in (${NEXT_EVENT_TYPES}));`
+    )
+
+    // Creation failures happen before any subscription row exists, so the two
+    // display columns must accept NULL for those records.
+    this.addSql(
+      `alter table if exists "subscription_log" alter column "subscription_id" drop not null;`
+    )
+    this.addSql(
+      `alter table if exists "subscription_log" alter column "subscription_reference" drop not null;`
+    )
+  }
+
+  override async down(): Promise<void> {
+    this.addSql(
+      `alter table if exists "subscription_log" drop constraint if exists "subscription_log_event_type_check";`
+    )
+    this.addSql(
+      `alter table if exists "subscription_log" add constraint "subscription_log_event_type_check" check("event_type" in (${PREVIOUS_EVENT_TYPES}));`
+    )
+
+    // Rollback cannot restore NOT NULL while pre-creation records exist, so the
+    // rows this migration introduced are removed first.
+    this.addSql(
+      `delete from "subscription_log" where "event_type" = 'subscription.creation_failed';`
+    )
+    this.addSql(
+      `alter table if exists "subscription_log" alter column "subscription_id" set not null;`
+    )
+    this.addSql(
+      `alter table if exists "subscription_log" alter column "subscription_reference" set not null;`
+    )
+  }
+}

@@ -7,8 +7,8 @@ import ActivityLogModuleService from "../modules/activity-log/service"
 import { ActivityLogActorType, ActivityLogEventType } from "../modules/activity-log/types"
 import {
   emitSubscriptionBusEvent,
-  persistSubscriptionLogEvent,
 } from "../workflows/steps/create-subscription-log-event"
+import { persistSubscriptionLogEvent } from "../modules/activity-log/utils/persist-log-event"
 import { normalizeActivityLogEvent } from "../modules/activity-log/utils/normalize-log-event"
 
 type ExpirySubscription = {

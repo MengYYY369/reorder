@@ -152,8 +152,10 @@ The logical event contract is:
 - unique event identifier
 
 `subscription_id`
-- required
+- nullable
 - the log is centered on one subscription lifecycle
+- the only records that omit it are pre-creation failures (`subscription.creation_failed`),
+  which are written when a subscription row never came into existence
 
 `customer_id`
 - optional but persisted when known
@@ -244,6 +246,15 @@ The `Activity Log` should use a stable, explicit taxonomy grouped by domain pref
 - `subscription.plan_change_scheduled`
 - `subscription.shipping_address_updated`
 - `subscription.next_delivery_skipped`
+- `subscription.payment_method_updated`
+- `subscription.expired`
+- `subscription.creation_failed`
+  - written by the `order.placed` subscriber when `create-subscription-from-order`
+    fails, so an order without a subscription row is visible to support instead of
+    only present in process logs
+  - carries the failing step name and the serialized workflow error chain in `reason`
+    (the metadata allowlist would drop an arbitrary error object), and dedupes on
+    `order_id` plus the failing step
 
 ### Renewal Events
 

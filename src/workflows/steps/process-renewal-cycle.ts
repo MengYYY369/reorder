@@ -43,8 +43,8 @@ import {
 } from "../utils/resolve-order-payment-collection"
 import {
   emitSubscriptionBusEvent,
-  persistSubscriptionLogEvent,
 } from "./create-subscription-log-event"
+import { persistSubscriptionLogEvent } from "../../modules/activity-log/utils/persist-log-event"
 import { toISOStringOrNull } from "../utils/date-output"
 
 type CartRecord = {

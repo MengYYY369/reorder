@@ -21,7 +21,7 @@ import {
   ActivityLogEventType,
 } from "../../modules/activity-log/types"
 import { processRenewalCycleWorkflow } from "../process-renewal-cycle"
-import { persistSubscriptionLogEvent } from "./create-subscription-log-event"
+import { persistSubscriptionLogEvent } from "../../modules/activity-log/utils/persist-log-event"
 
 export type ForceRenewalCycleStepInput = {
   renewal_cycle_id: string

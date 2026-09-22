@@ -125,6 +125,7 @@ const ActivityLogPage = () => {
             "subscription.shipping_address_updated",
             "subscription.next_delivery_skipped",
             "subscription.payment_method_updated",
+            "subscription.creation_failed",
           ],
         },
         {
@@ -963,6 +964,7 @@ function getEventColor(value: string) {
     case "renewal.failed":
     case "dunning.unrecovered":
     case "subscription.canceled":
+    case "subscription.creation_failed":
     case "cancellation.finalized":
       return "red"
     case "renewal.succeeded":

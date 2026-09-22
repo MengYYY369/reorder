@@ -15,6 +15,7 @@ export enum ActivityLogEventType {
   SUBSCRIPTION_NEXT_DELIVERY_SKIPPED = "subscription.next_delivery_skipped",
   SUBSCRIPTION_PAYMENT_METHOD_UPDATED = "subscription.payment_method_updated",
   SUBSCRIPTION_EXPIRED = "subscription.expired",
+  SUBSCRIPTION_CREATION_FAILED = "subscription.creation_failed",
   REDEMPTION_REDEEMED = "redemption.redeemed",
   RENEWAL_CYCLE_CREATED = "renewal.cycle_created",
   RENEWAL_APPROVAL_APPROVED = "renewal.approval_approved",

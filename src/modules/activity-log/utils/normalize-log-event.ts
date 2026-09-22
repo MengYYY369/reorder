@@ -14,14 +14,14 @@ type JsonLike =
     }
 
 export type ActivityLogDisplaySnapshot = {
-  subscription_reference: string
+  subscription_reference?: string | null
   customer_name?: string | null
   product_title?: string | null
   variant_title?: string | null
 }
 
 export type NormalizeLogEventInput = {
-  subscription_id: string
+  subscription_id?: string | null
   customer_id?: string | null
   event_type: ActivityLogEventType
   actor_type: ActivityLogActorType
@@ -40,12 +40,12 @@ export type NormalizeLogEventInput = {
 }
 
 export type NormalizedActivityLogEvent = {
-  subscription_id: string
+  subscription_id: string | null
   customer_id: string | null
   event_type: ActivityLogEventType
   actor_type: ActivityLogActorType
   actor_id: string | null
-  subscription_reference: string
+  subscription_reference: string | null
   customer_name: string | null
   product_title: string | null
   variant_title: string | null
@@ -105,12 +105,12 @@ export function normalizeActivityLogEvent(
   const metadata = buildMetadata(input.metadata ?? null, input.correlation_id ?? null)
 
   return {
-    subscription_id: input.subscription_id,
+    subscription_id: input.subscription_id ?? null,
     customer_id: input.customer_id ?? null,
     event_type: input.event_type,
     actor_type: input.actor_type,
     actor_id: input.actor_id ?? null,
-    subscription_reference: input.display.subscription_reference,
+    subscription_reference: input.display.subscription_reference ?? null,
     customer_name: input.display.customer_name ?? null,
     product_title: input.display.product_title ?? null,
     variant_title: input.display.variant_title ?? null,
