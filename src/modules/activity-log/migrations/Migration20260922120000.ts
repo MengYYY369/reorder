@@ -28,14 +28,15 @@ export class Migration20260922120000 extends Migration {
     this.addSql(
       `alter table if exists "subscription_log" drop constraint if exists "subscription_log_event_type_check";`
     )
-    this.addSql(
-      `alter table if exists "subscription_log" add constraint "subscription_log_event_type_check" check("event_type" in (${PREVIOUS_EVENT_TYPES}));`
-    )
 
-    // Rollback cannot restore NOT NULL while pre-creation records exist, so the
-    // rows this migration introduced are removed first.
+    // `add constraint ... check` validates the rows already in the table, so the
+    // rows this migration introduced are removed before the constraint is
+    // re-added and before NOT NULL is restored on the display columns.
     this.addSql(
       `delete from "subscription_log" where "event_type" = 'subscription.creation_failed';`
+    )
+    this.addSql(
+      `alter table if exists "subscription_log" add constraint "subscription_log_event_type_check" check("event_type" in (${PREVIOUS_EVENT_TYPES}));`
     )
     this.addSql(
       `alter table if exists "subscription_log" alter column "subscription_id" set not null;`
