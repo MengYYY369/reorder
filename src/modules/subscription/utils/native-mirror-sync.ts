@@ -10,7 +10,6 @@ import {
   type NativeMirrorFields,
   type ProviderSubscriptionRecord,
 } from "./native-mirror"
-import { nativeSubscriptionReferenceFilter } from "./native-subscription"
 
 type MirrorLogger = {
   info: (msg: string) => void
@@ -121,22 +120,6 @@ export async function upsertNativeMirrorSubscription(
   await subscriptionModule.updateSubscriptions(update as never)
 
   return "updated"
-}
-
-/**
- * Every mirror row currently in the table, by reference. Used by reconciliation
- * to spot provider subscriptions that have since been cancelled out-of-band.
- */
-export async function listExistingMirrorReferences(
-  container: MedusaContainer
-): Promise<ExistingMirrorRecord[]> {
-  const subscriptionModule = container.resolve<SubscriptionModuleService>(
-    SUBSCRIPTION_MODULE
-  )
-
-  return (await subscriptionModule.listSubscriptions(
-    nativeSubscriptionReferenceFilter() as never
-  )) as unknown as ExistingMirrorRecord[]
 }
 
 /**

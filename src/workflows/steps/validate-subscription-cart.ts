@@ -267,11 +267,16 @@ export const validateSubscriptionCartStep = createStep(
     // fresh manual row here would leave the scheduler with a mode it can act on
     // and nothing to charge; that case is handled at payment.captured instead,
     // where the vaulted method arrives.
+    //
+    // The row being extended is named for the native check: `resolveExtendTarget`
+    // already refuses provider mirrors, and this hands the flip the same evidence
+    // so the two can never disagree about which row is in question.
     const consentFlip =
       stacking.extend_subscription_id &&
       hasStoredPaymentMethod(stacking.existing_payment_context)
         ? consentFlipFrom(
             resolveConsentFlip({
+              reference: stacking.extend_subscription_reference,
               consent_from_session: offerRules.consent_from_session,
               payment_context: stacking.existing_payment_context,
               session_data: checkoutSession?.data,

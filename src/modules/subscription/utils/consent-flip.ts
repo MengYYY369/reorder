@@ -3,6 +3,7 @@ import type {
   SubscriptionPaymentMechanism,
   SubscriptionPaymentMode,
 } from "../types"
+import { isNativeSubscriptionReference } from "./native-subscription"
 
 /**
  * Consent-to-auto flip, decided as a pure function.
@@ -17,6 +18,18 @@ import type {
  * (`rules.consent_from_session`). Presence of the field in the payment session
  * is the proof: the storefront is expected to populate it only after the
  * customer ticked the auto-renew box.
+ *
+ * Whether a row is provider-owned is decided the same way everywhere else in
+ * the plugin: the `NATIVE-` reference prefix (see `native-subscription.ts`). The
+ * `mechanism` value inside `payment_context` is deliberately **not** consulted
+ * here — it is a jsonb field rows predating the discriminator never carried, and
+ * a guard built on it silently lets exactly those rows through, which on this
+ * path means reorder starts charging a recurrence PayPal is already charging.
+ *
+ * The same reasoning applies one level down: a reference which is not there at
+ * all (`undefined`) says nothing about ownership either, and treating it as
+ * "not native" would repeat the exact bug on a wider input. A row that cannot be
+ * read is left manual, with its own skip reason.
  */
 
 /** Session fields the plugin knows how to read consent from. */
@@ -25,6 +38,26 @@ const CONSENT_SESSION_FIELDS: Record<PlanOfferConsentSource, string> = {
 }
 
 export type ConsentFlipInput = {
+  /**
+   * The subscription row's unique reference, which is what decides native-ness.
+   *
+   * Required, and required of every caller: the failure this guard exists for is
+   * a flip onto a recurrence the provider is already charging, and an omitted
+   * field degrades to "not native" — the one answer that must never be reached
+   * by silence. A caller that has no row to name is still reachable and says so
+   * with an explicit `null`; forgetting the argument is a compile error.
+   *
+   * The compile error is the first line of defence and not the only one. This
+   * value arrives through container resolves which are untyped at the boundary
+   * (`payment-captured-save-payment-method.ts:126-128` still casts its read), so
+   * a projection which stops selecting the column yields `undefined` at runtime
+   * while every caller still names the property. `resolveConsentFlip` therefore
+   * refuses to answer the native question for a reference which is neither a
+   * string nor `null` — see `reference_undecidable` below. That makes the guard
+   * hold in a tree where nobody ran the typechecker, which is this repo: there is
+   * no CI workflow, so a build failure is only a defence once someone builds.
+   */
+  reference: string | null
   consent_from_session: PlanOfferConsentSource | null
   payment_context: Record<string, unknown> | null | undefined
   session_data: Record<string, unknown> | null | undefined
@@ -36,6 +69,12 @@ export type ConsentFlipDecision = {
   mechanism: SubscriptionPaymentMechanism | undefined
   /** Field the proof came from, for the activity-log record. */
   consent_field: string | null
+  /**
+   * Why the row was left alone; null when it was flipped. One of
+   * `consent_from_session_disabled`, `reference_undecidable` (the caller named no
+   * readable row, so ownership was never established), `native_reference`,
+   * `already_auto`, `consent_field_missing`. The subscriber logs it verbatim.
+   */
   skip_reason: string | null
 }
 
@@ -60,11 +99,22 @@ export function resolveConsentFlip(input: ConsentFlipInput): ConsentFlipDecision
     return unchanged("consent_from_session_disabled")
   }
 
-  if (mechanism === "native") {
+  if (!isDecidableReference(input.reference)) {
+    // Fail closed on the absence of evidence rather than reading it as evidence
+    // of the safe case. `isNativeSubscriptionReference` answers `false` for
+    // anything that is not a string, which is exactly the answer that lets the
+    // flip through, so an unreadable reference must be settled here instead of
+    // by the predicate's default. Deliberately before the native test and the
+    // mode test: this row is not being classified, it is being refused one, and
+    // the distinct reason is what a merchant and the activity log get to read.
+    return unchanged("reference_undecidable")
+  }
+
+  if (isNativeSubscriptionReference(input.reference)) {
     // A provider-owned recurrence is never switched to plugin charging, no
     // matter what the session carries: two systems billing the same product is
     // exactly the failure this sequence exists to prevent.
-    return unchanged("native_mechanism")
+    return unchanged("native_reference")
   }
 
   if (paymentMode === "auto") {
@@ -101,12 +151,35 @@ function hasSessionValue(
   return value !== null && value !== undefined
 }
 
+/**
+ * Whether a reference carries information at all.
+ *
+ * Every string is decidable, because the native test is a prefix test: a string
+ * either starts with `NATIVE-` or provably does not, `""` included. `null` is
+ * decidable too — it is a caller's explicit statement that no row is in question,
+ * and no row can be a mirror of one. Anything else (`undefined` from a projection
+ * which dropped the column, or a value that never was a reference) decides
+ * nothing, and the caller is told so instead of being handed the flip.
+ *
+ * Returns a plain boolean on purpose: as a type predicate it would narrow the
+ * rejected branch and report the surviving type as `never` wherever the caller
+ * still reads the row.
+ */
+function isDecidableReference(reference: ConsentFlipInput["reference"]): boolean {
+  return reference === null || typeof reference === "string"
+}
+
 function readPaymentMode(
   context: Record<string, unknown> | null
 ): SubscriptionPaymentMode {
   return context?.payment_mode === "auto" ? "auto" : "manual"
 }
 
+/**
+ * The mechanism annotation already on the row, read only to be carried forward
+ * unchanged by a non-flip decision. It must not decide anything here — see the
+ * file header; native-ness is the reference.
+ */
 function readMechanism(
   context: Record<string, unknown> | null
 ): SubscriptionPaymentMechanism | undefined {

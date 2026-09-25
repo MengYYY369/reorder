@@ -4,28 +4,21 @@
  * objects often enough that `String(error)` prints `[object Object]`. These
  * helpers flatten whatever arrives into a JSON-safe string that still names the
  * step that failed, so a support agent can locate the break in the chain.
+ *
+ * Whatever the chain carries is written into `reason` and rendered in the admin
+ * activity-log screen, so masking uses the same key set as the log normalizer.
  */
+
+import {
+  ACTIVITY_LOG_SENSITIVE_KEYS,
+  REDACTION_PLACEHOLDER,
+} from "./sensitive-keys"
 
 const MAX_DEPTH = 6
 const MAX_SIBLINGS = 12
 const MAX_MESSAGE_CHARS = 1500
 
 const NO_MESSAGE = "(no message)"
-
-const REDACTED_KEYS = new Set([
-  "payment_context",
-  "payment_method_reference",
-  "customer_payment_reference",
-  "source_payment_session_id",
-  "provider_payload",
-  "provider_response",
-  "stack",
-  "stacktrace",
-  "error_stack",
-  "api_key",
-  "secret",
-  "token",
-])
 
 const CHILD_KEYS = new Set(["errors", "error", "err", "cause"])
 const STEP_KEYS = new Set(["action", "step", "step_id", "handler_type"])
@@ -263,8 +256,8 @@ function stringifyFallback(value: unknown): string {
 
 function redactingReplacer(seen: Set<object>) {
   return (key: string, value: unknown): unknown => {
-    if (REDACTED_KEYS.has(key)) {
-      return "[redacted]"
+    if (ACTIVITY_LOG_SENSITIVE_KEYS.has(key)) {
+      return REDACTION_PLACEHOLDER
     }
 
     if (typeof value === "function" || typeof value === "symbol") {

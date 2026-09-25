@@ -3,6 +3,9 @@ import {
   ActivityLogChangedField,
   ActivityLogEventType,
 } from "../types"
+// State and metadata payloads are masked with the same key set the error-chain
+// serializer uses before writing `reason`, so one addition covers both writers.
+import { ACTIVITY_LOG_SENSITIVE_KEYS } from "./sensitive-keys"
 
 type Primitive = string | number | boolean | null
 
@@ -56,27 +59,6 @@ export type NormalizedActivityLogEvent = {
   changed_fields: ActivityLogChangedField[] | null
   metadata: Record<string, JsonLike> | null
 }
-
-const SENSITIVE_KEYS = new Set([
-  "address_1",
-  "address_2",
-  "postal_code",
-  "phone",
-  "payment_context",
-  "payment_reference",
-  "payment_method_reference",
-  "customer_payment_reference",
-  "source_payment_collection_id",
-  "source_payment_session_id",
-  "payment_session",
-  "payment_sessions",
-  "provider_payload",
-  "provider_response",
-  "raw_error",
-  "stack",
-  "stacktrace",
-  "error_stack",
-])
 
 const ALLOWED_METADATA_KEYS = new Set([
   "renewal_cycle_id",
@@ -191,7 +173,7 @@ function sanitizeStatePayload(
 }
 
 function sanitizeEntry(key: string, value: unknown): JsonLike | undefined {
-  if (SENSITIVE_KEYS.has(key)) {
+  if (ACTIVITY_LOG_SENSITIVE_KEYS.has(key)) {
     return undefined
   }
 

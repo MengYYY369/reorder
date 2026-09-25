@@ -1,5 +1,6 @@
 import { ACTIVITY_LOG_MODULE } from ".."
 import type ActivityLogModuleService from "../service"
+import type { ActivityLogChangedField } from "../types"
 import type { NormalizedActivityLogEvent } from "./normalize-log-event"
 
 export type SubscriptionLogRecord = NormalizedActivityLogEvent & {
@@ -12,6 +13,27 @@ export type SubscriptionLogRecord = NormalizedActivityLogEvent & {
 export type PersistSubscriptionLogResult = {
   record: SubscriptionLogRecord
   action: "created" | "existing"
+}
+
+/**
+ * What the module service accepts, read straight off the generated DTO so every
+ * column this writer sends keeps being checked against `subscription_log`.
+ */
+type CreateSubscriptionLogInput =
+  Parameters<ActivityLogModuleService["createSubscriptionLogs"]>[0][number]
+
+/**
+ * The same payload in domain types. `changed_fields` is the one column whose
+ * stored JSON does not match what the DML inference produces: `model.json()`
+ * types every JSON column as `Record<string, unknown>`, while this column holds
+ * an array of `{ field, before, after }` entries. The array form is kept here so
+ * callers pass `NormalizedActivityLogEvent` values unchecked.
+ */
+export type CreateSubscriptionLogData = Omit<
+  CreateSubscriptionLogInput,
+  "changed_fields"
+> & {
+  changed_fields?: ActivityLogChangedField[] | null
 }
 
 type LogEventContainer = {
@@ -30,9 +52,11 @@ export async function persistSubscriptionLogEvent(
   const activityLogModule =
     container.resolve(ACTIVITY_LOG_MODULE) as ActivityLogModuleService
 
+  const data: CreateSubscriptionLogData = logEvent
+
   try {
     const created = (await activityLogModule.createSubscriptionLogs(
-      logEvent as any
+      toCreateSubscriptionLogInput(data)
     )) as SubscriptionLogRecord
 
     return {
@@ -48,6 +72,23 @@ export async function persistSubscriptionLogEvent(
       record: logEvent as SubscriptionLogRecord,
       action: "existing",
     }
+  }
+}
+
+function toCreateSubscriptionLogInput(
+  data: CreateSubscriptionLogData
+): CreateSubscriptionLogInput {
+  const { changed_fields: changedFields, ...columns } = data
+
+  return {
+    ...columns,
+    // Narrow cast for the one column the DML inference mis-types: the JSON
+    // column holds an array, the generated DTO declares an object. Nothing else
+    // in the payload is cast, so every other column stays compile-checked.
+    changed_fields:
+      changedFields === undefined
+        ? undefined
+        : (changedFields as CreateSubscriptionLogInput["changed_fields"]),
   }
 }
 

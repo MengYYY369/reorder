@@ -83,6 +83,11 @@ export const createSubscriptionRecordStep = createStep(
     const subscriptionModule =
       container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
 
+    if (input.extend_subscription_id) {
+      return await extendSubscriptionRecord(subscriptionModule, input)
+    }
+
+    // A new row has nothing to merge with, so this write owns the whole object.
     const metadata = withStackedCycles(
       {
         source: input.metadata_source ?? "store_cart_subscribe",
@@ -90,14 +95,6 @@ export const createSubscriptionRecordStep = createStep(
       },
       input.total_cycles ?? input.frequency_value
     )
-
-    if (input.extend_subscription_id) {
-      return await extendSubscriptionRecord(
-        subscriptionModule,
-        input,
-        metadata
-      )
-    }
 
     const created = await subscriptionModule.createSubscriptions({
       reference: buildSubscriptionReference(input.order_display_id, input.order_id),
@@ -166,8 +163,7 @@ export const createSubscriptionRecordStep = createStep(
 
 async function extendSubscriptionRecord(
   subscriptionModule: SubscriptionModuleService,
-  input: CreateSubscriptionRecordStepInput,
-  metadata: Record<string, unknown>
+  input: CreateSubscriptionRecordStepInput
 ) {
   const existing = (await subscriptionModule.listSubscriptions({
     id: [input.extend_subscription_id!],
@@ -195,6 +191,22 @@ async function extendSubscriptionRecord(
         mechanism: input.consent_flip.mechanism,
       }
     : undefined
+
+  // The row being folded into already carries keys other steps own:
+  // `payment_method_update_context`
+  // (`update-subscription-payment-method.ts:118-123`) and `pause_context`
+  // (`pause-subscription.ts:96`), and both of those writers spread-merge them.
+  // This write merges the same way and claims only the provenance of the
+  // purchase it is recording: newest wins on `source` and `source_order_id`,
+  // everything else on the row survives.
+  const metadata = withStackedCycles(
+    {
+      ...(target.metadata ?? {}),
+      source: input.metadata_source ?? "store_cart_subscribe",
+      source_order_id: input.order_id,
+    },
+    input.total_cycles ?? input.frequency_value
+  )
 
   const purchasedAt = new Date(input.started_at)
   const nextRenewalAt = extendSubscriptionRenewalDate(

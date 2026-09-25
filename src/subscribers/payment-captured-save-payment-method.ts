@@ -158,6 +158,7 @@ export default async function paymentCapturedSavePaymentMethodHandler({
       variant_id: subscription.variant_id,
     })
     const decision = resolveConsentFlip({
+      reference: subscription.reference,
       consent_from_session: resolvePlanOfferRules(effectiveConfig.rules)
         .consent_from_session,
       payment_context: subscription.payment_context,
