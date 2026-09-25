@@ -37,7 +37,35 @@ type EnsureNextRenewalCycleStepOutput = {
  * just part of what the patch touched would leave the approval state or the
  * settings policy of a rolled-back row pointing at the failed run.
  */
-type UpcomingCycleReconcileSnapshot = { id: string } & UpcomingCycleReconcileRestore
+export type UpcomingCycleReconcileSnapshot = {
+  id: string
+} & UpcomingCycleReconcileRestore
+
+/**
+ * The one write a reconciliation rollback performs, narrowed to exactly what it
+ * calls, so the field set the `updated` / `adopted` compensation restores is
+ * assertable from a module spec without a workflow engine — the same extraction
+ * `deleted`'s ordering rule already got (`RenewalCycleRestoreWriter`). Inline in
+ * the compensation handler it was reachable only by driving a failing workflow,
+ * which no gate does.
+ */
+export type ReconcileRestoreWriter = {
+  updateRenewalCycles: (
+    data: UpcomingCycleReconcileSnapshot
+  ) => Promise<unknown>
+}
+
+/**
+ * Roll a reconciliation write back: one statement putting every column the patch
+ * touched — and, for an `adopt`, moved — back to the value the snapshot recorded
+ * before the write happened.
+ */
+export async function restoreReconciledCycle(
+  writer: ReconcileRestoreWriter,
+  previous: UpcomingCycleReconcileSnapshot
+): Promise<void> {
+  await writer.updateRenewalCycles(previous)
+}
 
 type EnsureNextRenewalCycleCompensation =
   | {
@@ -463,7 +491,7 @@ export const ensureNextRenewalCycleStep = createStep(
     }
 
     if (compensation.action === "adopted") {
-      await renewalModule.updateRenewalCycles(compensation.previous)
+      await restoreReconciledCycle(renewalModule, compensation.previous)
       return
     }
 
@@ -472,6 +500,6 @@ export const ensureNextRenewalCycleStep = createStep(
       return
     }
 
-    await renewalModule.updateRenewalCycles(compensation.previous)
+    await restoreReconciledCycle(renewalModule, compensation.previous)
   }
 )
