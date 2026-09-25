@@ -166,7 +166,11 @@ export const resolveRedemptionCodeStep = createStep(
     })
     const customer = customers?.[0]
     if (!customer) {
-      throw redemptionErrors.noMatchingSubscription(batch.variant_id)
+      // The customer row is gone — the caller's subject vanished, which is not
+      // a statement about subscriptions. A route that already checked the row
+      // reaches here when it is deleted in between, and the customer-scoped
+      // route reaches it on any request whose session outlived the row.
+      throw redemptionErrors.customerNotFound(input.customer_id)
     }
 
     const subscriptionModuleService =

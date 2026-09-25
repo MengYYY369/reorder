@@ -685,6 +685,55 @@ medusaIntegrationTestRunner({
         expect(body).not.toContain("canary-value-")
         expect(body).not.toContain("23505")
       })
+
+      it("answers a session whose customer row is gone as a vanished customer, at 404", async () => {
+        const container = getContainer()
+        const { variant } = await createProductWithVariant(container)
+        const batch = await createRedemptionBatch(container, {
+          name: "RDM-STORE-BATCH-VANISHED-CUSTOMER",
+          variant_id: variant.id,
+          free_cycles: 1,
+          generated_code_count: 1,
+        })
+
+        // A real request, and the shape production actually leaves behind: the
+        // session outlives the row. `requireStoreCustomer` reads only
+        // `auth_context.actor_id`, so nothing checks the customer exists before
+        // the workflow does, and the step's own customer read is the first to
+        // find it gone. This route preserves a declared refusal's status, so the
+        // `not_found` arrives as a 404 — where `/store/saas/redeem` answers the
+        // same refusal with its promised 400.
+        const vanishedCustomerId = `cus_vanished_${Date.now()}`
+        const headers = await createStoreHeadersWithPublishableKey(container, {
+          id: vanishedCustomerId,
+        })
+
+        const response = await api.post(
+          "/store/customers/me/redemptions",
+          { code: batch.codes[0].code },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(404)
+        expect(String(response.data?.message)).toEqual(
+          `Redemption customer ${vanishedCustomerId} not found`
+        )
+
+        // No variant is named, because no subscription question was ever asked.
+        const body = JSON.stringify(response.data ?? {})
+        expect(body).not.toContain(variant.id)
+        expect(body).not.toContain("variant")
+        expect(body).not.toContain("active subscription")
+
+        // The code was not consumed by the refusal.
+        const redemptionModule = container.resolve<RedemptionModuleService>(
+          REDEMPTION_MODULE
+        )
+        const [code] = await redemptionModule.listRedemptionCodes({
+          id: [batch.codes[0].id],
+        })
+        expect(code.redemption_count).toEqual(0)
+      })
     })
   },
 })

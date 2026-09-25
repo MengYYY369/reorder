@@ -217,6 +217,16 @@ was covered by any assertion in the http suite.
 - **activity log: the log write is typed.** `persist-log-event.ts` carried the only
   real `as any` in the sequence; the helper now takes the module's own input type, so
   a renamed field fails the build instead of arriving untyped at the database.
+- **redemption: a vanished customer is reported as a vanished customer.**
+  `resolve-redemption-code` threw `noMatchingSubscription` from its own customer read,
+  so a session that outlived the row was refused with the wrong reason and with a
+  variant id interpolated into the message. `redemptionErrors.customerNotFound`
+  (`not_found`) owns that branch now and `REDEEM_CUSTOMER_REFUSALS` declares it, so
+  `POST /store/customers/me/redemptions` answers **404** `Redemption customer <id> not
+  found` — the caller's own id, no variant id — and `POST /store/saas/redeem` answers
+  the same refusal with its promised **400**. A `customer_id` that never existed is
+  still stopped by that handler's own `retrieveCustomer` before the workflow runs, so
+  on the bridge the new wording appears only when the row goes between the two reads.
 
 ### Chores
 

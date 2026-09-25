@@ -52,7 +52,9 @@ const RESOLVE_CODE_STEP = resolveRedemptionCodeStep.__step__
  * What is deliberately NOT in the list, and what happens instead:
  * - `Redemption batch … not found` (the batch's variant row is gone) and the
  *   `not_found` a row loader throws: a broken configuration, not a refusal of
- *   the caller's request — 404 with the route's own text.
+ *   the caller's request — 404 with the route's own text. The customer row is
+ *   the exception, and it is listed: it is the caller's own subject, and the id
+ *   its message interpolates is the one the caller sent.
  * - a refusal whose text is not listed here at all: keeps its status, loses
  *   its wording.
  * - anything that is not a `MedusaError` at all (driver, connection, and a
@@ -63,6 +65,11 @@ export const REDEEM_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
     step: RESOLVE_CODE_STEP,
     type: MedusaError.Types.NOT_FOUND,
     copy: /^Redemption code "[^"]*" is invalid$/,
+  },
+  {
+    step: RESOLVE_CODE_STEP,
+    type: MedusaError.Types.NOT_FOUND,
+    copy: /^Redemption customer \S+ not found$/,
   },
   {
     step: RESOLVE_CODE_STEP,

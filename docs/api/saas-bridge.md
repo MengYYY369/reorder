@@ -252,15 +252,20 @@ Customer-visible refusals (400, own wording), all raised by
 `resolve-redemption-code`: unknown or malformed code, code disabled, batch
 disabled, outside the validity window, code exhausted, already redeemed by this
 customer, a trial code for a returning customer, an ambiguous target
-(`pass subscription_id`), and "no active subscription of this variant to
-extend". A code the store does not know is thrown as a `not_found` by the
-workflow and is still answered **400** here, which is what the byte-compatible
-bridge contract does — the customer-scoped `/store/customers/me/redemptions`
-route lets the domain error through untouched and answers **404** for the same
-case. Anything else — a batch whose variant row is gone, a driver fault, a core
-error surfacing under the same step name — keeps the status of the
-`MedusaError` it was thrown as (404 / 409 / 422) or answers 500, and always with
-the route's own text. See *Failure disclosure*.
+(`pass subscription_id`), "no active subscription of this variant to
+extend", and a customer row the step cannot read (`Redemption customer <id>
+not found` — the caller's own id, never a variant id). That last one is the
+race this handler's existence check leaves open: it has already seen the row,
+and the row is gone by the time the step queries it. A `customer_id` with no
+row at all is answered here first, by this handler's own `retrieveCustomer`, at
+**404** with core's wording. A code the store does not know is thrown as a
+`not_found` by the workflow and is still answered **400** here, which is what the
+byte-compatible bridge contract does — the customer-scoped
+`/store/customers/me/redemptions` route lets the domain error through untouched
+and answers **404** for the same case. Anything else — a batch whose variant row
+is gone, a driver fault, a core error surfacing under the same step name — keeps
+the status of the `MedusaError` it was thrown as (404 / 409 / 422) or answers
+500, and always with the route's own text. See *Failure disclosure*.
 
 ## Event forwarding
 

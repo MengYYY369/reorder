@@ -95,6 +95,19 @@ async function createTenantCustomer(
   })
 }
 
+/**
+ * The customer read `POST /store/saas/redeem` performs in its own handler,
+ * typed the way the route types it — a case below stands this one read up
+ * against the step's, so that a row can be visible to the caller and gone by
+ * the time `resolve-redemption-code` queries it.
+ */
+type BridgeCustomerRead = {
+  retrieveCustomer: (
+    id: string,
+    config?: Record<string, unknown>
+  ) => Promise<{ id: string; metadata?: Record<string, unknown> | null }>
+}
+
 type SeededOrder = {
   order_id: string
   cart_id: string
@@ -1302,6 +1315,51 @@ medusaIntegrationTestRunner({
         )
 
         expect(response.status).toEqual(404)
+      })
+
+      it("answers a customer that vanished after this handler saw it with its own refusal, and no variant id", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const { code, variant_id } = await seedRedeemableCode(container)
+        const vanishedCustomerId = `cus_vanished_${Date.now()}`
+
+        // The race the renew route documents at its own vanished-row case, and
+        // the only way this route's customer read and the step's can disagree:
+        // the handler has already seen the row, so by the time
+        // `resolve-redemption-code` queries the customer it is gone. An id that
+        // never existed is answered by this handler's own `retrieveCustomer`
+        // (404, core's wording) before the workflow runs, so it cannot reach
+        // the step either.
+        const customerModule = container.resolve<BridgeCustomerRead>(
+          Modules.CUSTOMER
+        )
+        const readSpy = jest
+          .spyOn(customerModule, "retrieveCustomer")
+          .mockImplementation(async () => ({
+            id: vanishedCustomerId,
+            metadata: { tenant_id: "default" },
+          }))
+
+        const response = await api.post(
+          "/store/saas/redeem",
+          { code, customer_id: vanishedCustomerId },
+          { headers, validateStatus: () => true }
+        )
+
+        readSpy.mockRestore()
+
+        // A declared refusal answers 400 here — the status the bridge promise
+        // gives every refusal — but it now states the true reason, and the
+        // variant id the previous wording interpolated is out of the body.
+        expect(response.status).toEqual(400)
+        expect(String(response.data?.message)).toEqual(
+          `Redemption customer ${vanishedCustomerId} not found`
+        )
+
+        const body = JSON.stringify(response.data ?? {})
+        expect(body).not.toContain(variant_id)
+        expect(body).not.toContain("variant")
+        expect(body).not.toContain("active subscription")
       })
 
       it("answers each declared refusal with 400 and that refusal's own copy", async () => {

@@ -54,7 +54,7 @@ Response:
 
 `kind` is `create` or `extend` (with `target_subscription_id` set for `extend`).
 
-Error responses (400/404): invalid code, disabled batch/code, outside validity window, code exhausted, already redeemed by this customer, no matching subscription for an explicitly passed `subscription_id`, ambiguous target (several matches without `subscription_id`).
+Error responses (400/404): invalid code, disabled batch/code, outside validity window, code exhausted, already redeemed by this customer, no matching subscription for an explicitly passed `subscription_id`, ambiguous target (several matches without `subscription_id`), and a customer row that is gone (`Redemption customer <id> not found`, 404).
 
 ### `POST /store/customers/me/redemptions`
 
@@ -87,7 +87,10 @@ while the step name and the serialized error go to the server log: a driver faul
 is a 500 and never a 422 quoting `table` and `detail`. What differs from the bridge
 route is only the status a *declared* refusal carries — this route answers it with
 the type the step threw it as, so an unknown code stays **404** here where the
-bridge has always flattened refusals to **400**. The shared mechanism is
+bridge has always flattened refusals to **400**. A session that outlived its
+customer row is one of those declared refusals: **404** `Redemption customer <id>
+not found`, naming the id the caller authenticated as and no variant.
+The shared mechanism is
 `src/workflows/utils/store-step-failure.ts` and its `preserveQuotedStatus` option.
 
 ### `GET /store/customers/me/redemptions`

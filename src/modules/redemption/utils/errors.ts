@@ -34,6 +34,8 @@ export const redemptionErrors = {
     ),
   invalidCode: (code: string) =>
     new RedemptionError("not_found", `Redemption code "${code}" is invalid`),
+  customerNotFound: (id: string) =>
+    new RedemptionError("not_found", `Redemption customer ${id} not found`),
   noMatchingSubscription: (variantId: string) =>
     new RedemptionError(
       "invalid_data",
