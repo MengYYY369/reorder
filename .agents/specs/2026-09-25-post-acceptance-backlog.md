@@ -299,18 +299,52 @@ came up on a partially migrated schema" is reachable and needs an explicit failu
 branch. The dump must therefore be **validated and its restore rehearsed before** the
 upgrade, not after — v2 checked it only in step 6.5.
 
+### Measured on 2026-09-25, which rewrites what "deploy" means
+
+- The running production image has **no `@mengyyy369/*` package at all**
+  (`ls /app/node_modules/@mengyyy369` → absent), and the backend workspace's
+  manifests declare no such dependency. So 1.6.0 onto `medusa-prod` is a **first
+  install, not an upgrade**: the plugin's tables are created from scratch, which
+  means the acceptance round's normalize step, the drift path and the index's
+  dedup behaviour will **not** be exercised there at all — they can only be
+  exercised by the §B harness. Anything that claims production "verified the
+  invariant" after a first install is claiming the wrong thing.
+- The backend is a **pnpm workspace**, not an npm app:
+  `/home/ubuntu/medusa-saas/src` holds `pnpm-workspace.yaml`, `pnpm-lock.yaml`,
+  `turbo.json` and `apps/`. Registry credentials therefore belong to pnpm's
+  config at the place `pnpm install` actually runs — and that is a build-time
+  concern, not a runtime one.
+- **No Dockerfile was found anywhere under `/home/ubuntu/medusa-saas`** (maxdepth 2),
+  yet `medusa-saas-backend:0.4.14` exists locally with `labels=null` and a
+  2026-09-21 build date. Open question Phase 6.1 must answer before anything
+  installs: **where is that image built?** If it is built off-box, the registry
+  credential belongs in that build environment and must never be copied onto the
+  production host.
+- Network path is fine: `npm.pkg.github.com` answers from the box (a clean 401
+  with no token supplied). `ubuntu/.npmrc` today holds a mirror `registry=` line
+  and **no token**, and `/root/.npmrc` exists separately. The local
+  developer-machine `.npmrc` now contains a `write:packages` credential, which is
+  publish-capable: copying it to a production host would trade a private-repository
+  read need for a write-capable secret sitting on a box that does not consume the
+  package. What this host needs, when the dependency is actually added, is a
+  separate token scoped to `read:packages` only.
+
 Order:
 
-1. Read the host's actual wiring: which `@mengyyy369/reorder` it resolves, from
-   GitHub Packages or a `yalc` link (the `local-dev` skill uses yalc), and whether
-   `medusa migrate` runs at container start or by hand. Record in the runbook.
+1. Answer the open question above — where `medusa-saas-backend` is built and where
+   `pnpm install` runs — then decide where a **read-only** registry credential
+   belongs. Record in the runbook.
 2. `pg_dump` the prod database, **restore it into a scratch database on the same box
    and boot the new version against that**, then throw the scratch away. The runbook
    is `docs/releases/1.6.0-host-upgrade.md` (tracked) — an untracked file is an
    unrecorded residual, `lessons.md:99`.
 3. Scale dtc down; confirm exactly one Medusa store in `docker ps`.
-4. Install 1.6.0, migrate, and assert the two invariants only a live store shows: no
-   subscription holds more than one live `SCHEDULED` cycle
+4. Add the dependency through the pnpm workspace and migrate. Because this is a
+   first install, the expected `mikro_orm_migrations` result is *every* plugin
+   migration applied fresh, and the drift assertions below are vacuous unless rows
+   are seeded deliberately — say which of them are asserted against seeded data and
+   which against the empty schema. Then assert the two invariants a live store
+   shows: no subscription holds more than one live `SCHEDULED` cycle
    (`group by subscription_id having count(*) > 1` returns nothing), and
    `renewal_cycle_one_scheduled_per_subscription` exists.
 5. Smoke the changed contracts, failures included: unknown redemption code stays 404
@@ -467,3 +501,73 @@ and a rollback that was rehearsed on a scratch database before the upgrade ran.
   4, 5; the runbook given a tracked path; the commit policy carried forward from the
   previous round's Q7; probes named per phase; v2's "none left" claim corrected; and
   `errors[0]` turned from an open question into a decision with a pin.
+
+## Appendix: constraints for the session that executes this plan
+
+Written by the session that produced the plan, because every line below was paid
+for in a wrong commit, a voided test run, or a rejected review.
+
+**Read first, in this order**: this file; `.agents/AGENTS.md`; `.agents/lessons.md`
+(each bullet is a rule someone was bitten by, and several describe the exact code
+this plan changes); `.agents/specs/2026-09-24-1.6.0-acceptance-fixes.md` for the
+rulings this one inherits. Do not re-derive any of it from the code.
+
+**Repo and release state as of 2026-09-25**: `main` is at `1d38d84`, equal to
+`origin/main`. Tag `v1.6.0` points at the same commit; the GitHub release exists.
+`@mengyyy369/reorder@1.6.0` is published to GitHub Packages
+(`npm view … → 1.6.0`, tarball shasum `f79d309a…`) with the 400-file surface this
+plan's Phase 1 shrinks. The e2e workstream is committed (`35499e8`), so the
+previous ruling to leave that work alone in the tree no longer applies to it.
+
+**Environment, measured on this machine**: `node_modules` exists (install with
+`corepack yarn install`; a plain `npm`/`yarn` without corepack picks the wrong
+toolchain). No Postgres container is running — `reorder-acceptance-pg` was deleted
+at cleanup, so Phase 0.1 recreates one before any gate means anything. Gates need
+`DB_HOST`/`DB_PORT`/`DB_USERNAME`/`DB_PASSWORD` exported (not `DATABASE_URL`; see
+`AGENTS.md`), and `TEST_TYPE` is set by the yarn scripts, not by hand.
+
+**Traps that produced bad evidence in the last round**
+
+- Never run `yarn build` while a gate or a reviewer holds the tree:
+  `medusa plugin:build` deletes and rewrites `.medusa/server`, which a running http
+  suite loads its plugin from. It produced four `FAIL`s from nothing but a rebuild.
+- The unattended http run loses ~2 suites to OS-killed workers (`SIGTERM`), a
+  different pair each time. "Green" is the union of runs plus an isolated
+  `--runInBand --max-old-space-size=4096` re-run of whatever was killed, and totals
+  must be reconciled by name (baseline: build 0; modules 25 suites / 270 tests;
+  http 35 suites / 228 tests).
+- Capture `$?` immediately after a command. A chained command's exit code is not
+  the gate's exit code; that is how a red build once got reported green.
+- Check the mtime of any log you are about to cite. `.scratch/*.log` files from the
+  original 12-ticket round nearly became this round's evidence.
+- A `cp` restore, or a full-file write, is a claim on the whole file. No second
+  agent may touch a file while a mutation probe is live in it.
+- Framework APIs named in a plan or a comment must carry the `node_modules` file and
+  line that proves they exist. This plan's first version cited
+  `Migrator.runMigrationClasses()`, which does not exist.
+- `medusa plugin:build` typechecks `src/` and `src/modules/*/__tests__/**` but not
+  `integration-tests/**`; `jest.config.js:26-33` decides which specs execute. A
+  decision unit placed under `src/api/**` or `src/workflows/__tests__/` can fail
+  nothing.
+- Engine-reported failures are serialized plain objects, never `Error` instances,
+  and a workflow run that leaves `throwOnError` at its default rethrows that object
+  verbatim. Any route that runs a workflow must classify.
+- Single-entity jsonb writes merge; batch/upsert paths overwrite; writing `null`
+  clears the column. Never describe an incomplete jsonb payload as data loss without
+  naming the DAL method that ran.
+
+**Working protocol**: one phase at a time; each phase ends with the three gates from
+a clean build **plus** its named mutation probe actually reddening; documentation
+owed by that phase changes in the same commit; every phase is its own commit with
+explicit paths (never `git add -A`) and its Conventional Commits message shown to
+the user **before** committing or pushing. `.scratch/source-repo-fixes/` is the
+ticket archive and is gitignored — never conclude from `git` that a ticket's status
+was updated.
+
+**Periphery**: `git remote` has an `upstream` pointing at `reorder-js/reorder`
+(the official project). `gh` resolves to it by default, so every `gh` call needs
+`--repo MengYYY369/reorder`; never push a tag or release there. The publish token in
+this machine's `~/.npmrc` is `write:packages`-capable — do not copy it to the
+production host; when the dependency is actually added, that environment needs a
+separate `read:packages` token, and Phase 6.1 must first answer where the backend
+image is built.
