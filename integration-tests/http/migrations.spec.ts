@@ -110,6 +110,17 @@ const NORMALIZED_NOTE =
   "normalized: duplicate upcoming cycle removed by the 1.6.0 uniqueness migration"
 
 /**
+ * The 1.6.x activity-log migration whose `down()` is the acceptance-round defect,
+ * and the event type it introduces. Named once here for the same reason as the two
+ * renewal constants above: the rollback case addresses the migration by name (never
+ * by its row number in `mikro_orm_migrations`, which re-runs of this file shift),
+ * and asserts on the event type from both sides — its rows leave with the rollback,
+ * its value leaves the check constraint and comes back with the restore.
+ */
+const CREATION_FAILURE_MIGRATION = "Migration20260922120000"
+const CREATION_FAILED_EVENT = "subscription.creation_failed"
+
+/**
  * The measured migration inventory: 22 migrations across the 9 module
  * directories that ship them (`saas-bridge` ships none). A floor like "more than
  * 20" would still pass if three directories were skipped, so the cases compare
@@ -604,6 +615,128 @@ async function liveScheduled(
 }
 
 /**
+ * One `subscription_log` row. The two display columns are listed only when the
+ * caller supplies them, because `Migration20260922120000.up()` is what makes them
+ * nullable: a creation-failure row seeded without them is exactly the shape the
+ * rollback has to delete before it can put `not null` back.
+ *
+ * `dedupe_key` is NOT optional the way the plan's four-column insert assumed: the
+ * table declares it `text not null` with no default and puts a partial unique index
+ * over it (`Migration20260401204521.ts:7-8`), so an insert that does not name it
+ * carries a NULL into a required column. It is derived from the id here rather than
+ * the insert dropped, which keeps the seed honest about the table.
+ */
+async function seedLogRow(
+  wrapper: ProbeWrapper,
+  {
+    id,
+    eventType,
+    actorType = "system",
+    subscriptionId = null,
+    subscriptionReference = null,
+  }: {
+    id: string
+    eventType: string
+    actorType?: string
+    subscriptionId?: string | null
+    subscriptionReference?: string | null
+  }
+): Promise<void> {
+  await wrapper.manager.execute(
+    `insert into subscription_log (id, event_type, actor_type, dedupe_key
+        ${subscriptionId ? ", subscription_id" : ""}
+        ${subscriptionReference ? ", subscription_reference" : ""},
+        created_at, updated_at)
+     values ('${id}', '${eventType}', '${actorType}', 'probe-${id}'
+        ${subscriptionId ? `, '${subscriptionId}'` : ""}
+        ${subscriptionReference ? `, '${subscriptionReference}'` : ""},
+        now(), now())`
+  )
+}
+
+/**
+ * What the database currently says about `subscription_log`'s event-type gate, read
+ * in one query so a rollback case compares the same snapshot of it rather than five
+ * separately-timed ones: whether the check constraint is there, which event types it
+ * admits, how many rows of the new type are on disk, which ids survive, and whether
+ * the two display columns still accept NULL.
+ *
+ * Nothing is coerced. A non-textual `definition` means the constraint is gone (the
+ * helper says so rather than returning `"undefined"`, which a `toContain` would
+ * treat as a pass waiting to happen); a missing count means the select stopped
+ * projecting it. The `is_nullable` pair is rendered as one string because the two
+ * columns are only ever meaningful together — `down()` restores both, and a rollback
+ * that restored one is the bug, not a partial result to compare per column.
+ */
+type LogGate = {
+  readonly constraintCount: number
+  readonly definition: string
+  readonly creationFailureRows: number
+  readonly survivingIds: string
+  readonly displayColumnsNullable: string
+}
+
+async function logGate(wrapper: ProbeWrapper): Promise<LogGate> {
+  const rows = await probeQuery(
+    wrapper,
+    `select
+        (select count(*)::int from pg_constraint
+          where conname = 'subscription_log_event_type_check') as constraint_count,
+        (select pg_get_constraintdef(oid) from pg_constraint
+          where conname = 'subscription_log_event_type_check') as definition,
+        (select count(*)::int from subscription_log
+          where event_type = '${CREATION_FAILED_EVENT}') as creation_failure_rows,
+        coalesce((select string_agg(id, ',' order by id) from subscription_log), '')
+          as surviving_ids,
+        (select string_agg(column_name || '=' || is_nullable, ',' order by column_name)
+           from information_schema.columns
+          where table_name = 'subscription_log'
+            and table_schema = '${PROBE_SCHEMA}'
+            and column_name in ('subscription_id', 'subscription_reference'))
+          as display_columns_nullable`
+  )
+
+  if (rows.length !== 1) {
+    throw new Error(
+      `subscription_log gate state came back as ${rows.length} rows, expected 1`
+    )
+  }
+
+  const row = rows[0]
+  const {
+    constraint_count: constraintCount,
+    definition,
+    creation_failure_rows: creationFailureRows,
+    surviving_ids: survivingIds,
+    display_columns_nullable: displayColumnsNullable,
+  } = row
+
+  if (typeof constraintCount !== "number" || typeof creationFailureRows !== "number") {
+    throw new Error(
+      `subscription_log gate counts did not come back as integers: ${JSON.stringify(row)}`
+    )
+  }
+
+  if (
+    typeof definition !== "string" ||
+    typeof survivingIds !== "string" ||
+    typeof displayColumnsNullable !== "string"
+  ) {
+    throw new Error(
+      `subscription_log gate state is not the shape this helper reads — most likely the check constraint is gone entirely (compare constraint_count), or the display columns are no longer on the table: ${JSON.stringify(row)}`
+    )
+  }
+
+  return {
+    constraintCount,
+    definition,
+    creationFailureRows,
+    survivingIds,
+    displayColumnsNullable,
+  }
+}
+
+/**
  * Puts the database back into the state a host upgrade arrives in: the 1.6.0
  * constraint not yet there, and the 1.6.0 migration not yet recorded.
  *
@@ -670,6 +803,132 @@ async function rerunNormalize(
       `${NORMALIZE_MIGRATION} did not re-apply itself to ${dbName}: ` +
         "mikro_orm_migrations has no row for it, so the normalization below proves nothing"
     )
+  }
+}
+
+/**
+ * The rows `pg_indexes` carries for the 1.6.0 partial unique index: exactly one
+ * while `Migration20260924120000` is applied, none once its `down()` has run.
+ *
+ * Rows rather than a boolean so the expectation says which of the two it checked,
+ * and read at BOTH ends of the rollback rather than only after it: `openDriftWindow`
+ * leaves this index dropped whenever a later step of a case throws, so an
+ * absence-only assertion would be satisfied by a probe another case drifted, and the
+ * rollback under test could do nothing at all and still pass.
+ */
+async function upcomingCycleIndexRows(
+  wrapper: ProbeWrapper
+): Promise<ProbeRow[]> {
+  return probeQuery(
+    wrapper,
+    `select indexname from pg_indexes where indexname = '${UPCOMING_CYCLE_INDEX}'`
+  )
+}
+
+/**
+ * Puts one reverted migration back and proves the probe is fully migrated again.
+ *
+ * `up()` is called only when the migration is actually pending, which is the
+ * difference from `rerunNormalize`: a rollback case whose `down()` failed part-way
+ * must still be able to restore, and MikroORM runs migrations transactionally
+ * (`transactional` and `allOrNothing` both default to true,
+ * `@mikro-orm/core/utils/Configuration.js:89-91`), so a failed `down()` leaves the
+ * row in `mikro_orm_migrations` and there is nothing to re-apply. The recorded-name
+ * check is what makes the restore observable rather than assumed: a probe left
+ * half-migrated hands every later case in this file a database whose pending set is
+ * not what its directory listing says, which is how a rollback leak turns into
+ * someone else's false green.
+ */
+async function restoreAppliedMigration(
+  dbName: string,
+  migrationDirPath: string,
+  migrationName: string,
+  wrapper: ProbeWrapper
+): Promise<void> {
+  await withMigratorFor(dbName, migrationDirPath, async (migrator) => {
+    const pending = (await migrator.getPendingMigrations()).map(
+      (entry) => entry.name
+    )
+
+    if (pending.includes(migrationName)) {
+      await migrator.up({ migrations: [migrationName] })
+    }
+  })
+
+  const recorded = await probeQuery(
+    wrapper,
+    `select name from mikro_orm_migrations where name = '${migrationName}'`
+  )
+
+  if (recorded.length !== 1) {
+    throw new Error(
+      `${migrationName} is not recorded in ${dbName} after the rollback case: the ` +
+        `probe was left half-migrated (${recorded.length} rows for that name) and ` +
+        "the next case would read that state as its own"
+    )
+  }
+}
+
+/**
+ * Reverts `migrationName` in `dbName`, runs `use` against the reverted database,
+ * then re-applies it whatever `use` did.
+ *
+ * The revert goes through `withMigratorFor` bound to the migration's own directory
+ * even when the database is the nine-directory probe: `setupDatabase()` configures
+ * the shared wrapper's ORM with `pathToMigrations: migrationPaths[0]`
+ * (`@medusajs/test-utils/dist/database.js:100-112`, the activity-log directory), so
+ * its own `orm.getMigrator()` cannot see any other module's migration and umzug
+ * would answer `Couldn't find migration to apply with name
+ * "Migration20260924120000"` (`umzug/lib/umzug.js:317-326`) for a `down()` that
+ * asks for it. That is a loud failure rather than a silent one, but it is also the
+ * wrong error to meet at a revert case, and the activity-log revert — the one
+ * migration `MIGRATION_PATHS[0]` does make reachable that way — is bound here too so
+ * that both cases run the same mechanism and whoever reorders `MIGRATION_PATHS` does
+ * not turn the other one over.
+ *
+ * The restore lives in the `finally`, not at the end of the calling case, because a
+ * case throwing on its way out is the expected shape of this file (both mutation
+ * probes in the plan do it), and a dropped index or a reverted migration must not
+ * survive a red run. `runTeardown` + `combineFailure` keep the case's own failure as
+ * the reported error, with the restore's problem appended to it rather than replacing
+ * it — the same rule `withSoloProbe` follows.
+ */
+async function withMigrationReverted(
+  dbName: string,
+  migrationDirPath: string,
+  migrationName: string,
+  wrapper: ProbeWrapper,
+  use: () => Promise<void>
+): Promise<void> {
+  let failure: Failure | undefined
+
+  try {
+    await withMigratorFor(dbName, migrationDirPath, (migrator) =>
+      migrator.down({ migrations: [migrationName] })
+    )
+
+    await use()
+  } catch (error) {
+    failure = { error }
+    throw error
+  } finally {
+    const notes = await runTeardown([
+      {
+        label: `restore ${migrationName} in ${dbName}`,
+        run: async () => {
+          await restoreAppliedMigration(
+            dbName,
+            migrationDirPath,
+            migrationName,
+            wrapper
+          )
+        },
+      },
+    ])
+
+    if (notes.length > 0) {
+      throw combineFailure(failure, notes.join("; "))
+    }
   }
 }
 
@@ -919,6 +1178,182 @@ medusaIntegrationTestRunner({
         // ...and it is the same row the fallback keeps, so a note that followed a
         // different survivor cannot pass either.
         expect(await liveScheduled(probeWrapper, "sub_t4")).toEqual(["cyc_t4_keep"])
+      })
+
+      /**
+       * The two cases below are the reason the probe harness exists at all: nothing
+       * else in this repository ever runs a `down()`. The app bootstrap only migrates
+       * forwards (`runModulesMigrations` -> `migration-up`), `test:integration:modules`
+       * never reaches a migration at all (see the header note), and grepping the suites
+       * for `getMigrator` outside this file finds none — so the two rollbacks shipped to
+       * the acceptance round with the second one throwing, and nothing noticed. Both
+       * cases revert one migration IN THE SHARED PROBE and hand it back fully migrated,
+       * through `withMigrationReverted`, because the inventory comparison above and
+       * every case a later task adds to this describe read that same database.
+       *
+       * Each case establishes its own rows rather than reading a sibling's: the renewal
+       * one needs a normalized partition and the activity-log one needs creation-failure
+       * rows, and an assertion that could be satisfied by whatever a previous case
+       * happened to leave behind is not testing the rollback.
+       */
+
+      it("drops the constraint and resurrects nothing on down()", async () => {
+        // This case's own drifted pair, put through this case's own normalization:
+        // the survivor is the entitlement row, the most-future duplicate is the
+        // tombstone with the note. Same rule the four cases above follow, and the
+        // same reason — the index has to be down before the pair is insertable.
+        await openDriftWindow(probeWrapper)
+        await seedSubscription(probeWrapper, "sub_t7", "2026-11-24T00:00:00Z")
+        await seedCycle(probeWrapper, { id: "cyc_t7_match", subscriptionId: "sub_t7", scheduledFor: "2026-11-24T00:00:00Z" })
+        await seedCycle(probeWrapper, { id: "cyc_t7_stale", subscriptionId: "sub_t7", scheduledFor: "2026-12-24T00:00:00Z" })
+
+        await rerunNormalize(PROBE_DB_NAME, probeWrapper)
+
+        // Presence FIRST, and asserted rather than assumed: `rerunNormalize` proves
+        // the migration is recorded, not that its index came with it, and without
+        // this line the absence below would be equally satisfied by an index
+        // `openDriftWindow` dropped and nobody restored.
+        expect(await upcomingCycleIndexRows(probeWrapper)).toHaveLength(1)
+
+        await withMigrationReverted(
+          PROBE_DB_NAME,
+          migrationDirOf("renewal"),
+          NORMALIZE_MIGRATION,
+          probeWrapper,
+          async () => {
+            // The whole of what `down()` is: the constraint goes away, and nothing
+            // else does.
+            expect(await upcomingCycleIndexRows(probeWrapper)).toHaveLength(0)
+
+            // The normalized neighbour is still a tombstone and still carries the
+            // note — reviving it would put a second chargeable cycle back on
+            // `listDueRenewalCyclesForProcessing`, which is why the migration soft
+            // deletes in the first place. Compared as the SET of tombstoned rows for
+            // this subscription, so a `down()` that hard-deleted the tombstones comes
+            // back `[]` here, and one that cleared their `deleted_at` comes back `[]`
+            // here and doubles the live count below: neither mutation can pass by
+            // moving the failure somewhere else.
+            expect(
+              await probeQuery(
+                probeWrapper,
+                `select id, last_error, deleted_at is not null as tombstoned
+                   from renewal_cycle
+                  where subscription_id = 'sub_t7' and deleted_at is not null
+                  order by id`
+              )
+            ).toEqual([
+              {
+                id: "cyc_t7_stale",
+                last_error: NORMALIZED_NOTE,
+                tombstoned: true,
+              },
+            ])
+            expect(await liveScheduled(probeWrapper, "sub_t7")).toEqual(["cyc_t7_match"])
+
+            // ...and with the index gone a second live `scheduled` row for one
+            // subscription is insertable again, which is the money-facing half: the
+            // constraint was the only thing between this pair and two charges. The
+            // reverse is what `openDriftWindow` documents for the normalize cases —
+            // while the index stands this very insert is rejected — so the seed
+            // resolving at all is the assertion, and the count below says two rows
+            // really are live for one subscription now.
+            await seedCycle(probeWrapper, { id: "cyc_t7_again", subscriptionId: "sub_t7", scheduledFor: "2027-01-01T00:00:00Z" })
+            expect(await liveScheduled(probeWrapper, "sub_t7")).toEqual([
+              "cyc_t7_again",
+              "cyc_t7_match",
+            ])
+          }
+        )
+
+        // Restored, and with it the asymmetry the release notes document: `up()`
+        // shapes data one way, so the pair the rollback allowed gets normalized again
+        // by the re-apply instead of being tolerated under a re-created index. This
+        // is also the proof the next case inherits a whole probe — the index, the
+        // survivor, and the complete 22-migration inventory rather than the two names
+        // this file touches.
+        expect(await upcomingCycleIndexRows(probeWrapper)).toHaveLength(1)
+        expect(await liveScheduled(probeWrapper, "sub_t7")).toEqual(["cyc_t7_match"])
+        expect(await appliedMigrationNames(probeWrapper)).toEqual(
+          expectedMigrationNames()
+        )
+      })
+
+      it("rolls the creation-failure migration back over its own rows", async () => {
+        // The acceptance defect: this rollback re-added the event-type check
+        // constraint BEFORE deleting the rows the migration had introduced, and `add
+        // constraint` validates every row on disk, so a host whose log contained a
+        // creation failure could not revert the plugin at all —
+        // `check constraint "subscription_log_event_type_check" is violated by some
+        // row`. The two rows below are that database: `up()` is the only thing that
+        // makes a creation-failure row with no `subscription_id` legal, and a
+        // rollback case without such a row cannot see the defect (mutation probe (a)
+        // in the plan reddens exactly and only here).
+        await seedLogRow(probeWrapper, { id: "slog_t7_bare", eventType: CREATION_FAILED_EVENT })
+        await seedLogRow(probeWrapper, { id: "slog_t7_ref", eventType: CREATION_FAILED_EVENT, subscriptionReference: "SUB_PROBE" })
+        // A row of a type that existed before 1.6.x, as the neighbour the rollback
+        // must leave alone: `down()` deletes its own event type, not the table.
+        await seedLogRow(probeWrapper, {
+          id: "slog_t7_created",
+          eventType: "subscription.created",
+          subscriptionId: "sub_t7",
+          subscriptionReference: "SUB_PROBE",
+        })
+
+        // The starting state, asserted rather than assumed: both new-type rows are on
+        // disk (so the zero below measures a delete, not a rejected seed), the
+        // constraint admits the event type, and both display columns are nullable.
+        expect(await logGate(probeWrapper)).toEqual({
+          constraintCount: 1,
+          definition: expect.stringContaining(CREATION_FAILED_EVENT),
+          creationFailureRows: 2,
+          survivingIds: "slog_t7_bare,slog_t7_created,slog_t7_ref",
+          displayColumnsNullable: "subscription_id=YES,subscription_reference=YES",
+        })
+
+        await withMigrationReverted(
+          PROBE_DB_NAME,
+          migrationDirOf("activity-log"),
+          CREATION_FAILURE_MIGRATION,
+          probeWrapper,
+          async () => {
+            const reverted = await logGate(probeWrapper)
+
+            // Its own rows are gone, and only its own rows.
+            expect(reverted.creationFailureRows).toBe(0)
+            expect(reverted.survivingIds).toBe("slog_t7_created")
+            // The constraint is back as ONE constraint (the migration drops and
+            // re-adds it, so two would mean the drop went missing) and it no longer
+            // admits the event type this migration introduced. Compared by membership
+            // and not against a captured definition string on purpose: `down()`'s list
+            // holds the same 25 values `Migration20260909130000.up()` installed
+            // (measured: the two sets differ by nothing), but that one appends
+            // `subscription.expired` / `redemption.redeemed` while this one places them
+            // mid-list, so `pg_get_constraintdef` renders them in a different order and
+            // a byte comparison would fail on a rollback that is correct.
+            expect(reverted.constraintCount).toBe(1)
+            expect(reverted.definition).not.toContain(CREATION_FAILED_EVENT)
+            // ...and the display columns are required again, which is the statement
+            // the delete exists to make possible.
+            expect(reverted.displayColumnsNullable).toBe(
+              "subscription_id=NO,subscription_reference=NO"
+            )
+          }
+        )
+
+        // Restored: the constraint admits the event type again and both columns are
+        // nullable again, so the probe is back to what `up()` leaves. The deleted
+        // creation-failure rows do NOT come back — that is the same one-way property
+        // the renewal case above documents.
+        expect(await logGate(probeWrapper)).toEqual({
+          constraintCount: 1,
+          definition: expect.stringContaining(CREATION_FAILED_EVENT),
+          creationFailureRows: 0,
+          survivingIds: "slog_t7_created",
+          displayColumnsNullable: "subscription_id=YES,subscription_reference=YES",
+        })
+        expect(await appliedMigrationNames(probeWrapper)).toEqual(
+          expectedMigrationNames()
+        )
       })
     })
 
