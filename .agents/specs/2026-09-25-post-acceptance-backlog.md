@@ -84,19 +84,26 @@ from there; `get-resolved-plugins.js:13,69-73`), and the admin bundler writes in
 (`@medusajs/framework/dist/build-tools/compiler.js:238-240`), so its absence in a
 published tarball is correct and keeps the host's admin `type: "package"`.
 
-So `files` becomes `[".medusa/server/src"]`. (`exports["./package.json"]` points
-outside it; npm packs `package.json` regardless, so that key still resolves.)
-Nothing in this repo consumes a packed path outside `src` — the scripts and docs
-refer to `./scripts/*.ts` in the checkout, not in the package. **Measured on
-2026-09-25 against the two real hosts: no host needs a packed path outside
-`.medusa/server/src`.**
+The array that ships is `files: [".medusa/server/src", "!**/__tests__/**"]`.
+(`exports["./package.json"]` points outside the first entry; npm packs
+`package.json` regardless, so that key still resolves.) The two entries drop
+disjoint sets, and the 35 removals measured in the packed-surface bullet below split
+along exactly that line: the first entry drops everything under `.medusa/server` that
+is not `src`, and the negation drops the compiled specs. Measured on this build with
+`npm pack --dry-run`: `[".medusa/server/src"]` alone packs 366 files, 28 of them
+`.medusa/server/src/**/__tests__/*.spec.js`; appending the negation packs 338 and
+none. Nothing in this repo consumes a packed path outside `src` — the scripts and
+docs refer to `./scripts/*.ts` in the checkout, not in the package. That is a
+repo-internal statement; the claim about consumers outside this repository is a
+separate measurement, and it holds too: **measured on 2026-09-25 against the two
+real hosts, no host needs a packed path outside `.medusa/server/src`.**
 
 The host boot this paragraph asked for was **not** performed, and that is a
 deviation from 1.3 below, so it is recorded here rather than in a gitignored note.
 Booting a host on the packed tree first requires making the host consume it:
 `medusa-dtc` pins a `file:` tarball at `apps/backend/package.json:51`, and
-`medusa-saas` declares `workspace:*` at `apps/backend/package.json:27` resolved by
-`pnpm-lock.yaml:70` to `link:vendor/@mengyyy369/reorder`, a vendored checkout of the
+`medusa-saas` declares `workspace:*` at `apps/backend/package.json:25` resolved by
+`pnpm-lock.yaml:67` to `link:vendor/@mengyyy369/reorder`, a vendored checkout of the
 plugin. Either way the install rewrites a tracked `package.json`, that repository's
 lockfile and its `node_modules`, and the boot then runs this plugin's subscribers and
 scheduled jobs against the database in that host's own `.env`
@@ -115,12 +122,15 @@ host's `.env` was opened.
 What the read-only measurement established:
 
 - **Consumed surface, defined by the consumers.** `git grep` over tracked source in
-  both hosts (excluding `pnpm-lock.yaml`) returns 7 specifier lines in `medusa-dtc`
-  and 8 in `medusa-saas`, and only two distinct specifiers a host writes: the bare
+  both hosts returns 7 specifier lines in `medusa-dtc` (excluding `pnpm-lock.yaml`)
+  and 7 in `medusa-saas` (excluding `pnpm-lock.yaml` and that host's vendored copy
+  of the plugin). The saas count is 7 where the first pass recorded 8: the third
+  `/workflows` site it named, `apps/backend/src/scripts/seed-logto-e2e.ts`, no longer
+  exists — saas commit `cd7d3c9` deleted it — and the two sites listed below are all
+  that remain. There are only two distinct specifiers a host writes: the bare
   `@mengyyy369/reorder` as `plugins[].resolve` (`medusa-dtc/apps/backend/medusa-config.ts:170`,
-  `medusa-saas/apps/backend/medusa-config.ts:113`) and `@mengyyy369/reorder/workflows`
+  `medusa-saas/apps/backend/medusa-config.ts:111`) and `@mengyyy369/reorder/workflows`
   (`medusa-dtc/apps/backend/src/scripts/seed-dtc-plan-offers.ts:3`,
-  `medusa-saas/apps/backend/src/scripts/seed-logto-e2e.ts:12`,
   `medusa-saas/apps/backend/src/scripts/seed-mypbo-test.js:18`). Zero specifiers name
   `e2e`, `playwright.config`, `scripts/`, `docs/`, `assets/` or any `__tests__` path,
   and neither storefront depends on the package.
@@ -131,9 +141,11 @@ What the read-only measurement established:
   (14 `.medusa/server/e2e/**`, 4 `.medusa/server/scripts/*.js`,
   `.medusa/server/playwright.config.js`) and 3 (`package.json`, `README.md`, `LICENSE`)
   are what npm ships regardless. Against the new 338-file tree the removal set is 35:
-  those 19 plus 16 compiled `**/__tests__/*.spec.js` that lived inside `src`. No
-  non-test `src` path was lost — the narrowed build is a superset there (24 paths
-  added, per-module migrations 20 → 22).
+  those 19, dropped by the `.medusa/server/src` entry, plus 16 compiled
+  `**/__tests__/*.spec.js` that lived inside `src`, dropped by `"!**/__tests__/**"` —
+  all 16 are in the 28 a `files: [".medusa/server/src"]`-only pack still carries, so
+  the negation is the entry that removes them. No non-test `src` path was lost — the
+  narrowed build is a superset there (24 paths added, per-module migrations 20 → 22).
 - **The vendored copy agrees.** `medusa-saas/apps/backend/vendor/@mengyyy369/reorder/`
   (844 files, the same `exports` map, `files` unset) differs from the new tree by 530
   paths, classifying as: (i) `exports` targets missing — **0**; (ii) `.medusa/server/src`
@@ -150,24 +162,57 @@ What the read-only measurement established:
   loader builds for itself (`<name>/package.json`, `<name>/admin`, and the ten
   `<name>/.medusa/server/src/modules/<dir>` read off the `modules` listing by
   `@medusajs/utils/dist/common/get-resolved-plugins.js:71,92`), their `./modules/*`
-  aliases, and nine deep `./*` imports. The new tree resolves 29/33 and the published
-  1.5.0 tarball 30/33, under both conditions; the entire old-versus-new difference is
-  one case, `@mengyyy369/reorder/workflows/__tests__/pause-subscription.spec`, which no
-  host imports. The three that fail do so in both trees: the bare root
-  (`ERR_PACKAGE_PATH_NOT_EXPORTED` — `exports` has no `"."` key, and the loader resolves
-  `<name>/package.json` instead, which the probe confirms), plus
-  `modules/renewal/index` and `modules/renewal/__tests__/service.spec`, which the
-  longer `./modules/*` pattern rewrites onto a nonexistent `…/index.js` — so compiled
-  module specs were never reachable by specifier, in any packaging. The `import`
-  condition was re-checked against `fs.existsSync` because `import.meta.resolve` maps
-  through `exports` without stat'ing and answers a URL for a removed file; it is also
+  aliases, and nine deep `./*` imports. In that sample the new tree resolves 29/33 and
+  the published 1.5.0 tarball 30/33, under both conditions, and the single differing
+  case — `@mengyyy369/reorder/workflows/__tests__/pause-subscription.spec` — is one of
+  three, not the whole delta; the sample simply happened to name one of them. Probing
+  every removed spec in every specifier form that can name it (29 cases: the three
+  `workflows/__tests__/*.spec` files, and each of the thirteen
+  `modules/*/__tests__/*.spec` files through both `./modules/*` and the loader's
+  `./.medusa/server/src/modules/*`) gives 3/29 in the 1.5.0 tree and 0/29 in the new
+  one. So the old-versus-new delta is **three specifier-reachable removals**: the `./*`
+  key that carries `api/middlewares` and `workflows/index` also named all three
+  `src/workflows/__tests__/*.spec.js` files — `cancel-subscription`,
+  `pause-subscription`, `update-subscription-shipping-address` — each of which resolves
+  in 1.5.0 and fails `MODULE_NOT_FOUND` in the new tree under `require`, mapping to an
+  absent file under `import`. The thirteen inside `modules/` were never
+  specifier-reachable in either packaging: the two patterns that outrank `./*` for
+  them, `./modules/*` and `./.medusa/server/src/modules/*`, both append `/index.js`,
+  so all 26 of their cases fail against the published 1.5.0 tree exactly as
+  against the new one. The three sample failures that are common to both trees are the
+  bare root (`ERR_PACKAGE_PATH_NOT_EXPORTED` — `exports` has no `"."` key, and the
+  loader resolves `<name>/package.json` instead, which the probe confirms), plus
+  `modules/renewal/index` and `modules/renewal/__tests__/service.spec`, the two
+  module-pattern-shadowed cases. No host writes any of the three removed specifiers,
+  and no gate here could run them: `jest.config.js:22` sets
+  `modulePathIgnorePatterns: ["dist/", ".medusa/"]`, which hides every packed copy in
+  both packagings, and the three `testMatch` values (`:27,29,31`) name
+  `integration-tests/http`, `src/modules/*/__tests__` and `src/admin/i18n/__tests__`,
+  never `src/workflows/__tests__` — the directory the three checkout
+  `src/workflows/__tests__/*.spec.ts` files sit in. The `import` condition was
+  re-checked against `fs.existsSync` because `import.meta.resolve` maps through
+  `exports` without stat'ing and answers a URL for a removed file; it is also
   the only condition that proves `./admin` → `admin/index.mjs` survives (`require`
   selects `admin/index.js`).
-- **Nothing reaches for a path it does not own.** The directory set the framework probes
-  inside the package — `modules/` (10, each with an `index.js`), `links/`, `workflows/`,
-  `subscribers/`, `jobs/`, `api/`, `admin/` (`get-resolved-plugins.js:71` and
-  `@medusajs/medusa/dist/loaders/index.js:38,48,116,124,127`) — is present in the new
-  tree, and `.medusa/server/medusa-plugin-options.json` stays absent, which
+- **Nothing reaches for a path it does not own.** The installed `@medusajs` 2.20.0
+  sources join nine directory names inside a plugin's resolved dir: `links/`,
+  `workflows/`, `policies/` and `search/`
+  (`@medusajs/medusa/dist/loaders/index.js:116,127,124`, and `:121` →
+  `@medusajs/medusa/dist/loaders/search.js:32`), `subscribers/` and `jobs/` (`:38`,
+  `:48`), `api/` (`@medusajs/medusa/dist/loaders/api.js:41`), and `modules/` and
+  `admin/` (`@medusajs/utils/dist/common/get-resolved-plugins.js:71`, `:75-82`). Seven
+  of the nine exist in the new tree: `modules/` with its 10 dirs, each carrying an
+  `index.js`, `api/` 106 files, `workflows/` 84, `admin/` 9, `links/` 8, `jobs/` 7,
+  `subscribers/` 5. The two that do not, `search/` and `policies/`, are absent from this
+  plugin in every form: `find src -type d -name search -o -name policies` returns
+  nothing here, and neither the new tree nor the published 1.5.0 one holds a directory
+  of either name, so there was nothing for the narrowing to lose. Each of the two also
+  no-ops on an empty set before it reads anything: `loaders/search.js:29-31` returns
+  unless the Search Module is registered, and the walk behind
+  `loaders/index.js:124` (`framework/dist/policies/policy-loader.js:10-15` →
+  `utils/dist/policies/discover-policies.js:25-30`) keeps only entries literally named
+  `policies` and returns on an empty list.
+  `.medusa/server/medusa-plugin-options.json` stays absent, which
   `get-resolved-plugins.js:45-56` tolerates and which keeps the host's admin
   `type: "package"`. The packed code performs no `__dirname`-relative read and no
   `readFileSync`/`readdirSync` at all, and a scan of all 690 relative `require()`
@@ -180,11 +225,22 @@ What the read-only measurement established:
   (`medusa-saas/docs/plugins/2026-09-21-plugin-issues-for-source-repos.md`) all sit
   under `.medusa/server/src/` and are present in both trees.
 
-What the boot still owns is registration, not resolution: it is the only thing that
-shows Awilix wiring, route mounting, the cron registrations and the admin build working
-in a real app. That is 6.2's boot-the-new-version rehearsal, where booting is the point
-and the database is this plan's own, and not a check to run inside a host repository
-this plan does not own.
+What the boot still owns is registration **of the packed tree**, not resolution, and
+that qualifier is the whole of it. A host boot is not the only thing that exercises
+Awilix wiring and route mounting for this plugin in a real app: `test:integration:http`
+boots one with the plugin registered as `resolve: projectRoot`
+(`integration-tests/medusa-config.ts:19-31`), which `get-resolved-plugins.js:13,69`
+resolves to the same `.medusa/server/src` a host's copy lives in, on a listening port
+(`@medusajs/test-utils/dist/medusa-test-runner.js:131-132` builds `api` as an axios
+client with `baseURL: http://localhost:<port>`;
+`integration-tests/http/cancellations-admin-flow.spec.ts:39` is one of its call sites),
+and §B below records that `medusaIntegrationTestRunner` is
+`MedusaTestRunner`. What that gate cannot reach is the artifact: it registers this
+checkout's build output, not the `files`-narrowed copy that lands in a host's
+`node_modules/@mengyyy369/reorder`, and the cron registrations and the admin build of
+*that* tree are what only a host boot shows working in a real app. That is 6.2's
+boot-the-new-version rehearsal, where booting is the point and the database is this
+plan's own, and not a check to run inside a host repository this plan does not own.
 
 ### B. Migration harness (Q3 / H1)
 
@@ -460,7 +516,9 @@ Order:
       record the probe database's `CREATE DATABASE` capability (§B measure first).
 
 ### Phase 1: Publish surface (A)
-- [ ] 1.1 `files: [".medusa/server/src"]`; `npm pack --dry-run` before/after with
+- [ ] 1.1 `files: [".medusa/server/src", "!**/__tests__/**"]` — the array that ships
+      (`package.json` at HEAD of this branch; §A states which removals each entry is
+      responsible for); `npm pack --dry-run` before/after with
       sizes and the file list.
 - [ ] 1.2 Unpack to a temp dir; assert every `exports` target resolves.
 - [ ] 1.3 Prove the packed tree against a host app. Its install-plus-boot form was **not
