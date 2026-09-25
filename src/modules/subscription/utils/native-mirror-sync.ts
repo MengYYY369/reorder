@@ -10,6 +10,10 @@ import {
   type NativeMirrorFields,
   type ProviderSubscriptionRecord,
 } from "./native-mirror"
+import {
+  asSubscriptionCreateInput,
+  asSubscriptionUpdateInput,
+} from "./subscription-write-input"
 
 type MirrorLogger = {
   info: (msg: string) => void
@@ -46,7 +50,7 @@ export async function upsertNativeMirrorSubscription(
   const current = existing[0]
 
   if (!current) {
-    await subscriptionModule.createSubscriptions({
+    const createInput = asSubscriptionCreateInput({
       reference: fields.reference,
       status: fields.status,
       customer_id: fields.customer_id,
@@ -86,7 +90,9 @@ export async function upsertNativeMirrorSubscription(
         source: "paypal_native_mirror",
         plan_id: fields.plan_id,
       },
-    } as never)
+    })
+
+    await subscriptionModule.createSubscriptions(createInput)
 
     logger.info(
       `[reorder] mirrored native subscription '${fields.reference}'` +
@@ -117,7 +123,9 @@ export async function upsertNativeMirrorSubscription(
     )
   }
 
-  await subscriptionModule.updateSubscriptions(update as never)
+  await subscriptionModule.updateSubscriptions(
+    asSubscriptionUpdateInput(update)
+  )
 
   return "updated"
 }

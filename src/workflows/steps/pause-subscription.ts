@@ -8,6 +8,7 @@ import {
   SubscriptionStatus,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { asSubscriptionUpdateInput } from "../../modules/subscription/utils/subscription-write-input"
 
 export type PauseSubscriptionStepInput = {
   id: string
@@ -46,20 +47,10 @@ export type SubscriptionWorkflowStepResult = {
   previous: SubscriptionWorkflowRecord
 }
 
-type SubscriptionUpdateInput = Parameters<
-  SubscriptionModuleService["updateSubscriptions"]
->[0]
-
 export function asSubscriptionWorkflowRecord(
   subscription: unknown
 ): SubscriptionWorkflowRecord {
   return subscription as SubscriptionWorkflowRecord
-}
-
-export function asSubscriptionUpdateInput(
-  subscription: SubscriptionWorkflowRecord
-): SubscriptionUpdateInput {
-  return subscription as unknown as SubscriptionUpdateInput
 }
 
 export const pauseSubscriptionStep = createStep(

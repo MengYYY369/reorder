@@ -5,8 +5,8 @@ import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionFrequencyInterval, SubscriptionStatus } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { asSubscriptionUpdateInput } from "../../modules/subscription/utils/subscription-write-input"
 import {
-  asSubscriptionUpdateInput,
   asSubscriptionWorkflowRecord,
   SubscriptionWorkflowRecord,
   SubscriptionWorkflowStepResult,

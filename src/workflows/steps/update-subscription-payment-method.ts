@@ -10,12 +10,12 @@ import {
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import { resolveCustomerPaymentMethod } from "../../modules/subscription/utils/payment-methods"
+import { asSubscriptionUpdateInput } from "../../modules/subscription/utils/subscription-write-input"
 import {
   buildPaymentModeFields,
   readStoredPaymentMode,
 } from "../utils/payment-mode-mechanism"
 import {
-  asSubscriptionUpdateInput,
   asSubscriptionWorkflowRecord,
   SubscriptionWorkflowRecord,
 } from "./pause-subscription"

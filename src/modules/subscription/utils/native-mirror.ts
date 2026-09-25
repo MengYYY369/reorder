@@ -5,6 +5,7 @@ import {
   SubscriptionStatus,
 } from "../types"
 import { buildNativeSubscriptionReference } from "./native-subscription"
+import type { SubscriptionWriteInput } from "./subscription-write-input"
 
 /**
  * Turns a `paypal.subscription.*` event into the fields of a mirror row.
@@ -274,8 +275,8 @@ export function buildNativeMirrorFieldsFromRecord(
 export function nativeMirrorReconcileFields(
   id: string,
   fields: NativeMirrorFields
-): Record<string, unknown> {
-  const update: Record<string, unknown> = {
+): SubscriptionWriteInput {
+  const update: SubscriptionWriteInput = {
     id,
     status: fields.status,
     product_id: fields.product_id,
