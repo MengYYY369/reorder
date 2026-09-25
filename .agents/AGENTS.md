@@ -51,24 +51,32 @@ Both jest gates need a reachable PostgreSQL server, and `DATABASE_URL` is not wh
 gives them one: `@medusajs/test-utils` creates a database per suite from
 `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD`
 (`@medusajs/test-utils/dist/database.js:12-20`, where `DB_USERNAME` defaults to an
-empty string), so export all four. The gate database is the container
-`reorder-acceptance-pg` — that name replaces `medusa-epay-pg`, which no longer exists
-on this machine — published to `127.0.0.1:5432` only, under the `user` role taken from
-`.env`'s `DATABASE_URL`, which must be able to `CREATE DATABASE` because one database
-is created per suite:
+empty string), so export all four. The requirement itself is generic: any PostgreSQL
+answering on `127.0.0.1:5432` under the role from `.env`'s `DATABASE_URL`, and that
+role must be able to `CREATE DATABASE` because a database is created per suite. This
+machine satisfies it with the container `reorder-acceptance-pg`, published to the
+loopback only. The two branches below are exclusive — `docker run` is reached only
+when there is no container to start — so the block is safe to paste as a unit:
 
 ```bash
-docker start reorder-acceptance-pg   # or, only if the container does not exist yet:
-docker run -d --name reorder-acceptance-pg -e POSTGRES_USER=user \
-  -e POSTGRES_PASSWORD=<password decoded from .env's DATABASE_URL> \
-  -p 127.0.0.1:5432:5432 postgres:16-alpine
+PW=$(node -e 'var s=require("fs").readFileSync(".env","utf8");var m=s.match(/DATABASE_URL="?([^"\n]+)/);process.stdout.write(decodeURIComponent(new URL(m[1]).password))')
+docker start reorder-acceptance-pg 2>/dev/null \
+  || docker run -d --name reorder-acceptance-pg -e POSTGRES_USER=user \
+       -e POSTGRES_PASSWORD="$PW" -p 127.0.0.1:5432:5432 postgres:16-alpine
 docker exec reorder-acceptance-pg pg_isready -U user   # -> "accepting connections"
+unset PW
 ```
 
-Confirm `pg_isready` answers before blaming code for `ORM not configured`. When you
-extract the password from a `.env` that git checked out with CRLF endings
-(`core.autocrlf=true`), strip `\r` before matching, or the trailing carriage return
-becomes part of the password and authentication fails.
+Never paste a literal credential into the `$PW` slot: the value belongs in that shell
+variable and is `unset` when done. Confirm `pg_isready` answers before blaming code for
+`ORM not configured`. Extract the password with the `new URL()` form above rather than
+by hand: URL parsing discards a stray `\r`, while a `grep`/`cut`/`sed` slice keeps
+whatever sits at end-of-line (the `grep '^DATABASE_URL=' .env | cut -d '=' -f2-` in
+`.agents/scripts/sync-local-env.sh:69` does so on any reader that does not translate
+line endings — `read -r` and node pass the `\r` through, Git Bash's own `grep`/`sed`
+strip it). A CRLF `.env` therefore comes from whatever wrote the file, never from a
+checkout: it is gitignored (`.gitignore:2`), so `core.autocrlf` cannot reach it.
+
 Two failure patterns that are the machine and
 not the code: `*/__tests__/service.spec.ts` and
 `activity-log/create-subscription-log-event.spec.ts` reporting `AggregateError` →
