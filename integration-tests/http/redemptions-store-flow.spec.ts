@@ -103,6 +103,17 @@ medusaIntegrationTestRunner({
         expect(subscription.free_cycles_remaining).toEqual(3)
         expect(subscription.is_trial).toEqual(false)
         expect(subscription.cart_id).toBeNull()
+        // The create constant writes the mode and its mechanism as one pair: a
+        // free-cycle row the scheduler charges never records a `manual` label.
+        expect(subscription.payment_context).toEqual({
+          payment_provider_id: null,
+          payment_mode: "auto",
+          mechanism: "reorder_auto",
+          source_payment_collection_id: null,
+          source_payment_session_id: null,
+          payment_method_reference: null,
+          customer_payment_reference: null,
+        })
         expect(
           (subscription.metadata as Record<string, unknown>).source
         ).toEqual("redemption")
@@ -506,6 +517,17 @@ medusaIntegrationTestRunner({
         )
         expect(updated.status).toEqual("active")
         expect(updated.free_cycles_remaining).toEqual(2)
+
+        // The extension branch touches status, free cycles and metadata only:
+        // the seeded `payment_context` survives untouched, mechanism-less.
+        expect(updated.payment_context).toEqual({
+          payment_provider_id: null,
+          payment_mode: "auto",
+          source_payment_collection_id: null,
+          source_payment_session_id: null,
+          payment_method_reference: null,
+          customer_payment_reference: null,
+        })
 
         const recoveredCase = await dunningModule.retrieveDunningCase(
           dunningCase.id

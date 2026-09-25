@@ -18,6 +18,7 @@ import {
   SubscriptionProductSnapshot,
   SubscriptionShippingAddress,
 } from "../../modules/subscription/types"
+import { buildPaymentModeFields } from "../utils/payment-mode-mechanism"
 
 export type ResolveRedemptionCodeStepInput = {
   code: string
@@ -289,10 +290,10 @@ const REDEMPTION_SHIPPING_PLACEHOLDER: SubscriptionShippingAddress = {
 }
 
 const REDEMPTION_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
-  payment_provider_id: null,
   // "auto" keeps the free cycles inside the scheduler's due set; the
   // generalized free-cycle branch never builds an order or touches payment.
-  payment_mode: "auto",
+  ...buildPaymentModeFields("auto"),
+  payment_provider_id: null,
   source_payment_collection_id: null,
   source_payment_session_id: null,
   payment_method_reference: null,
