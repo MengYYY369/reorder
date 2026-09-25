@@ -87,9 +87,104 @@ published tarball is correct and keeps the host's admin `type: "package"`.
 So `files` becomes `[".medusa/server/src"]`. (`exports["./package.json"]` points
 outside it; npm packs `package.json` regardless, so that key still resolves.)
 Nothing in this repo consumes a packed path outside `src` — the scripts and docs
-refer to `./scripts/*.ts` in the checkout, not in the package. **measure first**:
-Phase 1 proves it by installing the produced tarball into the host app and booting,
-which is the only check that catches a deep import the `exports` map does not show.
+refer to `./scripts/*.ts` in the checkout, not in the package. **Measured on
+2026-09-25 against the two real hosts: no host needs a packed path outside
+`.medusa/server/src`.**
+
+The host boot this paragraph asked for was **not** performed, and that is a
+deviation from 1.3 below, so it is recorded here rather than in a gitignored note.
+Booting a host on the packed tree first requires making the host consume it:
+`medusa-dtc` pins a `file:` tarball at `apps/backend/package.json:51`, and
+`medusa-saas` declares `workspace:*` at `apps/backend/package.json:27` resolved by
+`pnpm-lock.yaml:70` to `link:vendor/@mengyyy369/reorder`, a vendored checkout of the
+plugin. Either way the install rewrites a tracked `package.json`, that repository's
+lockfile and its `node_modules`, and the boot then runs this plugin's subscribers and
+scheduled jobs against the database in that host's own `.env`
+(`medusa-dtc/apps/backend/medusa-config.ts:106`,
+`medusa-saas/apps/backend/medusa-config.ts:34`) — not this plan's probe database. It does
+**not** migrate on its own, which is worth stating because the assumption is easy to
+make: `@medusajs/medusa/dist/commands/develop.js` and `start.js` contain zero occurrences
+of `migrat`, app migration runs only through `MedusaAppMigrateUp`
+(`@medusajs/framework/dist/medusa-app-loader.js:119`) reached from `medusa db:migrate`,
+and `medusa-dtc/docs/dtc-acceptance-runbook.md:23` documents that step as deliberately
+outside the container. Both repositories are developed outside this worktree, so the
+check was run read-only instead: both working trees were fingerprinted
+(`git status --porcelain | sha1sum`) before and after and are byte-identical, and neither
+host's `.env` was opened.
+
+What the read-only measurement established:
+
+- **Consumed surface, defined by the consumers.** `git grep` over tracked source in
+  both hosts (excluding `pnpm-lock.yaml`) returns 7 specifier lines in `medusa-dtc`
+  and 8 in `medusa-saas`, and only two distinct specifiers a host writes: the bare
+  `@mengyyy369/reorder` as `plugins[].resolve` (`medusa-dtc/apps/backend/medusa-config.ts:170`,
+  `medusa-saas/apps/backend/medusa-config.ts:113`) and `@mengyyy369/reorder/workflows`
+  (`medusa-dtc/apps/backend/src/scripts/seed-dtc-plan-offers.ts:3`,
+  `medusa-saas/apps/backend/src/scripts/seed-logto-e2e.ts:12`,
+  `medusa-saas/apps/backend/src/scripts/seed-mypbo-test.js:18`). Zero specifiers name
+  `e2e`, `playwright.config`, `scripts/`, `docs/`, `assets/` or any `__tests__` path,
+  and neither storefront depends on the package.
+- **The old packed surface is known exactly, because a host still holds it.**
+  `medusa-dtc/apps/backend/local-packages/mengyyy369-reorder-1.5.0.tgz` is the tarball
+  that host installs, packed under the previous `files: [".medusa/server"]`: 349 files,
+  22 of them outside `.medusa/server/src`, of which 19 are repository payload
+  (14 `.medusa/server/e2e/**`, 4 `.medusa/server/scripts/*.js`,
+  `.medusa/server/playwright.config.js`) and 3 (`package.json`, `README.md`, `LICENSE`)
+  are what npm ships regardless. Against the new 338-file tree the removal set is 35:
+  those 19 plus 16 compiled `**/__tests__/*.spec.js` that lived inside `src`. No
+  non-test `src` path was lost — the narrowed build is a superset there (24 paths
+  added, per-module migrations 20 → 22).
+- **The vendored copy agrees.** `medusa-saas/apps/backend/vendor/@mengyyy369/reorder/`
+  (844 files, the same `exports` map, `files` unset) differs from the new tree by 530
+  paths, classifying as: (i) `exports` targets missing — **0**; (ii) `.medusa/server/src`
+  paths missing — **16**, every one a `**/__tests__/*.spec.js`; (iii) repository
+  payload — **514** (387 `src/*.ts`, 90 `docs/`, 14 `.medusa/server/e2e/`, 8 `assets/`,
+  4 `.medusa/server/scripts/`, 4 `scripts/`, and one each of `playwright.config.js`,
+  `tsconfig.json`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, `.gitignore`, `.zcode/`).
+  Its `src/` and `docs/` bulk is an artifact of it being a checkout: no tarball ever
+  shipped those.
+- **Resolution, probed rather than asserted.** From a scratch consumer directory under
+  the OS temp dir whose `node_modules` holds only the unpacked tarball — no install, no
+  lockfile, so nothing can resolve by hoisting — 33 specifiers were resolved under both
+  the `require` and the `import` condition: the two the hosts write, the twelve the plugin
+  loader builds for itself (`<name>/package.json`, `<name>/admin`, and the ten
+  `<name>/.medusa/server/src/modules/<dir>` read off the `modules` listing by
+  `@medusajs/utils/dist/common/get-resolved-plugins.js:71,92`), their `./modules/*`
+  aliases, and nine deep `./*` imports. The new tree resolves 29/33 and the published
+  1.5.0 tarball 30/33, under both conditions; the entire old-versus-new difference is
+  one case, `@mengyyy369/reorder/workflows/__tests__/pause-subscription.spec`, which no
+  host imports. The three that fail do so in both trees: the bare root
+  (`ERR_PACKAGE_PATH_NOT_EXPORTED` — `exports` has no `"."` key, and the loader resolves
+  `<name>/package.json` instead, which the probe confirms), plus
+  `modules/renewal/index` and `modules/renewal/__tests__/service.spec`, which the
+  longer `./modules/*` pattern rewrites onto a nonexistent `…/index.js` — so compiled
+  module specs were never reachable by specifier, in any packaging. The `import`
+  condition was re-checked against `fs.existsSync` because `import.meta.resolve` maps
+  through `exports` without stat'ing and answers a URL for a removed file; it is also
+  the only condition that proves `./admin` → `admin/index.mjs` survives (`require`
+  selects `admin/index.js`).
+- **Nothing reaches for a path it does not own.** The directory set the framework probes
+  inside the package — `modules/` (10, each with an `index.js`), `links/`, `workflows/`,
+  `subscribers/`, `jobs/`, `api/`, `admin/` (`get-resolved-plugins.js:71` and
+  `@medusajs/medusa/dist/loaders/index.js:38,48,116,124,127`) — is present in the new
+  tree, and `.medusa/server/medusa-plugin-options.json` stays absent, which
+  `get-resolved-plugins.js:45-56` tolerates and which keeps the host's admin
+  `type: "package"`. The packed code performs no `__dirname`-relative read and no
+  `readFileSync`/`readdirSync` at all, and a scan of all 690 relative `require()`
+  targets across its 335 `.js`/`.mjs` files finds 0 missing and 0 escaping the package
+  root; the admin bundle is self-contained (0 relative imports, 0 self-references).
+  Both hosts' `plugins`/`modules` entries name only the bare package — the relative
+  resolves in those files (`./src/modules/desktop-seat`, `./src/modules/smtp-notification`,
+  `./src/lib/auth-email-templates.ts`) are host-owned. And the five reorder sites the
+  saas host documents patching by hand
+  (`medusa-saas/docs/plugins/2026-09-21-plugin-issues-for-source-repos.md`) all sit
+  under `.medusa/server/src/` and are present in both trees.
+
+What the boot still owns is registration, not resolution: it is the only thing that
+shows Awilix wiring, route mounting, the cron registrations and the admin build working
+in a real app. That is 6.2's boot-the-new-version rehearsal, where booting is the point
+and the database is this plan's own, and not a check to run inside a host repository
+this plan does not own.
 
 ### B. Migration harness (Q3 / H1)
 
@@ -368,8 +463,13 @@ Order:
 - [ ] 1.1 `files: [".medusa/server/src"]`; `npm pack --dry-run` before/after with
       sizes and the file list.
 - [ ] 1.2 Unpack to a temp dir; assert every `exports` target resolves.
-- [ ] 1.3 Install the tarball into the host app per `local-dev` and boot it: modules,
-      workflows, routes and the admin bundle must all register.
+- [ ] 1.3 Prove the packed tree against a host app. Its install-plus-boot form was **not
+      run** — the install rewrites a tracked `package.json` and lockfile in a host
+      repository outside this worktree, and the boot drives that host's own database;
+      §A records what replaced it and why. The read-only half is done: every specifier
+      either host writes, and every specifier the plugin loader builds, resolves inside
+      the narrowed tree. Unchecked here is the half only a boot settles — modules,
+      workflows, routes and the admin bundle *register* — which 6.2 rehearses.
 - [ ] 1.4 `CHANGELOG.md` + `docs/releases/1.6.0-host-upgrade.md`: what the package
       contains, stated once.
 - [ ] 1.5 With the user: does `v1.6.0` move again or does this ride a patch version.
@@ -466,7 +566,12 @@ and a rollback that was rehearsed on a scratch database before the upgrade ran.
   `mikro_orm_migrations` rows the real bootstrap writes, or the harness proves the
   wrong thing.
 - **R4 — narrowing `files` breaks a consumer** importing something outside `exports`.
-  Phase 1.3 (boot the host app from the installed tarball) is the check, not the diff.
+  Settled without the boot §A originally called for: the two real hosts write two
+  distinct specifiers between them and both resolve, the tarball a host still holds from
+  before the narrowing differs from the new one by 19 repository-payload paths and 16
+  compiled `__tests__` specs and nothing else, and all 690 relative `require()` targets
+  inside the packed tree resolve within it. What stays open is registration, which moves
+  to 6.2. See §A for the measurements.
 - **R5 — one-way data on prod.** `up()` soft-deletes drift rows, `down()` does not
   resurrect them, and per-module migration means a partial schema is reachable even
   though each migration is atomic. The rehearsed dump is the only undo.
