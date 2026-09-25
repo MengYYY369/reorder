@@ -238,6 +238,26 @@ was covered by any assertion in the http suite.
 - All migrations now import `Migration` from `@medusajs/framework/mikro-orm/migrations`,
   removing four direct imports of a package the plugin does not declare; the host
   resolves mikro-orm once.
+- **the package ships the plugin, not the repository:** `files` packed the whole
+  `.medusa/server` build output, so a host install carried everything `medusa
+  plugin:build` compiles — 29 Playwright files under `.medusa/server/e2e`,
+  `.medusa/server/playwright.config.js` and the compiled `scripts/` tree, whose
+  seed script alone is 193.5 kB. It now ships `.medusa/server/src`: measured
+  against one and the same build output, 400 files / 929.7 kB became 366 files /
+  826.7 kB (5.0 MB unpacked → 4.5 MB).
+  Nothing importable was lost, and that is asserted rather than assumed:
+  `scripts/assert-package-surface.mjs` (`npm run verify:package`, or
+  `corepack yarn verify:package`) extracts the tarball, fails on any `exports`
+  target missing from the packed tree, and fails on any target left under
+  `.medusa/server/` outside `src` — the exact path class `files` no longer
+  ships — while printing the targets it skips. `exports` itself is unchanged
+  from 1.5.0, so the seven keys and nine targets a host resolves through point
+  at the same files they did before; `prepublishOnly` still runs the build and
+  nothing else. Two things this does not reach: the 28 compiled
+  `src/**/__tests__` specs still ship, because they live under `src` and only
+  the build can exclude them, and the `./providers/*` key matches no packed file
+  — `src/providers/` holds only the Medusa template README, as it did in 1.5.0.
+  The verifier prints that one as matching nothing instead of failing on it.
 
 ## [1.5.0] - 2026-09-19
 

@@ -9,7 +9,7 @@
   "author": "Reorder (https://reorderjs.com)",
   "license": "MIT",
   "files": [
-    ".medusa/server"
+    ".medusa/server/src"
   ],
   "exports": {
     "./package.json": "./package.json",
@@ -34,6 +34,7 @@
   ],
   "scripts": {
     "build": "medusa plugin:build",
+    "verify:package": "node -e \"require('node:fs').mkdirSync('.scratch/pkg',{recursive:true})\" && npm pack --quiet --pack-destination .scratch/pkg && node scripts/assert-package-surface.mjs .scratch/pkg",
     "dev": "medusa plugin:develop",
     "prepublishOnly": "medusa plugin:build",
     "test:integration:http": "TEST_TYPE=integration:http NODE_OPTIONS=--experimental-vm-modules jest --silent=false --maxWorkers=2 --forceExit",
