@@ -41,10 +41,10 @@ This file defines how coding agents should work in the official `reorder` reposi
 Run the smallest relevant validation command for your changes:
 
 ```bash
-yarn build
-yarn test:integration:http
-yarn test:integration:modules
-yarn test:e2e                                      # Requires running Medusa backend (ADMIN_BASE_URL)
+corepack yarn build
+corepack yarn test:integration:http
+corepack yarn test:integration:modules
+corepack yarn test:e2e                             # Requires running Medusa backend (ADMIN_BASE_URL)
 ```
 
 Both jest gates need a reachable PostgreSQL server, and `DATABASE_URL` is not what
@@ -68,14 +68,18 @@ unset PW
 ```
 
 Never paste a literal credential into the `$PW` slot: the value belongs in that shell
-variable and is `unset` when done. Confirm `pg_isready` answers before blaming code for
-`ORM not configured`. Extract the password with the `new URL()` form above rather than
-by hand: URL parsing discards a stray `\r`, while a `grep`/`cut`/`sed` slice keeps
-whatever sits at end-of-line (the `grep '^DATABASE_URL=' .env | cut -d '=' -f2-` in
-`.agents/scripts/sync-local-env.sh:69` does so on any reader that does not translate
-line endings — `read -r` and node pass the `\r` through, Git Bash's own `grep`/`sed`
-strip it). A CRLF `.env` therefore comes from whatever wrote the file, never from a
-checkout: it is gitignored (`.gitignore:2`), so `core.autocrlf` cannot reach it.
+variable and is `unset` when done. If that `node` line exits non-zero — `.env` absent, or
+no usable `DATABASE_URL` in it — stop and ask the user and do not invent credentials
+(under `set -e` the block aborts there, before `docker` is reached). Confirm `pg_isready`
+answers before blaming code for `ORM not configured`. Extract the password with the
+`new URL()` form above rather than by hand: measured on a synthetic CRLF file, URL
+parsing discards a stray trailing `\r`, while the raw slice keeps it and
+`decodeURIComponent` returns it inside the value. The readers that keep the byte are
+`read -r`, node, and `cut` fed directly; Git Bash's `grep` and `sed` translate line
+endings and strip it, so a hand-rolled slice is unsafe only on a reader that does not
+translate — the URL form is safe on all of them. A CRLF `.env` therefore comes from
+whatever wrote the file, never from a checkout: it is gitignored (`.gitignore:2`), so
+`core.autocrlf` cannot reach it.
 
 Two failure patterns that are the machine and
 not the code: `*/__tests__/service.spec.ts` and
