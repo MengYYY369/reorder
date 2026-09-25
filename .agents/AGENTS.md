@@ -51,7 +51,25 @@ Both jest gates need a reachable PostgreSQL server, and `DATABASE_URL` is not wh
 gives them one: `@medusajs/test-utils` creates a database per suite from
 `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD`
 (`@medusajs/test-utils/dist/database.js:12-20`, where `DB_USERNAME` defaults to an
-empty string), so export all four. Two failure patterns that are the machine and
+empty string), so export all four. The gate database is the container
+`reorder-acceptance-pg` — that name replaces `medusa-epay-pg`, which no longer exists
+on this machine — published to `127.0.0.1:5432` only, under the `user` role taken from
+`.env`'s `DATABASE_URL`, which must be able to `CREATE DATABASE` because one database
+is created per suite:
+
+```bash
+docker start reorder-acceptance-pg   # or, only if the container does not exist yet:
+docker run -d --name reorder-acceptance-pg -e POSTGRES_USER=user \
+  -e POSTGRES_PASSWORD=<password decoded from .env's DATABASE_URL> \
+  -p 127.0.0.1:5432:5432 postgres:16-alpine
+docker exec reorder-acceptance-pg pg_isready -U user   # -> "accepting connections"
+```
+
+Confirm `pg_isready` answers before blaming code for `ORM not configured`. When you
+extract the password from a `.env` that git checked out with CRLF endings
+(`core.autocrlf=true`), strip `\r` before matching, or the trailing carriage return
+becomes part of the password and authentication fails.
+Two failure patterns that are the machine and
 not the code: `*/__tests__/service.spec.ts` and
 `activity-log/create-subscription-log-event.spec.ts` reporting `AggregateError` →
 `ORM not configured`, and an unattended http run losing ~2 suites to OS-killed
