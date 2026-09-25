@@ -154,8 +154,8 @@ const stackingInput = (overrides: Partial<StackingCall> = {}): StackingCall => (
  * `resolveStackingDecision` is given `StackingContainer`, whose reader is
  * `Pick<SubscriptionModuleService, "listSubscriptions">`, so the fake has to
  * satisfy the real method: `listSubscriptions` by that name, answering with rows
- * built at `StackingSubscriptionRecord` width (see `row` above). The earlier
- * shape typed the parameter generic (`resolve: <T>(key: string) => T`) and needed
+ * built at `StackingSubscriptionRecord` width (see `row` above). Typing the
+ * parameter generic instead (`resolve: <T>(key: string) => T`) would need
  * `subscriptionModule as unknown as T` here to satisfy it — an `any` equivalent
  * whose effect was to let the fake claim anything about the real read, which is
  * the same reason the production side dropped its `as never` / `as unknown as`

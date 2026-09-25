@@ -30,7 +30,7 @@
  * set, and nothing outside it, from both states and changed_fields`
  * (`__tests__/normalize-log-event.spec.ts`). Mirror a new member into both copies
  * in the same change; that is the step the addition needs, because those payloads
- * decide what the pins check. Measured against the current 27 cases:
+ * decide what the pins check. Measured against the specs as they stand:
  *
  * - a member added here alone, absent from the spec copies, reddens nothing —
  *   no payload carries a key they have never heard of. Silence here is not

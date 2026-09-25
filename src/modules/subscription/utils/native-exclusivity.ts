@@ -36,7 +36,7 @@ export async function findLiveNativeRecurrences(
     customer_id: input.customer_id,
     status: [...TRACK_OCCUPYING_NATIVE_STATUSES],
     ...nativeSubscriptionReferenceFilter(),
-  } as never)) as unknown as NativeRowCandidate[]
+  })) as NativeRowCandidate[]
 }
 
 /**

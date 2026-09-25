@@ -38,7 +38,7 @@ import { MedusaError } from "@medusajs/framework/utils"
 /**
  * One entry of the `errors` array the engine returns for `throwOnError: false`.
  */
-export type SerializedStepFailure = {
+type SerializedStepFailure = {
   action?: unknown
   handlerType?: unknown
   error?: unknown

@@ -138,7 +138,7 @@ export function restoreForUpcomingCycleReconcile(
   }
 }
 
-export function findUpcomingRenewalCycle(
+function findUpcomingRenewalCycle(
   cycles: UpcomingRenewalCycleRecord[],
   scheduledFor: Date
 ) {

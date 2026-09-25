@@ -73,11 +73,55 @@ type EnsureNextRenewalCycleCompensation =
       }>
     }
 
+type EnsureNextRenewalCycleDeletedSnapshot = Extract<
+  EnsureNextRenewalCycleCompensation,
+  { action: "deleted" }
+>["previous"][number]
+
 /**
- * Rollback order for the `deleted` compensation: one row comes back live (the
- * most future, smaller id first on a tie) and every extra is recreated
- * soft-deleted, because `renewal_cycle_one_scheduled_per_subscription` permits
- * a single live `scheduled` row per subscription.
+ * The two writes a `deleted` rollback performs, narrowed to exactly what it
+ * calls so its ordering rule is reachable from a test without a workflow engine.
+ *
+ * It is the one place a rollback could leave two live chargeable cycles behind,
+ * and it can no longer be driven through a real run: the uniqueness index means
+ * the step is only ever handed one live `scheduled` row to delete. A database
+ * whose index was lost is the shape this covers, and it is the shape its spec
+ * drives directly.
+ */
+export type RenewalCycleRestoreWriter = {
+  createRenewalCycles: (
+    data: EnsureNextRenewalCycleDeletedSnapshot[]
+  ) => Promise<unknown>
+  softDeleteRenewalCycles: (ids: string[]) => Promise<unknown>
+}
+
+/**
+ * Restore the rows the step deleted, keeping the invariant true at every instant
+ * rather than only at the end: extras are inserted and immediately soft-deleted,
+ * sequentially, and the keeper — the most future row, smaller id first on a tie
+ * (`orderCyclesForRestore`) — is recreated live last. Extras are never marked
+ * `failed`, which `scheduler-query.ts` selects alongside `scheduled` and would
+ * therefore re-arm for a charge.
+ */
+export async function restoreDeletedUpcomingCycles(
+  writer: RenewalCycleRestoreWriter,
+  deleted: RestoreableRenewalCycle[]
+): Promise<void> {
+  const [keeper, ...extras] = orderCyclesForRestore(deleted)
+
+  for (const cycle of extras) {
+    await writer.createRenewalCycles([toRestoreWrite(cycle)])
+    await writer.softDeleteRenewalCycles([cycle.id])
+  }
+
+  if (keeper) {
+    await writer.createRenewalCycles([toRestoreWrite(keeper)])
+  }
+}
+
+/**
+ * Which row the `deleted` compensation keeps live: the most future, smaller id
+ * first on a tie.
  *
  * That reproduces only the fallback tier of the preference the uniqueness
  * migration applies. The migration keeps the row whose `scheduled_for` already
@@ -90,7 +134,7 @@ type EnsureNextRenewalCycleCompensation =
  * Compensation payloads travel through JSON, so dates may arrive as strings.
  */
 function orderCyclesForRestore<
-  TRestorable extends { id: string; scheduled_for: Date }
+  TRestorable extends { id: string; scheduled_for: Date | string }
 >(cycles: TRestorable[]): TRestorable[] {
   return [...cycles].sort((left, right) => {
     const delta =
@@ -103,6 +147,26 @@ function orderCyclesForRestore<
 
     return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
   })
+}
+
+/** A deleted-row snapshot as the rollback receives it: dates may be JSON. */
+export type RestoreableRenewalCycle = Omit<
+  EnsureNextRenewalCycleDeletedSnapshot,
+  "scheduled_for"
+> & {
+  scheduled_for: Date | string
+}
+
+/**
+ * A row as it is written back. `scheduled_for` is rebuilt as a `Date` because a
+ * compensation that round-tripped the engine carries an ISO string, and leaving
+ * that to the ORM to reinterpret would make the restored row's type depend on
+ * whether a rollback happened to run through serialization.
+ */
+function toRestoreWrite(
+  cycle: RestoreableRenewalCycle
+): EnsureNextRenewalCycleDeletedSnapshot {
+  return { ...cycle, scheduled_for: new Date(cycle.scheduled_for) }
 }
 
 export const ensureNextRenewalCycleStep = createStep(
@@ -125,7 +189,7 @@ export const ensureNextRenewalCycleStep = createStep(
 
     const existingCycles = (await renewalModule.listRenewalCycles({
       subscription_id: subscription.id,
-    } as any)) as UpcomingRenewalCycleRecord[]
+    } as Record<string, unknown>)) as UpcomingRenewalCycleRecord[]
 
     if (!shouldSubscriptionHaveUpcomingRenewalCycle(subscription)) {
       const scheduledCycles = existingCycles.filter(
@@ -404,28 +468,7 @@ export const ensureNextRenewalCycleStep = createStep(
     }
 
     if (compensation.action === "deleted") {
-      const restore = orderCyclesForRestore(compensation.previous)
-      const [keeper, ...extras] = restore
-
-      /**
-       * Exactly one row may come back live. Drift can have handed this step
-       * several `scheduled` rows to delete, and recreating them all as live
-       * rows would break `renewal_cycle_one_scheduled_per_subscription` on the
-       * second insert, leaving the rollback half-applied with a duplicate
-       * upcoming cycle on the subscription it was meant to repair. Extras are
-       * soft-deleted again right after they are inserted (never marked
-       * `failed`, which `scheduler-query.ts` would re-arm), so at no point do
-       * two live `scheduled` rows exist for the same subscription.
-       */
-      for (const cycle of extras) {
-        await renewalModule.createRenewalCycles(cycle)
-        await renewalModule.softDeleteRenewalCycles([cycle.id])
-      }
-
-      if (keeper) {
-        await renewalModule.createRenewalCycles(keeper)
-      }
-
+      await restoreDeletedUpcomingCycles(renewalModule, compensation.previous)
       return
     }
 
