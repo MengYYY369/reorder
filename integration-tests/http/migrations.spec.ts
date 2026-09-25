@@ -286,12 +286,84 @@ async function probeQuery(
 }
 
 /**
+ * The migrations a probe database has recorded as applied, sorted so it can be
+ * compared against a directory listing. The single reader of `mikro_orm_migrations`
+ * for the set comparisons: `migrateProbe` applying a directory and the cases
+ * claiming a database reached that directory's state must go through the same
+ * query, or the two could disagree about what "applied" means.
+ */
+async function appliedMigrationNames(wrapper: ProbeWrapper): Promise<string[]> {
+  return migrationNames(
+    await probeQuery(wrapper, `select name from mikro_orm_migrations order by id`)
+  )
+}
+
+/**
+ * A failure a helper has already caught and must keep, boxed so that "there was
+ * no error" (`undefined`) and "something threw `undefined`" stay distinguishable
+ * in the teardown helpers below.
+ */
+type Failure = { readonly error: unknown }
+
+/** How an unknown rejection reads when it has to be reported inside another error. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+}
+
+/**
+ * Attempts every teardown step even when an earlier one throws, and returns what
+ * went wrong instead of throwing the first failure. The order matters: a probe's
+ * `close()` must never be able to skip its `drop()`, because the next run would
+ * then read a database this process never migrated (see `probeDatabase`), and a
+ * helper that rethrew immediately is how that leak happens.
+ */
+async function runTeardown(
+  steps: Array<{ label: string; run: () => Promise<void> }>
+): Promise<string[]> {
+  const notes: string[] = []
+
+  for (const step of steps) {
+    try {
+      await step.run()
+    } catch (error) {
+      notes.push(`${step.label}: ${describeError(error)}`)
+    }
+  }
+
+  return notes
+}
+
+/**
+ * The error a caller should throw when a teardown step failed. The error the body
+ * was already failing with wins — it is the one that explains the red, and a
+ * `close()` or `drop()` problem must not be able to replace it — but that error
+ * gains the teardown failure on its message, so neither half is swallowed. A body
+ * error that is not an `Error` cannot carry a note, so it comes back as one that
+ * quotes both rather than dropping the teardown problem.
+ */
+function combineFailure(primary: Failure | undefined, teardownNote: string): Error {
+  if (primary === undefined) {
+    return new Error(teardownNote)
+  }
+
+  if (primary.error instanceof Error) {
+    primary.error.message = `${primary.error.message} [teardown: ${teardownNote}]`
+    return primary.error
+  }
+
+  return new Error(
+    `${describeError(primary.error)} [teardown: ${teardownNote}]`
+  )
+}
+
+/**
  * Runs `use` against a migrator bound to ONE directory over ONE probe database,
  * built the same way `runMigrationsFromPath` builds its own: `getMikroOrmConfig`
  * plus `MikroORM.init` with `discovery.warnWhenNoEntities` (needed because the
  * migrator is constructed with no entities), and `CustomDBMigrator` comes along
  * because `getMikroOrmConfig` registers it — so this is the same entry point
- * `medusa migrate` uses, not a `migrationsList` shortcut. Closed in `finally`.
+ * `medusa migrate` uses, not a `migrationsList` shortcut. Closed whatever `use`
+ * did, in a way that cannot replace `use`'s error with a close error.
  */
 async function withMigratorFor<T>(
   dbName: string,
@@ -313,10 +385,87 @@ async function withMigratorFor<T>(
     discovery: { warnWhenNoEntities: false },
   })
 
+  let failure: Failure | undefined
+
   try {
     return await use(orm.getMigrator())
+  } catch (error) {
+    failure = { error }
+    throw error
   } finally {
-    await orm.close()
+    // A plain `finally { await orm.close() }` would replace the migrator failure
+    // the case is reporting with whatever `close()` throws — and every case here
+    // throws through this helper on purpose (`rerunNormalize` guards, the revert
+    // cases will too), so the masking error would be the common path rather than
+    // the exotic one. The teardown notes go onto the primary instead.
+    const notes = await runTeardown([
+      {
+        label: `migrator orm for ${dbName}`,
+        run: async () => {
+          await orm.close()
+        },
+      },
+    ])
+
+    if (notes.length > 0) {
+      throw combineFailure(failure, notes.join("; "))
+    }
+  }
+}
+
+/** The one database and one wrapper a solo probe case gets to itself. */
+type SoloProbe = {
+  readonly name: string
+  readonly wrapper: ProbeWrapper
+}
+
+/**
+ * The lifecycle every single-directory probe case needs: create a fresh database,
+ * migrate `migrationPaths` onto it, hand the case the wrapper, then close and
+ * drop it whatever the case did. Task 4 and Task 6 each wrote all of that out in
+ * full and Task 7 needs it again, so it lives here once.
+ *
+ * Each case gets its OWN database rather than sharing one built by a
+ * `beforeAll`, and that is the same attribution argument as the describe split one
+ * level down: a probe created in a shared hook makes the first case to reject
+ * poison every sibling's report, and these cases mutate
+ * `mikro_orm_migrations` (`openDriftWindow` deletes a row from it), so one shared
+ * database would also make the applied-set comparisons depend on case order.
+ */
+async function withSoloProbe<T>(
+  dbName: string,
+  migrationPaths: string[],
+  use: (probe: SoloProbe) => Promise<T>
+): Promise<T> {
+  const solo = await probeDatabase(dbName)
+  let wrapper: ProbeWrapper | undefined
+  let failure: Failure | undefined
+
+  try {
+    wrapper = await migrateProbe(solo, migrationPaths)
+    return await use({ name: dbName, wrapper })
+  } catch (error) {
+    failure = { error }
+    throw error
+  } finally {
+    const notes = await runTeardown([
+      {
+        label: `solo probe orm ${dbName}`,
+        run: async () => {
+          await wrapper?.orm.close()
+        },
+      },
+      {
+        label: `solo probe drop ${dbName}`,
+        run: async () => {
+          await solo.drop()
+        },
+      },
+    ])
+
+    if (notes.length > 0) {
+      throw combineFailure(failure, notes.join("; "))
+    }
   }
 }
 
@@ -360,8 +509,27 @@ function readRowsFromRaw(result: unknown): ProbeRow[] {
   )
 }
 
+/**
+ * The `name` column of the rows, sorted.
+ *
+ * A row whose name is missing throws with that row quoted instead of becoming
+ * `String(undefined)`: the literal `"undefined"` would keep the compared set the
+ * right size and shape, so a migration recorded without a name — or a select that
+ * stopped projecting one — would pass an equality check against a directory
+ * listing rather than be reported as the broken row it is.
+ */
 function migrationNames(rows: ProbeRow[]): string[] {
-  return rows.map((row) => String(row.name)).sort()
+  return rows
+    .map((row) => {
+      if (typeof row.name !== "string") {
+        throw new Error(
+          `mikro_orm_migrations row carries no name: ${JSON.stringify(row)}`
+        )
+      }
+
+      return row.name
+    })
+    .sort()
 }
 
 /**
@@ -542,7 +710,19 @@ medusaIntegrationTestRunner({
   medusaConfigFile: path.resolve(process.cwd(), "integration-tests"),
   env: { JWT_SECRET: "supersecret", COOKIE_SECRET: "supersecret" },
   testSuite: ({ getContainer }) => {
-    describe("plugin migrations", () => {
+    /**
+     * Two sibling describes rather than one, and the split is load-bearing: jest
+     * inherits a failing `beforeAll` into EVERY case of that describe, so a case
+     * that shares the nine-directory probe's hook can never attribute its own red.
+     * With `Migration20260924120000`'s `to_regclass` guard neutralized, the probe
+     * below rejects while applying `renewal` — the 7th of the 9, before
+     * `subscription` creates its table — and all eight cases then report that one
+     * inherited error while their own bodies never run. The renewal-only probes
+     * therefore live in the describe after this one, which has no hook for them to
+     * inherit, and each builds its own single-directory database inside its own
+     * body through `withSoloProbe`.
+     */
+    describe("plugin migrations on the probe over every shipped directory", () => {
       let probe!: ProbeDatabase
       let probeWrapper!: ProbeWrapper
 
@@ -553,13 +733,27 @@ medusaIntegrationTestRunner({
 
       afterAll(async () => {
         // Either is unset when `beforeAll` itself rejected, and the runner's own
-        // cleanup drops the suite database but never this one. The `finally` is
-        // the point: a rejected `close()` must not be able to skip the drop and
-        // hand the next run a database this one never migrated.
-        try {
-          await probeWrapper?.orm.close()
-        } finally {
-          await probe?.drop()
+        // cleanup drops the suite database but never this one. Teardown goes
+        // through `runTeardown` so a rejected `close()` cannot skip the drop and
+        // hand the next run a database this one never migrated — and so neither
+        // failure is swallowed.
+        const notes = await runTeardown([
+          {
+            label: "shared probe orm",
+            run: async () => {
+              await probeWrapper?.orm.close()
+            },
+          },
+          {
+            label: "shared probe drop",
+            run: async () => {
+              await probe?.drop()
+            },
+          },
+        ])
+
+        if (notes.length > 0) {
+          throw new Error(`${PROBE_DB_NAME} teardown: ${notes.join("; ")}`)
         }
       })
 
@@ -578,50 +772,6 @@ medusaIntegrationTestRunner({
         ).toEqual([])
       })
 
-      it("reaches the migration state of one module directory", async () => {
-        // A one-entry list takes the other branch of `setupDatabase()`: the
-        // migrations are applied by name, which only holds because this database
-        // was created moments ago and so has pending ones. Re-running
-        // `setupDatabase()` over an already-migrated database is not allowed here
-        // at all — with nothing pending that branch regenerates the schema from
-        // the entities and would wipe the seeded rows.
-        const soloName = `${PROBE_DB_NAME}_renewal_only`
-        const solo = await probeDatabase(soloName)
-        let soloWrapper: ProbeWrapper | undefined
-
-        try {
-          soloWrapper = await migrateProbe(solo, [migrationDirOf("renewal")])
-
-          expect(
-            migrationNames(
-              await probeQuery(
-                soloWrapper,
-                `select name from mikro_orm_migrations order by id`
-              )
-            )
-          ).toEqual(migrationNamesIn(migrationDirOf("renewal")).sort())
-
-          // Bound to one directory AND to this database: a migrator built over a
-          // different module sees that module's migrations as still pending, which
-          // is what the re-run and revert cases in this phase rely on.
-          const pendingForActivityLog = await withMigratorFor(
-            soloName,
-            migrationDirOf("activity-log"),
-            (migrator) => migrator.getPendingMigrations()
-          )
-
-          expect(pendingForActivityLog.map((entry) => entry.name).sort()).toEqual(
-            migrationNamesIn(migrationDirOf("activity-log")).sort()
-          )
-        } finally {
-          try {
-            await soloWrapper?.orm.close()
-          } finally {
-            await solo.drop()
-          }
-        }
-      })
-
       it("applies every migration the app bootstrap applies", async () => {
         const expected = expectedMigrationNames()
 
@@ -636,12 +786,7 @@ medusaIntegrationTestRunner({
           expected.includes(name)
         )
 
-        const appliedByProbe = migrationNames(
-          await probeQuery(
-            probeWrapper,
-            `select name from mikro_orm_migrations order by id`
-          )
-        )
+        const appliedByProbe = await appliedMigrationNames(probeWrapper)
 
         // The two sets come from two different databases: the suite one the
         // bootstrap migrated and this probe one. Their equality is the comparison
@@ -775,95 +920,157 @@ medusaIntegrationTestRunner({
         // different survivor cannot pass either.
         expect(await liveScheduled(probeWrapper, "sub_t4")).toEqual(["cyc_t4_keep"])
       })
+    })
 
-      /**
-       * The four cases above this one all run on a database where `subscription`
-       * exists. This one runs where it does not, which is the state a FIRST
-       * INSTALL is in: the plugin's module migrators go in module order, so
-       * `renewal` is migrated long before `subscription` creates its table
-       * (renewal is the 7th of the 9 directories in `MIGRATION_PATHS`,
-       * subscription the 9th, and the app bootstrap's own migration log puts
-       * `MODULE: renewal` before `MODULE: subscription` exactly that way round).
-       * `Migration20260924120000`'s normalization SQL then joins `subscription`
-       * only if `to_regclass` says the relation answers — that guard is the only
-       * thing standing between a first install and a failed boot, and nothing but
-       * this case asserts it.
-       */
-      it("normalizes without a subscription table at all", async () => {
-        // The database is built over the renewal directory ALONE, and through
-        // `probeDatabase` + `migrateProbe` rather than a bare
-        // `getProbeWrapperFor(...)` whose `setupDatabase()` the case calls itself:
-        // with exactly one migration path and NOTHING pending, that call falls
-        // through to `orm.schema.refreshDatabase()`, which regenerates the schema
-        // from the entities (`database.js:130-140`) and would hand this case a
-        // `subscription` table the migration never created — the guard would then
-        // be false for the wrong reason and the case would test nothing. `probeDatabase`
-        // drops before it creates, so this name is freshly created here and both
-        // renewal migrations are applied by name. That apply is the first half of
-        // the proof: it IS the first-install boot path, and it must not throw.
-        const soloName = `${PROBE_DB_NAME}_normalize_solo`
-        const solo = await probeDatabase(soloName)
-        let soloWrapper: ProbeWrapper | undefined
-
-        try {
-          soloWrapper = await migrateProbe(solo, [migrationDirOf("renewal")])
-
-          // The negative half, asserted rather than assumed: the table really is
-          // absent in this database. Without it a later change that widens the
-          // directory list, or one that lands this probe on the entity-derived
-          // branch above, would leave the case green while it normalized a
-          // database that has the table after all. Both spellings are read
-          // because the migration guards on the unqualified `'"subscription"'`
-          // — resolved through `search_path`, see its comment — while a
-          // schema-qualified read is the stronger statement about the probe
-          // itself; on this public-schema database they must agree on NULL.
-          expect(
-            await probeQuery(
-              soloWrapper,
-              `select to_regclass('public.subscription') as qualified,
-                      to_regclass('"subscription"') as searched`
+    /**
+     * The two probes that migrate the renewal directory ALONE, which is the state
+     * a FIRST INSTALL is in: the plugin's module migrators go in module order, so
+     * `renewal` is migrated long before `subscription` creates its table (renewal
+     * is the 7th of the 9 directories in `MIGRATION_PATHS`, subscription the 9th,
+     * and the app bootstrap's own migration log puts `MODULE: renewal` before
+     * `MODULE: subscription` exactly that way round). `Migration20260924120000`'s
+     * normalization SQL then joins `subscription` only if `to_regclass` says the
+     * relation answers, and that guard is the only thing standing between a first
+     * install and a failed boot.
+     *
+     * No `beforeAll` here, deliberately: these cases build their own database
+     * inside their own bodies (`withSoloProbe`), so the error a mutated migration
+     * produces names the case that met it instead of being inherited from a hook
+     * the whole describe shares. One hook over a single renewal-only probe would
+     * reintroduce exactly that, one level down, and these two cases also delete
+     * rows from `mikro_orm_migrations` (`openDriftWindow`), which would make one
+     * case's applied-set comparison depend on which of them jest ran first.
+     */
+    describe("plugin migrations on a renewal-only probe", () => {
+      it("reaches the migration state of one module directory", async () => {
+        // A one-entry list takes the other branch of `setupDatabase()`: the
+        // migrations are applied by name, which only holds because this database
+        // was created moments ago and so has pending ones — `withSoloProbe` drops
+        // before it creates. The applied-set assertion is that fact stated rather
+        // than assumed; re-running `setupDatabase()` over an already-migrated
+        // database is not allowed here at all, because with nothing pending that
+        // branch regenerates the schema from the entities and would wipe seeded
+        // rows (see the case below for what that would and would not notice).
+        await withSoloProbe(
+          `${PROBE_DB_NAME}_renewal_only`,
+          [migrationDirOf("renewal")],
+          async (solo) => {
+            expect(await appliedMigrationNames(solo.wrapper)).toEqual(
+              migrationNamesIn(migrationDirOf("renewal")).sort()
             )
-          ).toEqual([{ qualified: null, searched: null }])
 
-          // Same ordering rule Task 5 hit on the shared probe, and for the same
-          // reason: the renewal directory has just created
-          // `renewal_cycle_one_scheduled_per_subscription`, so a second live
-          // `scheduled` row for one subscription is rejected by the very index
-          // this migration installs unless the drift window is opened first.
-          await openDriftWindow(soloWrapper)
+            // Bound to one directory AND to this database: a migrator built over a
+            // different module sees that module's migrations as still pending, which
+            // is what the re-run and revert cases in this phase rely on.
+            const pendingForActivityLog = await withMigratorFor(
+              solo.name,
+              migrationDirOf("activity-log"),
+              (migrator) => migrator.getPendingMigrations()
+            )
 
-          // No `seedSubscription` here — there is nothing to insert into. The
-          // orphan id is insertable because `renewal_cycle.subscription_id` is a
-          // plain `text not null` column with no foreign key
-          // (`Migration20260329185930.ts:7`).
-          await seedCycle(soloWrapper, { id: "cyc_solo_a", subscriptionId: "sub_solo", scheduledFor: "2026-08-24T00:00:00Z" })
-          await seedCycle(soloWrapper, { id: "cyc_solo_b", subscriptionId: "sub_solo", scheduledFor: "2026-09-24T00:00:00Z" })
-
-          await rerunNormalize(soloName, soloWrapper)
-
-          // The dedup still happened, down to the row the fallback comparator
-          // keeps: with no entitlement date to consult, `scheduled_for desc`
-          // decides, so the later cycle survives. That is what the migration
-          // promises for such a database ("a database with no `subscription`
-          // table cannot hold drift against an entitlement date, so the fallback
-          // ordering is sufficient there") — and it is the half a guard written
-          // the other way round loses. Measured: with `ELSE return;` added to the
-          // guard, so a missing `subscription` skips the normalization outright,
-          // this is the only one of the eight cases that reddens, and it reddens
-          // on the drift the skipped normalization leaves behind
-          // (`could not create unique index ... Key (subscription_id)=(sub_solo)
-          // is duplicated`) because both seeded rows are still live. Forcing the
-          // join the opposite way instead aborts with
-          // `relation "subscription" does not exist`, which is the first-install
-          // boot failure the guard exists to prevent.
-          expect(await liveScheduled(soloWrapper, "sub_solo")).toEqual(["cyc_solo_b"])
-        } finally {
-          try {
-            await soloWrapper?.orm.close()
-          } finally {
-            await solo.drop()
+            expect(pendingForActivityLog.map((entry) => entry.name).sort()).toEqual(
+              migrationNamesIn(migrationDirOf("activity-log")).sort()
+            )
           }
-        }
+        )
+      })
+
+      it("normalizes without a subscription table at all", async () => {
+        await withSoloProbe(
+          `${PROBE_DB_NAME}_normalize_solo`,
+          [migrationDirOf("renewal")],
+          async (solo) => {
+            // The applied set comes first, because it is what makes the rest of
+            // this case mean what it says: THIS directory's migrations ran on
+            // THIS database and nothing else did. `migrationNamesIn` is the same
+            // listing the harness itself globs, so a mismatch can only mean the
+            // probe ended up somewhere other than the renewal directory alone —
+            // a widened path list, a database name reused across cases, a
+            // wrapper built over another module.
+            //
+            // It is not, however, a net for `setupDatabase()`'s entity-derived
+            // fall-through (with exactly one path and nothing pending it
+            // regenerates the schema from entities instead of applying
+            // migrations, `database.js:130-140`), and the case comment that
+            // claimed it was is wrong on both halves, measured here: such a
+            // wrapper loads the one directory's models only
+            // (`getProbeWrapperFor`) and every MikroORM instance owns its
+            // `MetadataStorage` (`@mikro-orm/core/MikroORM.js:108`), so no
+            // `subscription` table can appear for the assertion below to trip
+            // on; and calling `setupDatabase()` twice over the same fresh
+            // database leaves the first pass' rows in `mikro_orm_migrations`,
+            // because `Migrator.getPendingMigrations()` creates that table itself
+            // (`@mikro-orm/migrations/Migrator.js:192` ->
+            // `MigrationStorage.js:83-102`) and the regenerate does not empty it
+            // — so the set comparison still passes, and it passes honestly,
+            // because the migrations did run in that database. The reach of this
+            // assertion is the migrated-something-else direction, and it is not
+            // redundant with the one below: with it removed and the list widened
+            // to two directories all eight cases went green; with it restored
+            // this is the only one red, on exactly this line.
+            expect(await appliedMigrationNames(solo.wrapper)).toEqual(
+              migrationNamesIn(migrationDirOf("renewal")).sort()
+            )
+
+            // The negative half, asserted rather than assumed: the table really
+            // is absent in this database, so the dedup below is not silently
+            // normalizing one that has it. A widening that brings the table with
+            // it (the subscription directory in the list) reddens here as well as
+            // on the set comparison; one that does not (any other module)
+            // reddens on the set comparison alone, which is why both are here.
+            // Both spellings are read because the migration guards on the
+            // unqualified `'"subscription"'` — resolved through `search_path`, see
+            // its comment — while a schema-qualified read is the stronger
+            // statement about the probe itself; on this public-schema database
+            // they must agree on NULL.
+            expect(
+              await probeQuery(
+                solo.wrapper,
+                `select to_regclass('public.subscription') as qualified,
+                        to_regclass('"subscription"') as searched`
+              )
+            ).toEqual([{ qualified: null, searched: null }])
+
+            // Same ordering rule Task 5 hit on the shared probe, and for the same
+            // reason: the renewal directory has just created
+            // `renewal_cycle_one_scheduled_per_subscription`, so a second live
+            // `scheduled` row for one subscription is rejected by the very index
+            // this migration installs unless the drift window is opened first.
+            await openDriftWindow(solo.wrapper)
+
+            // No `seedSubscription` here — there is nothing to insert into. The
+            // orphan id is insertable because `renewal_cycle.subscription_id` is a
+            // plain `text not null` column with no foreign key
+            // (`Migration20260329185930.ts:7`).
+            await seedCycle(solo.wrapper, { id: "cyc_solo_a", subscriptionId: "sub_solo", scheduledFor: "2026-08-24T00:00:00Z" })
+            await seedCycle(solo.wrapper, { id: "cyc_solo_b", subscriptionId: "sub_solo", scheduledFor: "2026-09-24T00:00:00Z" })
+
+            await rerunNormalize(solo.name, solo.wrapper)
+
+            // The dedup still happened, down to the row the fallback comparator
+            // keeps: with no entitlement date to consult, `scheduled_for desc`
+            // decides, so the later cycle survives. That is what the migration
+            // promises for such a database ("a database with no `subscription`
+            // table cannot hold drift against an entitlement date, so the fallback
+            // ordering is sufficient there") — and it is the half a guard written
+            // the other way round loses. Measured: with `ELSE return;` added to the
+            // guard, so a missing `subscription` skips the normalization outright,
+            // this is the only one of the eight cases that reddens, and it reddens
+            // on the drift the skipped normalization leaves behind
+            // (`could not create unique index ... Key (subscription_id)=(sub_solo)
+            // is duplicated`) because both seeded rows are still live. Neutralizing
+            // the guard the other way instead makes the join unconditional, and this
+            // case then fails inside its own `withSoloProbe` with
+            // `relation "subscription" does not exist` — the first-install boot
+            // failure the guard exists to prevent — rather than inheriting the
+            // shared probe's rejection: measured with the guard replaced by a
+            // literal that is always non-null, the stack below is this case's own
+            // `withSoloProbe` -> `migrateProbe`, and it is the reason these two
+            // probes sit in their own describe rather than in the nine-directory one
+            // above.
+            expect(await liveScheduled(solo.wrapper, "sub_solo")).toEqual(["cyc_solo_b"])
+          }
+        )
       })
     })
   },
