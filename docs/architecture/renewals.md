@@ -116,7 +116,10 @@ plus one constraint rather than one lookup:
 
 For a subscription that should have an upcoming renewal, exactly one live
 `renewal_cycle` row stands for it, and it carries `scheduled_for` equal to
-`subscription.next_renewal_at`. Two layers make that true:
+`subscription.next_renewal_at`. The count is the enforced half: two layers below
+make no subscription ever hold two live rows. The date holds whenever the step can
+write, with one deliberate exception — `defer` leaves a row on its own date rather
+than move money that is already in flight, and says so in the log.
 
 **The reconciliation step.** `ensure-next-renewal-cycle` no longer looks for a row
 by exact date and creates another one when it finds nothing; it asks

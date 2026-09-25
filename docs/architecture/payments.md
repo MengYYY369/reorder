@@ -64,7 +64,7 @@ Provider specific requirement for PayPal: the storefront must create the checkou
 `payment_mode` and `mechanism` change together: no path updates a stored mode and
 leaves the old label standing. The rule that derives the label from the mode being
 committed — `auto` → `reorder_auto`, `manual` → `manual` — is `buildPaymentModeFields`
-(`src/workflows/utils/payment-mode-mechanism.ts:32-39`), and two sites call it: the
+(`src/workflows/utils/payment-mode-mechanism.ts:44-51`), and two sites call it: the
 write step of the auto-renew switch
 (`src/workflows/steps/set-subscription-auto-renew.ts:192-195`) and the payment-method
 update, which keeps the stored mode and re-derives the label that matches it
@@ -134,7 +134,7 @@ question stays decided by the `NATIVE-` reference prefix.
 
 A row that stores no mode at all is readable, and the default is the caller's
 choice. Two callers state it through `readStoredPaymentMode`
-(`src/workflows/utils/payment-mode-mechanism.ts:49-60`): the auto-renew switch
+(`src/workflows/utils/payment-mode-mechanism.ts:61-72`): the auto-renew switch
 treats a modeless row as `"manual"`
 (`src/workflows/steps/set-subscription-auto-renew.ts:118,187` — a row nobody
 opted into cannot be overdue), the payment-method update as `"auto"`
@@ -289,7 +289,7 @@ own customer-facing text.
 
 Anything else is neither blamed on the caller nor quoted: it keeps the HTTP status
 of the `MedusaError` it was thrown as, and the body carries one of the route's own
-fixed strings instead (`src/api/store/saas/auto-renew/route.ts:42-46,123-145`). A
+fixed strings instead (`src/api/store/saas/auto-renew/route.ts:44-48,117-149`). A
 `not_found` — the row vanishing after this handler validated it
 (`src/workflows/steps/set-subscription-auto-renew.ts:101-103,181-183`) — is
 therefore still a 404 and a `conflict` still a 409; the preserved types and the

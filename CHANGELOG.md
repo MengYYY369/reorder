@@ -92,8 +92,9 @@ was covered by any assertion in the http suite.
   nothing, and created a second future `SCHEDULED` cycle — which the scheduler
   charged at both dates. That is the RE-7 failure ticket #08 claimed was
   structurally eliminated.
-- **renewals: the invariant is a database constraint now, not a convention.** A new
-  renewal migration, `Migration20260924120000`, creates the partial unique index
+- **renewals: the at-most-one-row half of the invariant is a database constraint
+  now, not a convention.** A new renewal migration, `Migration20260924120000`,
+  creates the partial unique index
   `renewal_cycle_one_scheduled_per_subscription` on `subscription_id`, restricted to
   `status = 'scheduled' and deleted_at is null`. **`up()` normalizes before it
   constrains**, because indexing a drifted database fails outright: rows already
