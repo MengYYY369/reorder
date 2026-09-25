@@ -1,4 +1,4 @@
-import { buildShippingAddressLogStates } from "../update-subscription-shipping-address"
+import { buildShippingAddressLogStates } from "../../../workflows/update-subscription-shipping-address"
 
 describe("buildShippingAddressLogStates", () => {
   it("marks sensitive address changes through before/after flags", () => {

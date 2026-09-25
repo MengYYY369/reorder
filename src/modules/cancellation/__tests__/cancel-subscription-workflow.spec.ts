@@ -1,4 +1,4 @@
-import { buildCancelSubscriptionAnalyticsRebuildInput } from "../cancel-subscription"
+import { buildCancelSubscriptionAnalyticsRebuildInput } from "../../../workflows/cancel-subscription"
 
 describe("buildCancelSubscriptionAnalyticsRebuildInput", () => {
   it("targets the cancellation day for incremental analytics rebuild", () => {

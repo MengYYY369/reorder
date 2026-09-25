@@ -1,4 +1,4 @@
-import { buildPauseSubscriptionAnalyticsRebuildInput } from "../pause-subscription"
+import { buildPauseSubscriptionAnalyticsRebuildInput } from "../../../workflows/pause-subscription"
 
 describe("buildPauseSubscriptionAnalyticsRebuildInput", () => {
   it("targets the paused day for incremental analytics rebuild", () => {
