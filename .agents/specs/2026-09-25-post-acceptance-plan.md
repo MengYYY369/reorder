@@ -20,7 +20,7 @@ Every task includes this section. Values are copied verbatim from the spec and `
 - Install/test through **`corepack yarn`** (`packageManager` is yarn 4 in `package.json`).
 - Both jest gates need **`DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` exported** — `DATABASE_URL` does not feed the per-suite databases (`AGENTS.md:49-61`, `@medusajs/test-utils/dist/database.js:12-20`). No container is running until Task 1 creates one.
 - **Never** run `yarn build` while a gate or reviewer holds the tree: `medusa plugin:build` deletes and rewrites `.medusa/server`, which a running http suite loads (`lessons.md`, *Whole-File Restore Is Exclusive Ownership*).
-- Gate baseline to reconcile against: build 0; modules **25 suites / 270 tests**; http **35 suites / 228 tests**; an unattended http run loses ~2 suites to `SIGTERM`, so green = union of runs **plus** an isolated `--runInBand --max-old-space-size=4096` re-run of whatever was killed.
+- Gate baseline to reconcile against: build 0; modules **25 suites / 270 tests**; http **36 suites / 238 tests** (re-baselined at Phase 2's close, 2026-09-26; it was 35 / 228 through Phase 1, and the delta is `integration-tests/http/migrations.spec.ts` with its 10 cases — Phase 2 added no module spec, so the modules number is unchanged); an unattended http run loses ~2 suites to `SIGTERM`, so green = union of runs **plus** an isolated `--runInBand --max-old-space-size=4096` re-run of whatever was killed.
 - No `any`, **including in specs** — a test double gets a local type or `unknown` plus narrowing. No business rules in route handlers, no documented intended-future behavior (`AGENTS.md` *Never*).
 - `.scratch/source-repo-fixes/` is the gitignored ticket archive — never infer from git that a ticket status changed.
 - `git remote` has **`upstream → github.com/reorder-js/reorder`** (someone else's repo). Every `gh` call needs `--repo MengYYY369/reorder`.
@@ -67,7 +67,7 @@ export DB_PASSWORD=$(node -e 'var s=require("fs").readFileSync(".env","utf8");va
 TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules corepack yarn jest --forceExit
 ```
 
-Expected: `Test Suites: 25 passed, 25 total` / `Tests: 270 passed, 270 total`. If six `service.spec.ts` files fail with `ORM not configured`, the env export did not take — fix the shell, not the code.
+Expected: `Test Suites: 25 passed, 25 total` / `Tests: 270 passed, 270 total`. If five `service.spec.ts` files fail with `ORM not configured`, the env export did not take — fix the shell, not the code. There are five such files, not six: `plan-offer`, `redemption`, `renewal`, `settings`, `subscription` (the first draft of this line counted a sixth; `ls src/modules/*/__tests__/service.spec.ts` is the check).
 
 - [ ] **Step 4: Run the http gate, then re-run killed suites in isolation**
 
@@ -438,14 +438,32 @@ git commit -m "test(migrations): apply the plugin migrations to a probe database
 
 - [ ] **Step 1: Add the seeding helpers**
 
+> **Corrected 2026-09-26 after Phase 2 shipped.** Three parts of this task's text were
+> wrong against the measured schema and the measured migration behaviour, and the
+> versions below are what `integration-tests/http/migrations.spec.ts` actually runs.
+> The three: the `subscription` columns named here do not exist, the index drop sat
+> *after* the seeding that needs the index already gone, and two seed dates made Step 5's
+> probes blind — against the planned data `prefer_entitlement := ''` reddened **nothing**
+> and the `scheduled_for desc → asc` flip reached only one of the two cases it names.
+> Re-deriving these cases from the pre-correction text reintroduces all three, which is
+> the failure mode `.agents/lessons.md` *A Residual Recorded Only In Gitignored Notes Is
+> Unrecorded* is about — so the correction lives here, not only in a report.
+
 ```typescript
 async function seedSubscription(wrapper: ProbeWrapper, id: string, nextRenewalAt: string) {
+  // `interval`, `interval_count` and `currency_code` are not columns of this table
+  // (`Migration20260327143452.ts` names them `frequency_interval` / `frequency_value`,
+  // and there is no currency column at all), and `product_snapshot` /
+  // `shipping_address` are `jsonb not null` with no default, so the INSERT below is
+  // the measured shape rather than the planned one. `reference` carries a partial
+  // unique index and so is derived from the id.
   await wrapper.manager.execute(
-    `insert into subscription (id, reference, currency_code, customer_id,
-        product_id, variant_id, status, interval, interval_count,
-        next_renewal_at, created_at, updated_at)
-     values ('${id}', 'REF-${id}', 'USD', 'cus_probe', 'prod_probe',
-        'variant_probe', 'active', 1, 1, '${nextRenewalAt}', now(), now())`
+    `insert into subscription (id, reference, customer_id, product_id, variant_id,
+        status, frequency_interval, frequency_value, started_at, next_renewal_at,
+        product_snapshot, shipping_address, created_at, updated_at)
+     values ('${id}', 'REF-${id}', 'cus_probe', 'prod_probe', 'variant_probe',
+        'active', 'month', 1, now(), '${nextRenewalAt}',
+        '{"id":"${id}"}'::jsonb, '{}'::jsonb, now(), now())`
   )
 }
 
@@ -488,20 +506,53 @@ async function liveScheduled(wrapper: ProbeWrapper, subscriptionId: string) {
 
 - [ ] **Step 2: Write the re-run helper the cases need**
 
-The migration has already run once (Task 4). Each normalization case re-runs `up()` on demand:
+The migration has already run once (Task 4). Each normalization case opens its own
+drift window and then re-runs `up()` on demand:
 
 ```typescript
-async function rerunNormalize(wrapper: ProbeWrapper) {
+// MUST run before the duplicate rows are seeded, not inside the re-run helper.
+// `up()` ends by creating `renewal_cycle_one_scheduled_per_subscription`, a partial
+// unique index over live `scheduled` rows, so a probe sitting at the post-1.6.0
+// state rejects the second insert of a duplicate pair: the case would fail on its
+// own seed instead of on the migration's decision.
+async function openDriftWindow(wrapper: ProbeWrapper) {
   await wrapper.manager.execute(
     `drop index if exists "renewal_cycle_one_scheduled_per_subscription"`
   )
-  await wrapper.manager.execute(`delete from mikro_orm_migrations where name like '%20260924120000%'`)
-  const pending = await wrapper.orm.getMigrator().getPendingMigrations()
-  await wrapper.orm.getMigrator().up({
-    migrations: pending
-      .map((m) => m.label ?? m.name ?? "")
-      .filter((name) => name.includes("20260924120000")),
+  await wrapper.manager.execute(
+    `delete from mikro_orm_migrations where name = 'Migration20260924120000'`
+  )
+}
+
+// Takes the database NAME as well as the wrapper: `setupDatabase()` configures the
+// shared wrapper's own ORM with `pathToMigrations: migrationPaths[0]` — the
+// activity-log directory (`@medusajs/test-utils/dist/database.js:107`) — so
+// `wrapper.orm.getMigrator()` cannot see this migration at all, and umzug answers
+// `Couldn't find migration to apply with name` (`umzug/lib/umzug.js:317-326`).
+// `withMigratorFor(dbName, migrationDirOf("renewal"), …)` builds the migrator the
+// way `runMigrationsFromPath` does, which keeps `CustomDBMigrator` in play. Pending
+// entries are `{ name, path? }` in MikroORM 6.6.14 — there is no `label`.
+async function rerunNormalize(dbName: string, wrapper: ProbeWrapper) {
+  await withMigratorFor(dbName, migrationDirOf("renewal"), async (migrator) => {
+    const pending = (await migrator.getPendingMigrations()).map((e) => e.name)
+    // Guard 1: umzug's `up({ migrations })` selects from the PENDING set only
+    // (`umzug/lib/umzug.js:136-160`), so a still-recorded migration is skipped with
+    // no error and no output — the silent pass this phase exists to close.
+    if (!pending.includes("Migration20260924120000")) {
+      throw new Error("not pending: open the drift window before re-running it")
+    }
+    await migrator.up({ migrations: ["Migration20260924120000"] })
   })
+
+  // Guard 2: the apply itself must show up in the storage table, or the assertions
+  // below would be measuring rows the migration never touched.
+  const recorded = await probeQuery(
+    wrapper,
+    `select name from mikro_orm_migrations where name = 'Migration20260924120000'`
+  )
+  if (recorded.length !== 1) {
+    throw new Error("Migration20260924120000 did not re-apply itself")
+  }
 }
 ```
 
@@ -509,33 +560,41 @@ async function rerunNormalize(wrapper: ProbeWrapper) {
 
 ```typescript
       it("keeps the cycle already sitting on the entitlement date", async () => {
+        await openDriftWindow(probeWrapper)
         await seedSubscription(probeWrapper, "sub_t1", "2026-11-24T00:00:00Z")
-        await seedCycle(probeWrapper, { id: "cyc_t1_stale", subscriptionId: "sub_t1", scheduledFor: "2026-10-24T00:00:00Z" })
+        // Corrected: planned at 2026-10-24, which made this the MIDDLE row, so the
+        // entitlement match and the most-future row were the same row
+        // (`cyc_t1_match`) and both comparators agreed. Deleting the
+        // `prefer_entitlement` tier from the migration then reddened nothing — this
+        // case, titled for the entitlement rule, pinned the fallback instead.
+        await seedCycle(probeWrapper, { id: "cyc_t1_stale", subscriptionId: "sub_t1", scheduledFor: "2026-12-24T00:00:00Z" })
         await seedCycle(probeWrapper, { id: "cyc_t1_match", subscriptionId: "sub_t1", scheduledFor: "2026-11-24T00:00:00Z" })
         await seedCycle(probeWrapper, { id: "cyc_t1_older", subscriptionId: "sub_t1", scheduledFor: "2026-09-24T00:00:00Z" })
 
-        await rerunNormalize(probeWrapper)
+        await rerunNormalize(PROBE_DB_NAME, probeWrapper)
 
         expect(await liveScheduled(probeWrapper, "sub_t1")).toEqual(["cyc_t1_match"])
       })
 
       it("keeps the most future cycle when none matches the entitlement date", async () => {
+        await openDriftWindow(probeWrapper)
         await seedSubscription(probeWrapper, "sub_t2", "2026-12-31T00:00:00Z")
         await seedCycle(probeWrapper, { id: "cyc_t2_newest", subscriptionId: "sub_t2", scheduledFor: "2026-10-24T00:00:00Z" })
         await seedCycle(probeWrapper, { id: "cyc_t2_older", subscriptionId: "sub_t2", scheduledFor: "2026-09-24T00:00:00Z" })
 
-        await rerunNormalize(probeWrapper)
+        await rerunNormalize(PROBE_DB_NAME, probeWrapper)
 
         expect(await liveScheduled(probeWrapper, "sub_t2")).toEqual(["cyc_t2_newest"])
       })
 
       it("leaves failed and already soft-deleted duplicates alone", async () => {
+        await openDriftWindow(probeWrapper)
         await seedSubscription(probeWrapper, "sub_t3", "2026-11-24T00:00:00Z")
         await seedCycle(probeWrapper, { id: "cyc_t3_failed", subscriptionId: "sub_t3", scheduledFor: "2026-08-24T00:00:00Z", status: "failed" })
         await seedCycle(probeWrapper, { id: "cyc_t3_gone", subscriptionId: "sub_t3", scheduledFor: "2026-07-24T00:00:00Z", deletedAt: "2026-07-25T00:00:00Z" })
         await seedCycle(probeWrapper, { id: "cyc_t3_live", subscriptionId: "sub_t3", scheduledFor: "2026-09-24T00:00:00Z" })
 
-        await rerunNormalize(probeWrapper)
+        await rerunNormalize(PROBE_DB_NAME, probeWrapper)
 
         expect(
           readRows(
@@ -548,11 +607,15 @@ async function rerunNormalize(wrapper: ProbeWrapper) {
       })
 
       it("notes why the survivors' neighbours vanished", async () => {
-        await seedSubscription(probeWrapper, "sub_t4", "2026-11-24T00:00:00Z")
+        await openDriftWindow(probeWrapper)
+        // Corrected: planned at 2026-11-24, which is exactly `cyc_t4_keep` below, so
+        // the entitlement tier chose that survivor and the case could not see a
+        // change to `scheduled_for desc` — the comparator it exists to react to.
+        await seedSubscription(probeWrapper, "sub_t4", "2026-12-24T00:00:00Z")
         await seedCycle(probeWrapper, { id: "cyc_t4_keep", subscriptionId: "sub_t4", scheduledFor: "2026-11-24T00:00:00Z" })
         await seedCycle(probeWrapper, { id: "cyc_t4_drop", subscriptionId: "sub_t4", scheduledFor: "2026-10-24T00:00:00Z" })
 
-        await rerunNormalize(probeWrapper)
+        await rerunNormalize(PROBE_DB_NAME, probeWrapper)
 
         const dropped = readRows(
           await probeWrapper.manager.execute(
@@ -564,6 +627,11 @@ async function rerunNormalize(wrapper: ProbeWrapper) {
         )
       })
 ```
+
+A normalize case must make the migration's two comparators **disagree**: an
+entitlement-matching row that is also the most-future row tests only the fallback, and
+a note case whose survivor is chosen by tier 1 never sees tier 2. That is the rule the
+two corrected literals above buy, and it is only visible under Step 5's probes.
 
 Knex/MikroORM result shape (`rows` vs the array itself) is settled the first time it runs; keep whichever the driver returns and drop the other branch, do not leave both.
 
@@ -578,6 +646,14 @@ Expected: PASS on all four.
 - [ ] **Step 5: Mutation probe**
 
 In `src/modules/renewal/migrations/Migration20260924120000.ts`, change the ordering key `prefer_entitlement` to the empty string `''`, re-run, and confirm **exactly** case 1 reddens (`cyc_t1_match` loses to `cyc_t1_stale`). Restore. Then flip `rc."scheduled_for" desc` to `asc`, re-run, and confirm **exactly** cases 2 and 4's survivor expectations redden. Restore. Record both probe outputs in the commit body.
+
+Both are **probe-side** mutations and need no rebuild: `pathToMigrations` points at
+`src/modules/*/migrations/*.ts`, which jest reads through its own transform. A probe of
+what the *app bootstrap* does with a migration reads the built copy instead
+(`package.json` `exports` → `.medusa/server/src/modules/<dir>`, resolved at
+`@medusajs/modules-sdk/dist/loaders/utils/load-internal.js:367`), so it must
+`corepack yarn build` after mutating **and** after restoring — Task 8's `lessons.md`
+bullet carries the measurement, and Task 6's probe pair is what found it.
 
 - [ ] **Step 6: Commit**
 
@@ -750,7 +826,12 @@ git add .agents/lessons.md .agents/specs/2026-09-25-post-acceptance-backlog.md
 git commit -m "docs(lessons): record what the migration harness proved"
 ```
 
-Expected: modules now **26 suites / 270+N tests**; http 36 suites total. Update the Appendix baseline in the same commit.
+Expected, as measured on 2026-09-26: modules **stays 25 suites / 270 tests** and http
+becomes **36 suites / 238 tests**. This step's first draft said "modules now 26 suites /
+270+N tests; http 36 suites total", and the modules half was wrong: Tasks 4-7 added
+exactly one suite, `integration-tests/http/migrations.spec.ts`, which is an **http** suite
+of **10 cases**, so no module spec exists to count. Update the Appendix baseline in the
+same commit.
 
 ---
 

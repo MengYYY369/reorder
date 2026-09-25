@@ -274,11 +274,80 @@ the pre-migration state, and points `pathToMigrations` at the plugin's migration
 directories in the order the real migrator applies them — alphabetical by module,
 recorded last round from `mikro_orm_migrations` on a fresh install: activity-log,
 analytics, cancellation, dunning, plan-offer, redemption, renewal, settings,
-subscription. **Measure first**, before committing to the shape: (a) that the
-migration `.ts` files resolve under jest's transform through `pathTs`; (b) that the
-test role can `CREATE DATABASE` (inferred from the runner doing it, not measured
-here); (c) that a partially-migrated probe database can be reused across cases or
-must be recreated per case.
+subscription.
+
+**Measured 2026-09-26, when Phase 2 closed. The three "measure first" items are
+answered, all three in the direction the design assumed:**
+
+- **(a) the `.ts` files do resolve through `pathTs`.** `getMikroOrmConfig` sets `path`
+  and `pathTs` to the same directory (`@medusajs/test-utils/dist/database.js:41-42`) and
+  jest's `@swc/jest` transform loads them, so `MIGRATION_PATHS` points at
+  `src/modules/*/migrations` and the probe applies **22 migrations across 9 module
+  directories** (`saas-bridge` ships none) with no compiled fallback used or needed. The
+  inventory case pins the `.ts`-only layout deliberately: a compiled-migration tree
+  reddens it rather than passing on stripped names.
+- **(b) the test role can `CREATE DATABASE`.** Role `user` in `reorder-acceptance-pg` is
+  `rolsuper = t`, `rolcreatedb = t`, and `CREATE DATABASE` / `DROP DATABASE` were run on a
+  throwaway name before the harness existed, so the plan's BLOCKED path never triggered.
+- **(c) a partially-migrated probe database can be reused across cases** — the shared
+  nine-directory probe is migrated once in `beforeAll` and every case that mutates it
+  (`openDriftWindow`, the two reverts) hands it back on the path that passes, because the
+  runner's snapshot/restore covers only the *suite* database, never a probe this file
+  created. Each case owns its id range (`sub_t1..sub_t4`, `sub_t7`) so no case depends on a
+  sibling's cleanup, and the one known leak window is listed in the residuals below. A
+  **fresh** database is required for a one-directory wrapper, and
+  the reason is the framework, not taste: with nothing pending, `setupDatabase()` falls through
+  to `orm.schema.refreshDatabase()` (`database.js:130-140`) and regenerates the schema from
+  the entity models over a database you believed you had migrated.
+
+Harness facts later phases build on (the mechanics and their citations are the
+`A Migration Is Only Real Where a Runner Applies It` bullet in `.agents/lessons.md`):
+`getMikroOrmWrapper`'s own migrator is bound to `pathToMigrations[0]`
+(`database.js:107`), so a revert of any other module's migration goes through
+`withMigratorFor(dbName, migrationDirOf(<module>), …)`; `getPendingMigrations()` entries
+are `{ name, path? }` with no `label` (MikroORM 6.6.14); `dbTestUtilFactory()` has no
+`delete`/`execute` and its `create` swallows an existing database, so `probeDatabase()`
+drops before it creates and every teardown is `try { close } finally { drop }`;
+`withSoloProbe(dbName, dirs, fn)` and `withMigrationReverted(dbName, dir, name, wrapper,
+use)` are the two lifecycles cases should call instead of re-writing them; and the probe
+reads `src/` while the app bootstrap reads the built `.medusa/server/` copy, so an
+app-side probe rebuilds after mutating **and** after restoring.
+
+Shipped case set (10, all green in the re-baselined http gate): the six on the
+nine-directory probe — inventory, app-bootstrap equivalence, and the four normalize cases
+— plus `drops the constraint and resurrects nothing on down()` and
+`rolls the creation-failure migration back over its own rows` on the same probe, and the
+two renewal-only cases (`reaches the migration state of one module directory`,
+`normalizes without a subscription table at all`) in a describe with no hook, so their
+red is attributable.
+
+**Not settled here, and deliberately not ticked:** the "index predicate both ways" item
+below is only half built. A second live `SCHEDULED` insert is rejected while the index is
+up — but that is proven operationally (a seed violates it and the case fails loudly), not
+by an assertion, and nothing yet shows a `failed` or soft-deleted duplicate being
+*accepted* under the live index, which is the "partial" half of the partial index.
+Residuals the next reader of this harness owns, with their rulings:
+
+- **Task 17** — the activity-log `down()` case's `definition` check is one-sided
+  (`not.toContain('subscription.creation_failed')` proves the new value left, nothing
+  proves the other 25 stayed). Fix: seed one `dunning.started` row and let `add
+  constraint`'s own validation assert, or parse the quoted values and compare as a sorted
+  set against `Migration20260909130000.ts:3-4`.
+- **Task 17** — `survivingIds` aggregates the WHOLE `subscription_log` table, so any case
+  added before that one which seeds it must update three expectations (it fails loudly and
+  informatively, not silently).
+- **Task 10** — reuse `withMigrationReverted` rather than writing a fourth revert
+  skeleton.
+- **Task 5's helper, unowned** — `openDriftWindow` runs outside any teardown, so a throw
+  between it and `rerunNormalize` leaks a dropped index *and* an unrecorded migration into
+  the shared probe. Today no case can read that as a false green (the next inventory
+  comparison goes red), and the clean fix is a `withDriftWindow(dbName, wrapper, use)`
+  that re-applies in its own `finally`.
+- **Task 4's still-open minors** — `readRowsFromRaw` dereferences `.rows` on a possibly
+  null envelope instead of throwing its named `TypeError` (`migrations.spec.ts:510`), and
+  `MIGRATION_FILE_EXTENSIONS.some((ext) => file.endsWith(ext))` (`:160`) would accept
+  `.mts` as `.ts`. `EXPECTED_MIGRATION_COUNT = 22` is a deliberate tripwire: raising it is
+  correct only for a migration that has been given cases in this file.
 
 Cases it must pin — each one is a rule a future editor can break silently:
 
@@ -602,9 +671,12 @@ Order:
 Phases 1–5 each end with the three gates from a clean build **plus** the mutation
 probe named for that phase — no phase may claim verification without one, which is
 what v2 did three times. Totals must be attributable by name: the last round's
-baseline is build 0, modules 25 suites / 270 tests, http 35 suites / 228 tests, and
-the http gate's union-of-runs protocol (including OS-killed suites) is in
-`AGENTS.md:49-61` and `lessons.md:107`.
+baseline was build 0, modules 25 suites / 270 tests, http 35 suites / 228 tests, and
+Phase 2's close re-baselined it to **modules 25 / 270 (unchanged — Phase 2 added no
+module spec) and http 36 suites / 238 tests**, the delta being
+`integration-tests/http/migrations.spec.ts` and its 10 cases. The http gate's
+union-of-runs protocol (including OS-killed suites) is in `AGENTS.md:49-61` and
+`lessons.md:107`; the numbers and their per-suite reconciliation are in the Appendix.
 
 Phase 6 is verified on the box: the two invariant queries, the endpoint smoke list,
 and a rollback that was rehearsed on a scratch database before the upgrade ran.
@@ -684,10 +756,15 @@ previous ruling to leave that work alone in the tree no longer applies to it.
 
 **Environment, measured on this machine**: `node_modules` exists (install with
 `corepack yarn install`; a plain `npm`/`yarn` without corepack picks the wrong
-toolchain). No Postgres container is running — `reorder-acceptance-pg` was deleted
-at cleanup, so Phase 0.1 recreates one before any gate means anything. Gates need
-`DB_HOST`/`DB_PORT`/`DB_USERNAME`/`DB_PASSWORD` exported (not `DATABASE_URL`; see
-`AGENTS.md`), and `TEST_TYPE` is set by the yarn scripts, not by hand.
+toolchain). No Postgres container was running when this was written — `reorder-acceptance-pg`
+was deleted at cleanup, so Phase 0.1 recreates one before any gate means anything; it has
+existed since (Task 1) and `docker start reorder-acceptance-pg` is the branch that applies
+now. Gates need `DB_HOST`/`DB_PORT`/`DB_USERNAME`/`DB_PASSWORD` exported (not
+`DATABASE_URL`; see `AGENTS.md`), **`DB_HOST` must be `localhost` on this machine, never
+`127.0.0.1`** — the loopback address wedges Medusa's `PgConnection` (pool timeouts at
+60/120/180 s, zero server-side backends, reproduced against an untouched spec) while the
+container's publish address legitimately is `127.0.0.1:5432`. `TEST_TYPE` is set by the yarn
+scripts, not by hand.
 
 **Traps that produced bad evidence in the last round**
 
@@ -697,8 +774,11 @@ at cleanup, so Phase 0.1 recreates one before any gate means anything. Gates nee
 - The unattended http run loses ~2 suites to OS-killed workers (`SIGTERM`), a
   different pair each time. "Green" is the union of runs plus an isolated
   `--runInBand --max-old-space-size=4096` re-run of whatever was killed, and totals
-  must be reconciled by name (baseline: build 0; modules 25 suites / 270 tests;
-  http 35 suites / 228 tests).
+  must be reconciled by name. Baseline as of Phase 2's close (2026-09-26):
+  **build 0; modules 25 suites / 270 tests; http 36 suites / 238 tests, 0 failing
+  assertions** — modules unchanged, because Phase 2 added no module spec, and the
+  `+1 suite / +10 tests` on the http side is `integration-tests/http/migrations.spec.ts`
+  (§B's harness). The pre-Phase-2 numbers were 35 / 228.
 - Capture `$?` immediately after a command. A chained command's exit code is not
   the gate's exit code; that is how a red build once got reported green.
 - Check the mtime of any log you are about to cite. `.scratch/*.log` files from the
@@ -711,7 +791,11 @@ at cleanup, so Phase 0.1 recreates one before any gate means anything. Gates nee
 - `medusa plugin:build` typechecks `src/` and `src/modules/*/__tests__/**` but not
   `integration-tests/**`; `jest.config.js:26-33` decides which specs execute. A
   decision unit placed under `src/api/**` or `src/workflows/__tests__/` can fail
-  nothing.
+  nothing. Measured again at Phase 2's close: on a fully green tree
+  `npx tsc --noEmit -p tsconfig.json` still exits 2 with **90 `error TS` spread over 18
+  files under `integration-tests/`**, none of them in `migrations.spec.ts`. So a spec
+  added there is typechecked by hand, and "clean" means `… | grep -c <spec>` returns 0 —
+  the exit code says nothing while that pre-existing debt stands.
 - Engine-reported failures are serialized plain objects, never `Error` instances,
   and a workflow run that leaves `throwOnError` at its default rethrows that object
   verbatim. Any route that runs a workflow must classify.

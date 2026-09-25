@@ -81,7 +81,7 @@
 
 | 套件 | 命令 | DB 来源 | 现状 |
 |---|---|---|---|
-| reorder http | `yarn test:integration:http` | `reorder/.env` 的 `DATABASE_URL`，**仓内无 compose** | 需外部 PG；本机曾成功跑过（容器里残留 `medusa-*-integration-1` 库即为证据） |
+| reorder http | `yarn test:integration:http` | **Not** `reorder/.env`'s `DATABASE_URL`: `@medusajs/test-utils` creates one database per suite and reads `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` (`.agents/AGENTS.md`, *Validation Commands*); `.env`'s URL only supplies the role and password. **No compose file in this repo** | 需外部 PG；本机曾成功跑过（容器里残留 `medusa-*-integration-1` 库即为证据） |
 | reorder modules | `yarn test:integration:modules` | 不需要 DB | 可跑 |
 | better-auth integration | `pnpm test:integration` | `integration-tests/docker-compose.yml`（宿主口 5433） | 可跑，CI 里也在跑 |
 
@@ -184,7 +184,7 @@ reason 路由已补）、`dunning/[id]/retry-now`、`subscription-analytics/rebu
 |---|---|---|---|---|
 | G1 | 3 个 workflow spec 永不运行 | `reorder/jest.config.js` testMatch 无 `src/workflows` | 取消/暂停/改地址的编排层无守护 | **P0**：加 `TEST_TYPE=unit` 分支或并入 modules 模式 |
 | G2 | vendor 21 个 spec 永不运行 | `apps/backend/jest.config.js:17-18` | 线上跑的副本零测试 | **P0**：发布顺序里"删 vendor"前必须先跑它的 spec，或干脆把 vendor 副本纳入 roots |
-| G3 | e2e 数据层依赖 psql 二进制 + 明文口令默认值 | `e2e/seed.setup.ts:5-9`（`postgres://postgres:Kasperski1@localhost/…`），另 3 个 spec 各抄一份 INSERT | Windows 上直接跑不了；口令进了可发布仓库 | **P0**：✅ 已改走 `pg` 驱动（已声明 devDep）；默认值只从环境变量取；缺变量时报错。4 处手写 INSERT 已收敛到 `e2e/helpers/db.ts` 单点 |
+| G3 | e2e 数据层依赖 psql 二进制 + 明文口令默认值 | `e2e/seed.setup.ts:5-9`（`postgres://postgres:<redacted>@localhost/…` — the literal credential is removed here; it is already in pushed history, so redacting this line does not unexpose it, and rotation is the only real fix），另 3 个 spec 各抄一份 INSERT | Windows 上直接跑不了；口令进了可发布仓库 | **P0**：✅ 已改走 `pg` 驱动（已声明 devDep）；默认值只从环境变量取；缺变量时报错。4 处手写 INSERT 已收敛到 `e2e/helpers/db.ts` 单点 |
 | G4 | 装了 better-auth 的宿主后台登不进，L2 整层挂不住 | dtc 实测：`POST /auth/user/emailpass` 200、`POST /auth/session` 200 **不发 cookie**、浏览器内 `/admin/users/me` 401 而 Bearer 200；`/auth/user/providers` = better-auth+logto | e2e 进不了 `/app` | **P0**：先修 medusa-better-auth 的会话交接（本仓自己的职责），或给 e2e 留一个"仅 emailpass"的最小宿主 |
 | G5 | plan offer 编辑抽屉无 e2e | 本次未写 | rules/折扣改错静默生效在店面 | ✅ 已补 |
 | G6 | 挽留只测 pause 分支 | `cancellation-retention.spec.ts:77` | `discount_offer`/`bonus_offer` 的校验路径未测；`cancellations/:id/reason` 零触达 | ✅ 已补 |
@@ -204,7 +204,7 @@ reason 路由已补）、`dunning/[id]/retry-now`、`subscription-analytics/rebu
 | 优先级 | 任务 | 验收 |
 |---|---|---|
 | P0-1 | 修 G4（better-auth 会话 cookie）或提供"仅 emailpass"e2e 宿主 | `yarn test:e2e --project=setup` 绿，`e2e/.auth/admin.json` 生成 |
-| P0-2 | G3：e2e 种子改 `pg` 驱动 + 去掉明文口令默认值；迁移 4 处手写 INSERT 到 `e2e/helpers/db.ts` | 本机无 psql 也能 `yarn test:e2e`；`grep -r Kasperski1 reorder/e2e` 空 |
+| P0-2 | G3：e2e 种子改 `pg` 驱动 + 去掉明文口令默认值；迁移 4 处手写 INSERT 到 `e2e/helpers/db.ts` | 本机无 psql 也能 `yarn test:e2e`；no plaintext credential anywhere under `reorder/e2e` — grep for the value redacted in G3 above and it must return nothing |
 | P0-3 | G1/G2：让"存在的 spec"真的被跑（补 testMatch / roots 或删文件） | `--list`/`jest --listTests` 数量与磁盘文件数一致 |
 | P0-4 | G8：`tsconfig.e2e.json` + `test:e2e:types` | 新脚本退出码 0 |
 | P0-5 | L4：paypal 0.5.0 + 金额 SQL 同窗发布；宿主删 vendor、跑 §4 回归 | `npm view` 有 0.5.0；宿主 backend 装到 0.5.0；§4 十一条逐条签字 |

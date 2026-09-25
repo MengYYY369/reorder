@@ -55,7 +55,13 @@ empty string), so export all four. The requirement itself is generic: any Postgr
 answering on `127.0.0.1:5432` under the role from `.env`'s `DATABASE_URL`, and that
 role must be able to `CREATE DATABASE` because a database is created per suite. This
 machine satisfies it with the container `reorder-acceptance-pg`, published to the
-loopback only. The two branches below are exclusive — `docker run` is reached only
+loopback only. **Export `DB_HOST=localhost`, never `DB_HOST=127.0.0.1`.** The two are
+not interchangeable here even though the publish line above is `127.0.0.1`: measured
+twice on this machine, the loopback *address* wedges Medusa's `PgConnection` — pool
+timeouts at 60/120/180 s with zero server-side backends, reproduced against an
+untouched spec — so the gate stalls instead of erroring and reads as a code hang. The
+server's bind address and the client's `DB_HOST` are separate settings; only the first
+one is `127.0.0.1`. The two branches below are exclusive — `docker run` is reached only
 when there is no container to start — so the block is safe to paste as a unit:
 
 ```bash
