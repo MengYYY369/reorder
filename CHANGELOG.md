@@ -242,22 +242,33 @@ was covered by any assertion in the http suite.
   `.medusa/server` build output, so a host install carried everything `medusa
   plugin:build` compiles — 29 Playwright files under `.medusa/server/e2e`,
   `.medusa/server/playwright.config.js` and the compiled `scripts/` tree, whose
-  seed script alone is 193.5 kB. It now ships `.medusa/server/src`: measured
-  against one and the same build output, 400 files / 929.7 kB became 366 files /
-  826.7 kB (5.0 MB unpacked → 4.5 MB).
+  seed script alone is 193.5 kB — and, under `src`, the 28 compiled
+  `src/**/__tests__/*.spec.js` files (440.5 kB). `files` is now
+  `[".medusa/server/src", "!**/__tests__/**"]`: measured against one and the same
+  build output, 400 files / 929.7 kB became 366 files / 826.7 kB and then
+  338 files / 738.4 kB (5.0 MB unpacked → 4.5 MB → 4.0 MB), and listing the final
+  tarball with `tar -tzf` shows no `__tests__` entry at all. The negation carries
+  no `./` prefix because that prefix makes npm ignore it — measured on one tree:
+  `!./**/__tests__/**` packs 366 files, `!**/__tests__/**` packs 338.
   Nothing importable was lost, and that is asserted rather than assumed:
   `scripts/assert-package-surface.mjs` (`npm run verify:package`, or
-  `corepack yarn verify:package`) extracts the tarball, fails on any `exports`
-  target missing from the packed tree, and fails on any target left under
-  `.medusa/server/` outside `src` — the exact path class `files` no longer
-  ships — while printing the targets it skips. `exports` itself is unchanged
-  from 1.5.0, so the seven keys and nine targets a host resolves through point
-  at the same files they did before; `prepublishOnly` still runs the build and
-  nothing else. Two things this does not reach: the 28 compiled
-  `src/**/__tests__` specs still ship, because they live under `src` and only
-  the build can exclude them, and the `./providers/*` key matches no packed file
-  — `src/providers/` holds only the Medusa template README, as it did in 1.5.0.
-  The verifier prints that one as matching nothing instead of failing on it.
+  `corepack yarn verify:package`) extracts the tarball with the system `tar` —
+  retrying with GNU tar's `--force-local`, without which that tar refuses an
+  absolute `X:\…\reorder-1.6.0.tgz` argument as a remote host — and fails on any
+  `exports` target missing from the packed tree, on any target left under
+  `.medusa/server/` outside `src` (the exact path class `files` no longer
+  ships), on any pattern target matching no packed file unless the script names
+  it in its own `EMPTY_PATTERN_ALLOWLIST`, and on a packed manifest that leaves
+  the check with nothing to compare. `exports` itself is unchanged from 1.5.0, so
+  the seven keys and nine targets a host resolves through point at the same files
+  they did before; each was resolved through Node's resolver against the final
+  338-file tree, and the repo's own `jest src/modules/renewal` gate still runs the
+  TypeScript specs (3 suites, 24 tests) because the exclusion reaches the package
+  only. `prepublishOnly` still runs the build and nothing else. One target is
+  allowlisted because it is empty, not because it was forgotten: `./providers/*`
+  matches no packed file — `src/providers/` holds only the Medusa template README,
+  as it did in 1.5.0 — so `@mengyyy369/reorder/providers/<name>` never resolved,
+  and the verifier prints that exemption by name instead of passing it quietly.
 
 ## [1.5.0] - 2026-09-19
 

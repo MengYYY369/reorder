@@ -9,7 +9,8 @@
   "author": "Reorder (https://reorderjs.com)",
   "license": "MIT",
   "files": [
-    ".medusa/server/src"
+    ".medusa/server/src",
+    "!**/__tests__/**"
   ],
   "exports": {
     "./package.json": "./package.json",
