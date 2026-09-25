@@ -7,7 +7,10 @@ import {
 } from "../../modules/renewal/types"
 import {
   deriveUpcomingRenewalApprovalState,
-  findUpcomingRenewalCycle,
+  resolveUpcomingCycle,
+  restoreForUpcomingCycleReconcile,
+  type UpcomingCycleReconcilePatch,
+  type UpcomingCycleReconcileRestore,
   type UpcomingRenewalCycleRecord,
   type UpcomingRenewalSubscriptionRecord,
   shouldSubscriptionHaveUpcomingRenewalCycle,
@@ -22,10 +25,19 @@ export type EnsureNextRenewalCycleStepInput = {
 }
 
 type EnsureNextRenewalCycleStepOutput = {
-  action: "noop" | "created" | "updated" | "deleted"
+  action: "noop" | "created" | "updated" | "adopted" | "deferred" | "deleted"
   subscription_id: string
   renewal_cycle_id: string | null
 }
+
+/**
+ * The row state a reconciliation write overwrote. `updated` (an exact-date hit)
+ * and `adopted` (the drift repair) are the same write differing only by
+ * `scheduled_for`, so both carry the full snapshot: a rollback that restored
+ * just part of what the patch touched would leave the approval state or the
+ * settings policy of a rolled-back row pointing at the failed run.
+ */
+type UpcomingCycleReconcileSnapshot = { id: string } & UpcomingCycleReconcileRestore
 
 type EnsureNextRenewalCycleCompensation =
   | {
@@ -34,14 +46,11 @@ type EnsureNextRenewalCycleCompensation =
     }
   | {
       action: "updated"
-      previous: {
-        id: string
-        approval_required: boolean
-        approval_status: RenewalApprovalStatus | null
-        approval_decided_at: Date | null
-        approval_decided_by: string | null
-        approval_reason: string | null
-      }
+      previous: UpcomingCycleReconcileSnapshot
+    }
+  | {
+      action: "adopted"
+      previous: UpcomingCycleReconcileSnapshot
     }
   | {
       action: "deleted"
@@ -64,12 +73,47 @@ type EnsureNextRenewalCycleCompensation =
       }>
     }
 
+/**
+ * Rollback order for the `deleted` compensation: one row comes back live (the
+ * most future, smaller id first on a tie) and every extra is recreated
+ * soft-deleted, because `renewal_cycle_one_scheduled_per_subscription` permits
+ * a single live `scheduled` row per subscription.
+ *
+ * That reproduces only the fallback tier of the preference the uniqueness
+ * migration applies. The migration keeps the row whose `scheduled_for` already
+ * equals `subscription.next_renewal_at` and falls back to the most future one;
+ * this compensation receives a snapshot of cycle rows and never reads the
+ * subscription, so the entitlement date is not knowable here and cannot be
+ * preferred. With a single deleted row (the only shape a new write can produce
+ * under that index) the two choices coincide; only legacy drift can make them
+ * disagree, and either way the rollback leaves exactly one upcoming cycle.
+ * Compensation payloads travel through JSON, so dates may arrive as strings.
+ */
+function orderCyclesForRestore<
+  TRestorable extends { id: string; scheduled_for: Date }
+>(cycles: TRestorable[]): TRestorable[] {
+  return [...cycles].sort((left, right) => {
+    const delta =
+      new Date(right.scheduled_for).getTime() -
+      new Date(left.scheduled_for).getTime()
+
+    if (delta !== 0) {
+      return delta
+    }
+
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  })
+}
+
 export const ensureNextRenewalCycleStep = createStep(
   "ensure-next-renewal-cycle",
   async function (
     input: EnsureNextRenewalCycleStepInput,
     { container }
   ) {
+    const logger = container.resolve("logger") as {
+      warn: (msg: string) => void
+    }
     const renewalModule = container.resolve<RenewalModuleService>(RENEWAL_MODULE)
     const subscriptionModule =
       container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -139,9 +183,30 @@ export const ensureNextRenewalCycleStep = createStep(
 
     const scheduledFor = subscription.next_renewal_at!
     const settings = await getEffectiveSubscriptionSettings(container)
-    const existingCycle = findUpcomingRenewalCycle(existingCycles, scheduledFor)
+    const resolution = resolveUpcomingCycle(existingCycles, scheduledFor)
 
-    if (!existingCycle) {
+    if (resolution.action === "defer") {
+      const deferred = resolution.cycle
+
+      logger.warn(
+        `[reorder] left upcoming renewal cycle '${deferred.id}' of subscription '${subscription.id}' untouched: status '${deferred.status}' carries renewal order '${
+          deferred.generated_order_id ?? "none"
+        }' in flight while the entitlement date is '${scheduledFor.toISOString()}'`
+      )
+
+      return new StepResponse<
+        EnsureNextRenewalCycleStepOutput,
+        EnsureNextRenewalCycleCompensation
+      >(
+        {
+          action: "deferred",
+          subscription_id: subscription.id,
+          renewal_cycle_id: deferred.id,
+        }
+      )
+    }
+
+    if (resolution.action === "create") {
       const createTimeBehavior = settings.is_persisted
         ? settings.default_renewal_behavior
         : SubscriptionRenewalBehavior.REQUIRE_REVIEW_FOR_PENDING_CHANGES
@@ -181,6 +246,14 @@ export const ensureNextRenewalCycleStep = createStep(
       )
     }
 
+    const existingCycle = resolution.cycle
+    /**
+     * `adopt` is the drift repair: the row a stacked purchase left behind keeps
+     * its id, its `renewal_attempt` children and its `generated_order_id`
+     * history, and only follows the entitlement date.
+     */
+    const adopting = resolution.action === "adopt"
+
     const existingBehavior =
       (
         existingCycle.metadata?.settings_policy as
@@ -216,6 +289,7 @@ export const ensureNextRenewalCycleStep = createStep(
     }
 
     if (
+      !adopting &&
       existingCycle.approval_required === approvalState.approval_required &&
       existingCycle.approval_status === approvalState.approval_status &&
       existingCycle.approval_decided_at === approvalState.approval_decided_at &&
@@ -234,8 +308,13 @@ export const ensureNextRenewalCycleStep = createStep(
       )
     }
 
-    const updated = await renewalModule.updateRenewalCycles({
-      id: existingCycle.id,
+    /**
+     * One object describes the whole write, and the compensation below is the
+     * same object's mirror: whatever lands here is rolled back by the same
+     * statement that applied it.
+     */
+    const reconcile: UpcomingCycleReconcilePatch = {
+      ...(adopting ? { scheduled_for: scheduledFor } : {}),
       ...approvalState,
       metadata: {
         ...(existingCycle.metadata ?? {}),
@@ -259,7 +338,32 @@ export const ensureNextRenewalCycleStep = createStep(
             )?.is_persisted ?? settings.is_persisted,
         },
       },
-    } as any)
+    }
+
+    const updated = await renewalModule.updateRenewalCycles({
+      id: existingCycle.id,
+      ...reconcile,
+    })
+
+    if (adopting) {
+      return new StepResponse<
+        EnsureNextRenewalCycleStepOutput,
+        EnsureNextRenewalCycleCompensation
+      >(
+        {
+          action: "adopted",
+          subscription_id: subscription.id,
+          renewal_cycle_id: updated.id,
+        },
+        {
+          action: "adopted",
+          previous: {
+            id: existingCycle.id,
+            ...restoreForUpcomingCycleReconcile(existingCycle),
+          },
+        }
+      )
+    }
 
     return new StepResponse<
       EnsureNextRenewalCycleStepOutput,
@@ -274,11 +378,7 @@ export const ensureNextRenewalCycleStep = createStep(
         action: "updated",
         previous: {
           id: existingCycle.id,
-          approval_required: existingCycle.approval_required,
-          approval_status: existingCycle.approval_status,
-          approval_decided_at: existingCycle.approval_decided_at,
-          approval_decided_by: existingCycle.approval_decided_by,
-          approval_reason: existingCycle.approval_reason,
+          ...restoreForUpcomingCycleReconcile(existingCycle),
         },
       }
     )
@@ -298,14 +398,37 @@ export const ensureNextRenewalCycleStep = createStep(
       return
     }
 
+    if (compensation.action === "adopted") {
+      await renewalModule.updateRenewalCycles(compensation.previous)
+      return
+    }
+
     if (compensation.action === "deleted") {
-      for (const cycle of compensation.previous) {
-        await renewalModule.createRenewalCycles(cycle as any)
+      const restore = orderCyclesForRestore(compensation.previous)
+      const [keeper, ...extras] = restore
+
+      /**
+       * Exactly one row may come back live. Drift can have handed this step
+       * several `scheduled` rows to delete, and recreating them all as live
+       * rows would break `renewal_cycle_one_scheduled_per_subscription` on the
+       * second insert, leaving the rollback half-applied with a duplicate
+       * upcoming cycle on the subscription it was meant to repair. Extras are
+       * soft-deleted again right after they are inserted (never marked
+       * `failed`, which `scheduler-query.ts` would re-arm), so at no point do
+       * two live `scheduled` rows exist for the same subscription.
+       */
+      for (const cycle of extras) {
+        await renewalModule.createRenewalCycles(cycle)
+        await renewalModule.softDeleteRenewalCycles([cycle.id])
+      }
+
+      if (keeper) {
+        await renewalModule.createRenewalCycles(keeper)
       }
 
       return
     }
 
-    await renewalModule.updateRenewalCycles(compensation.previous as any)
+    await renewalModule.updateRenewalCycles(compensation.previous)
   }
 )
