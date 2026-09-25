@@ -1,10 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { execFileSync } from "child_process";
+import {
+  deleteSubscriptionTree,
+  insertRenewalCycle,
+  insertSubscription,
+} from "./helpers/db";
 import { RenewalDetailPage } from "./pages/RenewalDetailPage";
-
-const DB_URL =
-  process.env.DATABASE_URL ??
-  "postgres://postgres:Kasperski1@localhost/medusa-my-medusa-store";
 
 interface SeedOptions {
   approvalRequired: boolean;
@@ -13,87 +13,45 @@ interface SeedOptions {
 }
 
 /**
- * Seed a fresh active subscription and linked renewal cycle via psql.
- * Returns the generated reference and cycle ID for navigation.
+ * Seed a fresh active subscription and a linked renewal cycle through the
+ * shared data layer, the same rows the store checkout and the scheduler would
+ * produce. The subscription id is returned so `afterEach` can delete the tree.
  */
-function seedSubscriptionWithRenewalCycle(options: SeedOptions) {
-  const ts = Date.now();
-  const subId = `sub_${ts}`;
-  const cycleId = `cycle_${ts}`;
-  const reference = `SUB-E2E-RENEWAL-${ts}`;
+async function seedSubscriptionWithRenewalCycle(options: SeedOptions) {
+  const sub = await insertSubscription();
+  const cycleId = await insertRenewalCycle(sub.id, {
+    status: options.cycleStatus,
+    approvalRequired: options.approvalRequired,
+    approvalStatus: options.approvalStatus,
+  });
 
-  const now = new Date();
-  const nowStr = now.toISOString();
-
-  const futureRenewal = new Date(
-    now.getTime() + 30 * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const pastScheduled = new Date(
-    now.getTime() - 24 * 60 * 60 * 1000,
-  ).toISOString();
-
-  const cycleStatus = options.cycleStatus || "scheduled";
-  const approvalStatusVal = options.approvalStatus
-    ? `'${options.approvalStatus}'`
-    : "NULL";
-
-  const sql = [
-    `INSERT INTO subscription (`,
-    `  id, reference, status,`,
-    `  customer_id, cart_id, product_id, variant_id,`,
-    `  frequency_interval, frequency_value,`,
-    `  started_at, next_renewal_at,`,
-    `  skip_next_cycle, is_trial,`,
-    `  customer_snapshot, product_snapshot, pricing_snapshot,`,
-    `  shipping_address, payment_context,`,
-    `  created_at, updated_at`,
-    `) VALUES (`,
-    `  '${subId}', '${reference}', 'active',`,
-    `  'cus_e2e_renewal_${ts}', 'cart_e2e_renewal_${ts}',`,
-    `  'prod_e2e_renewal_${ts}', 'variant_e2e_renewal_${ts}',`,
-    `  'month', 1,`,
-    `  '${nowStr}', '${futureRenewal}',`,
-    `  true, false,`,
-    `  '{"email":"e2e-renewal@test.com","full_name":"E2E Renewal Test"}'::jsonb,`,
-    `  '{"product_id":"prod_e2e","product_title":"E2E Renewal Product","variant_id":"var_e2e","variant_title":"Default","sku":"E2E-SKU-RENEWAL"}'::jsonb,`,
-    `  '{"discount_type":"percentage","discount_value":0,"label":null}'::jsonb,`,
-    `  '{"first_name":"E2E","last_name":"Renewal","address_1":"Test St 1","city":"Warsaw","postal_code":"00-001","country_code":"PL"}'::jsonb,`,
-    `  '{"payment_provider_id":"pp_stripe_stripe"}'::jsonb,`,
-    `  '${nowStr}', '${nowStr}'`,
-    `);`,
-
-    `INSERT INTO renewal_cycle (`,
-    `  id, subscription_id, scheduled_for,`,
-    `  status, approval_required, approval_status,`,
-    `  attempt_count,`,
-    `  created_at, updated_at`,
-    `) VALUES (`,
-    `  '${cycleId}', '${subId}', '${pastScheduled}',`,
-    `  '${cycleStatus}', ${options.approvalRequired}, ${approvalStatusVal},`,
-    `  0,`,
-    `  '${nowStr}', '${nowStr}'`,
-    `);`,
-  ].join(" ");
-
-  execFileSync("psql", [DB_URL, "-c", sql], { stdio: "pipe" });
-  return { reference, cycleId };
+  return { reference: sub.reference, subscriptionId: sub.id, cycleId };
 }
 
 test.describe("Renewal force execution & approval", () => {
   let detailPage: RenewalDetailPage;
+  const seededSubscriptionIds: string[] = [];
 
   test.beforeEach(async ({ page }) => {
     detailPage = new RenewalDetailPage(page);
     // Login flow is handled globally via Playwright setup/auth state in this repo.
   });
 
+  test.afterEach(async () => {
+    while (seededSubscriptionIds.length) {
+      await deleteSubscriptionTree(seededSubscriptionIds.pop()!);
+    }
+  });
+
   test("forces a scheduled renewal cycle", async ({ page }) => {
     // 1. Seed subscription + renewal_cycle (scheduled, no approval)
-    const { reference, cycleId } = seedSubscriptionWithRenewalCycle({
-      approvalRequired: false,
-      approvalStatus: null,
-      cycleStatus: "scheduled",
-    });
+    const { reference, subscriptionId, cycleId } =
+      await seedSubscriptionWithRenewalCycle({
+        approvalRequired: false,
+        approvalStatus: null,
+        cycleStatus: "scheduled",
+      });
+    seededSubscriptionIds.push(subscriptionId);
 
     // 2-6. Navigate via queue and wait for load
     await detailPage.gotoFromQueue(reference);
@@ -145,11 +103,13 @@ test.describe("Renewal force execution & approval", () => {
 
   test("approves pending changes on a renewal cycle", async ({ page }) => {
     // 1. Seed subscription + renewal_cycle (approval pending)
-    const { reference, cycleId } = seedSubscriptionWithRenewalCycle({
-      approvalRequired: true,
-      approvalStatus: "pending",
-      cycleStatus: "scheduled",
-    });
+    const { reference, subscriptionId, cycleId } =
+      await seedSubscriptionWithRenewalCycle({
+        approvalRequired: true,
+        approvalStatus: "pending",
+        cycleStatus: "scheduled",
+      });
+    seededSubscriptionIds.push(subscriptionId);
 
     // 2-4. Navigate via queue and wait for load
     await detailPage.gotoFromQueue(reference);

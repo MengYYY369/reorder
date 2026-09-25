@@ -8,17 +8,6 @@ export class RenewalDetailPage {
   readonly statusBadge: Locator;
   readonly actionMenuTrigger: Locator;
 
-  // Drawer/Decision locators
-  readonly drawerHeading: Locator;
-  readonly reasonTextarea: Locator;
-
-  // Approval summary locators
-  readonly approvalSummaryHeading: Locator;
-  readonly approvalStatusBadge: Locator;
-
-  // Attempt history locators
-  readonly attemptHistoryHeading: Locator;
-
   constructor(page: Page) {
     this.page = page;
 

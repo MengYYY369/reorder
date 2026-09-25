@@ -58,9 +58,41 @@ export class CancellationCaseDetailPage {
     ).toBeVisible();
   }
 
+  menuItem(name: string): Locator {
+    return this.page.getByRole("menuitem", { name, exact: true });
+  }
+
+  fieldById(id: string): Locator {
+    return this.drawer.locator(`#${id}`);
+  }
+
   async selectPauseOffer(): Promise<void> {
     await this.page.locator("#offer-type").click();
     await this.page.getByRole("option", { name: "Pause offer" }).click();
+  }
+
+  /** The offer-type Select holds all three offers; only the ones eligible for the
+   *  case's current state are rendered as options. */
+  async selectOfferType(label: string): Promise<void> {
+    await this.page.locator("#offer-type").click();
+    await this.page.getByRole("option", { name: label, exact: true }).click();
+  }
+
+  async selectBonusType(label: string): Promise<void> {
+    await this.page.locator("#bonus-type").click();
+    await this.page.getByRole("option", { name: label, exact: true }).click();
+  }
+
+  async selectReasonCategory(label: string): Promise<void> {
+    await this.page.locator("#cancellation-reason-category").click();
+    await this.page.getByRole("option", { name: label, exact: true }).click();
+  }
+
+  /** Submits the open drawer by its footer label. The apply-offer drawer's
+   *  button is "Apply offer" while the reason drawer's is "Save", so the
+   *  label is passed in rather than inferred from the drawer mode. */
+  async submitDrawerWithLabel(label: string): Promise<void> {
+    await this.drawer.getByRole("button", { name: label, exact: true }).click();
   }
 
   async fillPauseCycles(cycles: string): Promise<void> {
@@ -81,14 +113,15 @@ export class CancellationCaseDetailPage {
   }
 
   async confirmPrompt(
-    confirmText: "Apply pause offer" | "Finalize cancellation",
+    confirmText: "Apply pause offer" | "Apply discount offer" | "Apply bonus offer" | "Finalize cancellation",
+    confirmButton: string
   ): Promise<void> {
     const prompt = this.page.getByRole("alertdialog", {
       name: new RegExp(`^${confirmText}\\?$`),
     });
     await expect(prompt).toBeVisible({ timeout: 5_000 });
     await prompt
-      .getByRole("button", { name: confirmText, exact: true })
+      .getByRole("button", { name: confirmButton, exact: true })
       .click();
   }
 

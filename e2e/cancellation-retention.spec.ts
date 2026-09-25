@@ -1,72 +1,41 @@
-import { execFileSync } from "child_process";
 import { expect, test } from "@playwright/test";
+import {
+  deleteSubscriptionTree,
+  insertCancellationCase,
+  insertSubscription,
+} from "./helpers/db";
 import { CancellationCaseDetailPage } from "./pages/CancellationCaseDetailPage";
 import { CancellationsListPage } from "./pages/CancellationsListPage";
 import { SubscriptionDetailPage } from "./pages/SubscriptionDetailPage";
 
-const DB_URL =
-  process.env.DATABASE_URL ??
-  "postgres://postgres:Kasperski1@localhost/medusa-my-medusa-store";
-
 type SeededCancellationCase = {
   cancellationCaseId: string;
-  reference: string;
   subscriptionId: string;
+  reference: string;
 };
 
-function seedActiveCancellationCase(): SeededCancellationCase {
-  const timestamp = Date.now();
-  const subscriptionId = `sub_e2e_cancellation_${timestamp}`;
-  const cancellationCaseId = `case_e2e_cancellation_${timestamp}`;
-  const reference = `SUB-E2E-CANCELLATION-${timestamp}`;
-  const now = new Date().toISOString();
-  const nextRenewalAt = new Date(
-    timestamp + 30 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+/**
+ * Seed a fresh active subscription plus a `requested` cancellation case through
+ * the shared data layer. The subscription id comes back so `afterEach` can
+ * delete the whole tree — the previous hand-written INSERT left every row it
+ * created behind.
+ */
+async function seedActiveCancellationCase(): Promise<SeededCancellationCase> {
+  const sub = await insertSubscription();
+  const cancellationCaseId = await insertCancellationCase(sub.id);
 
-  const sql = [
-    "INSERT INTO subscription (",
-    "  id, reference, status,",
-    "  customer_id, cart_id, product_id, variant_id,",
-    "  frequency_interval, frequency_value,",
-    "  started_at, next_renewal_at,",
-    "  skip_next_cycle, is_trial,",
-    "  customer_snapshot, product_snapshot, pricing_snapshot,",
-    "  shipping_address, payment_context,",
-    "  created_at, updated_at",
-    ") VALUES (",
-    `  '${subscriptionId}', '${reference}', 'active',`,
-    `  'cus_e2e_cancellation_${timestamp}', 'cart_e2e_cancellation_${timestamp}',`,
-    `  'prod_e2e_cancellation_${timestamp}', 'variant_e2e_cancellation_${timestamp}',`,
-    "  'month', 1,",
-    `  '${now}', '${nextRenewalAt}',`,
-    "  false, false,",
-    `  '{"email":"e2e-cancellation@test.com","full_name":"E2E Cancellation Test"}'::jsonb,`,
-    `  '{"product_id":"prod_e2e_cancellation","product_title":"E2E Cancellation Product","variant_id":"var_e2e_cancellation","variant_title":"Default","sku":"E2E-SKU-CANCELLATION"}'::jsonb,`,
-    `  '{"discount_type":"percentage","discount_value":0,"label":null}'::jsonb,`,
-    `  '{"first_name":"E2E","last_name":"Cancellation","address_1":"Test St 1","city":"Warsaw","postal_code":"00-001","country_code":"PL"}'::jsonb,`,
-    `  '{"payment_provider_id":"pp_stripe_stripe"}'::jsonb,`,
-    `  '${now}', '${now}'`,
-    ");",
-    "INSERT INTO cancellation_case (",
-    "  id, subscription_id, status, reason, reason_category, metadata,",
-    "  created_at, updated_at",
-    ") VALUES (",
-    `  '${cancellationCaseId}', '${subscriptionId}', 'requested',`,
-    "  'Customer requested cancellation', 'price', '{}'::jsonb,",
-    `  '${now}', '${now}'`,
-    ");",
-  ].join(" ");
-
-  execFileSync("psql", [DB_URL, "-c", sql], { stdio: "pipe" });
-
-  return { cancellationCaseId, reference, subscriptionId };
+  return {
+    cancellationCaseId,
+    subscriptionId: sub.id,
+    reference: sub.reference,
+  };
 }
 
 test.describe("Cancellation & Retention", () => {
   let cancellationDetailPage: CancellationCaseDetailPage;
   let cancellationsListPage: CancellationsListPage;
   let subscriptionDetailPage: SubscriptionDetailPage;
+  const seededSubscriptionIds: string[] = [];
 
   test.beforeEach(async ({ page }) => {
     cancellationDetailPage = new CancellationCaseDetailPage(page);
@@ -74,8 +43,15 @@ test.describe("Cancellation & Retention", () => {
     subscriptionDetailPage = new SubscriptionDetailPage(page);
   });
 
+  test.afterEach(async () => {
+    while (seededSubscriptionIds.length) {
+      await deleteSubscriptionTree(seededSubscriptionIds.pop()!);
+    }
+  });
+
   test("applies a pause retention offer to an active case", async ({ page }) => {
-    const seededCase = seedActiveCancellationCase();
+    const seededCase = await seedActiveCancellationCase();
+    seededSubscriptionIds.push(seededCase.subscriptionId);
 
     await cancellationsListPage.goto();
     await cancellationsListPage.openCase(seededCase.reference);
@@ -94,7 +70,7 @@ test.describe("Cancellation & Retention", () => {
     await cancellationDetailPage.selectPauseOffer();
     await cancellationDetailPage.fillPauseCycles("2");
     await cancellationDetailPage.submitDrawer("Apply offer");
-    await cancellationDetailPage.confirmPrompt("Apply pause offer");
+    await cancellationDetailPage.confirmPrompt("Apply pause offer", "Apply pause offer");
 
     const applyOfferResponse = await applyOfferResponsePromise;
     const applyOfferBody = await applyOfferResponse.json();
@@ -126,7 +102,8 @@ test.describe("Cancellation & Retention", () => {
   });
 
   test("finalizes cancellation when retention is rejected", async ({ page }) => {
-    const seededCase = seedActiveCancellationCase();
+    const seededCase = await seedActiveCancellationCase();
+    seededSubscriptionIds.push(seededCase.subscriptionId);
     const reason = "Customer declined every retention option";
 
     await cancellationsListPage.goto();
@@ -146,7 +123,7 @@ test.describe("Cancellation & Retention", () => {
     await cancellationDetailPage.fillFinalizeReason(reason);
     await cancellationDetailPage.selectFinalizeReasonCategory("Price");
     await cancellationDetailPage.submitDrawer("Continue");
-    await cancellationDetailPage.confirmPrompt("Finalize cancellation");
+    await cancellationDetailPage.confirmPrompt("Finalize cancellation", "Finalize cancellation");
 
     const finalizeResponse = await finalizeResponsePromise;
     const finalizeBody = await finalizeResponse.json();

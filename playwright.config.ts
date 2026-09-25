@@ -9,6 +9,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: "html",
+  globalTeardown: "./e2e/global-teardown.ts",
   use: {
     baseURL: ADMIN_BASE_URL,
     trace: "retain-on-failure",
