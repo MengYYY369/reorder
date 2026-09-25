@@ -71,8 +71,169 @@
   multi-tenant one. `reconcile` no longer answers a tenant mismatch with an empty
   subscription list, which was indistinguishable from "nothing to reconcile".
 
+### Fixes (acceptance round, 2026-09-24)
+
+The twelve tickets above passed their gates, then three defects were proven by
+execution and several verified mediums were ruled into the round. None of the three
+was covered by any assertion in the http suite.
+
+- **renewals: a stacked purchase can no longer leave two chargeable cycles (#08).**
+  `ensure-next-renewal-cycle` reconciles the rows a subscription already carries
+  instead of matching by exact date and appending another. The new pure selector
+  `resolveUpcomingCycle` (`src/modules/renewal/utils/upcoming-cycle.ts`) answers
+  `match | adopt | defer | create`: `adopt` moves the existing row onto the
+  entitlement date and keeps its id, its `renewal_attempt` children and its
+  `generated_order_id` history; `defer` writes nothing and logs one warning naming
+  the cycle and the order when the only candidate already has money in flight (a
+  `processing` row, or one carrying a generated order — `create-manual-renewal`
+  reuses a due `SCHEDULED` row without changing its status, so a row can be billed
+  while it still reads `scheduled`). Before this, a repeat purchase pushed
+  `subscription.next_renewal_at` forward, the step matched on that date, found
+  nothing, and created a second future `SCHEDULED` cycle — which the scheduler
+  charged at both dates. That is the RE-7 failure ticket #08 claimed was
+  structurally eliminated.
+- **renewals: the invariant is a database constraint now, not a convention.** A new
+  renewal migration, `Migration20260924120000`, creates the partial unique index
+  `renewal_cycle_one_scheduled_per_subscription` on `subscription_id`, restricted to
+  `status = 'scheduled' and deleted_at is null`. **`up()` normalizes before it
+  constrains**, because indexing a drifted database fails outright: rows already
+  carrying a duplicate live `SCHEDULED` cycle are **soft-deleted** (stamped with a
+  `last_error` marker), and the row kept is the one whose `scheduled_for` already
+  equals `subscription.next_renewal_at`, falling back to the most recent one.
+  Soft-delete, never `failed` — `scheduler-query` selects `status in [scheduled,
+  failed]`, so a `failed` row would be re-armed for a charge. **`down()` drops the
+  index only and does not resurrect those rows**: returning a second chargeable
+  cycle to the queue is worse than the asymmetry, and an operator rolling back must
+  know the normalized cycles are not coming back. The index is hand-authored because
+  the model generator cannot express the extra `status` predicate, so a later
+  `medusa plugin:db:generate` may propose dropping it — that drop is a regression,
+  not cleanup. Two rollback defects found on the way are fixed with it: the step's
+  `deleted` compensation now restores at most one live row and recreates extras
+  soft-deleted, so a rollback cannot violate the index it is rolling back; and the
+  reconciliation write shares one declared field list with its restore, so adding a
+  column to the write without adding it to the rollback is a type error rather than
+  a half-repaired row.
+- **activity log: the creation-failure migration can roll back (#01).**
+  `Migration20260922120000.down()` re-added the 25-value `event_type` CHECK
+  constraint *before* deleting the `subscription.creation_failed` rows the migration
+  introduced, and `ADD CONSTRAINT` validates existing data — so the rollback aborted
+  on any database holding one of those rows. The delete now runs first, then the
+  constraint, then the NOT NULL restoration. `up()` is unchanged, which is why this
+  migration was corrected in place rather than superseded: a host that already ran
+  it has nothing to re-apply.
+- **consent flip: a provider-owned row is recognized by its reference, not by jsonb
+  (#06).** `resolveConsentFlip` tested `payment_context.mechanism` — the one
+  predicate this release documents as unusable, since rows persisted before the
+  discriminator carry no such key — so the guard passed exactly the rows it exists
+  to protect, and a flip could hand a PayPal-owned recurrence to reorder's
+  scheduler. It now tests the `NATIVE-` reference prefix through the shared
+  predicate. `reference` is a **required** input of `ConsentFlipInput` (omitting it
+  does not compile), a reference that is neither a string nor an explicit `null` is
+  answered by a new outcome, `reference_undecidable` — left alone rather than
+  assumed "not native" — and the extend path now carries the real reference
+  (`extend_subscription_reference`, surfaced by the stacking decision) instead of
+  nothing.
+- **activity log: sensitive-key masking is one shared set (#01).** The two writers
+  that sanitize before persistence each kept a private list, and they had drifted
+  apart in both directions: the error serializer masked `api_key` / `secret` /
+  `token`, the normalizer masked address, postal-code, phone, payment-reference and
+  raw-error keys. Both now import one union, `ACTIVITY_LOG_SENSITIVE_KEYS`
+  (`src/modules/activity-log/utils/sensitive-keys.ts`). Behavior change to expect:
+  **the normalizer masks three keys more than before**, and an error's own fields —
+  which `describeOwnFields` JSON-dumps into the human-readable `reason` the Admin
+  activity-log screen renders — can no longer carry an address or a payment
+  reference.
+- **subscriptions: the extend write claims only the keys it owns (#08).**
+  `create-subscription-record` built a fresh `{ source, source_order_id }` +
+  `cycles_purchased` object and passed it to `updateSubscriptions` as the whole
+  `metadata` column, while every other metadata writer in the module spreads the
+  stored object first. **This lost no customer data**, and the entry does not claim
+  it did: `updateSubscriptions` reaches `manager.assign(..., { mergeObjectProperties:
+  true })`, which merges when both the stored and the incoming values are plain
+  objects, so `payment_method_update_context` and `pause_context` survived the
+  incomplete payload. The merge is path-dependent, not universal — the same
+  repository's batch path (`nativeUpdateMany`, reached through `upsert` /
+  `upsertWithReplace`) overwrites the column, and a stored non-object takes the
+  non-merging branch too. The defect was a payload whose correctness depended on
+  which DAL method the caller happened to use; extend now merges into the row's
+  stored metadata locally, newest purchase winning `source` and `source_order_id`.
+- **checkout gate: a read failure no longer decides anything (#12).** Ticket 12
+  intends an unreadable state to let the request reach the core handler. The
+  completion middleware called `listSubscriptions` unguarded, so a throw there
+  rejected the middleware promise and hung or 500-ed checkout over a plugin-side
+  read. The decision is now a pure, injectable unit
+  (`src/modules/subscription/utils/checkout-gate.ts`) that is total — a rejected
+  read *or* an unexpected result shape both answer "allow" — and
+  `src/api/store/carts/completion-gate.ts` is the thin re-export the middleware
+  registration imports. The unit sits in the module because no jest `testMatch`
+  executes anything under `src/api/`, and its duplicated query shape was folded into
+  the one pushdown, `findLiveNativeRecurrences`, that the subscription-track guard
+  already used. Fail-open is bounded to the reads the rule itself needs: the product
+  title is read only after the verdict exists and behind its own guard, so a
+  cosmetic failure degrades the wording and never turns a real collision back into
+  a silent pass.
+- **native mirror: the dead reconciliation helper is gone (#06).**
+  `listExistingMirrorReferences` had no caller. Out-of-band cancellation is covered
+  by the event surface (`paypal.subscription.cancelled` is subscribed), and the
+  residual gap — a provider row deleted with no event at all — is now stated as a
+  limitation in `docs/architecture/subscriptions.md` instead of being papered over
+  with an unused function.
+- **saas: the auto-renew toggle left the route handler, and route failures stopped
+  quoting internals.** `POST /store/saas/auto-renew` held its own native write-side
+  guard and performed the `payment_context` write from the request handler — against
+  AGENTS.md's "no business rules in route handlers" — duplicating a predicate that
+  already existed elsewhere and writing `payment_mode` without its `mechanism`
+  partner. The toggle is now the `set-subscription-auto-renew` workflow (guard,
+  overdue check, one compensating write), and `payment_mode` / `mechanism` are
+  written as a single derived pair by `buildPaymentModeFields`
+  (`src/workflows/utils/payment-mode-mechanism.ts`) from both write sides. The
+  preserved contract: a refusal answers 400 and `payment_mode` still reads `manual`.
+  Fixing the guards exposed a disclosure defect shared by `auto-renew`, `renew` and
+  `redeem`: the workflow engine hands back a *serialized* failure, so `instanceof
+  Error` never holds, and every step failure was re-wrapped as `invalid_data` —
+  which both reported infrastructure faults as the caller's error and echoed
+  internal text to the SaaS bridge. Only refusals the plugin authors as customer
+  copy are quoted now, declared per route; anything else keeps the `MedusaError`
+  type it was thrown as (a 404 stays 404, a 409 stays 409) and answers with one of
+  the route's own fixed strings, while the step name and the raw serialized error go
+  to the log, which is the only place that text may go. A deserialized database
+  error is never rethrown as it stands: `formatException` switches on `err.code` and
+  would rewrite it into a 422 whose body embeds `table` and `detail`.
+- **saas: the fourth caller of the redeem workflow stopped quoting internals too.**
+  `POST /store/customers/me/redemptions` runs the same `redeem-redemption-code`
+  workflow with the default `throwOnError: true`, and that mode makes the engine
+  answer with `throw ret.errors[0].error` — the serialized failure, `code`, `table`
+  and `detail` included. It classifies through the same mechanism now, with
+  `preserveQuotedStatus` so a declared refusal keeps the status this route has always
+  given it (an unknown code stays 404 where the bridge says 400) while every other
+  failure gets one of the route's fixed strings and a driver fault becomes a 500
+  rather than a 422 naming a table. Closing it also exposed the whitelist's own weak
+  point: matching a declared refusal on step and type alone was enough to echo
+  `column redemption_code.redemption_cont does not exist` to a storefront, because
+  `db-error-mapper` turns a schema fault on a guard step's own read into an
+  `invalid_data` wearing that step's name. A refusal is now matched on its exact
+  text as well, which is what the third field of `CustomerRefusal` was always for.
+- **activity log: the log write is typed.** `persist-log-event.ts` carried the only
+  real `as any` in the sequence; the helper now takes the module's own input type, so
+  a renamed field fails the build instead of arriving untyped at the database.
+
 ### Chores
 
+- **plan-offer and relationship documentation (#10):** the relationship-model
+  document opened with "none of the mechanism/rule fields described below exist in
+  the code yet", wrote R1-R5 in the future tense, and named a
+  `payment_context.native_subscription_id` field that exists nowhere in `src/`. It
+  now describes implemented behavior in the present tense, and mirror identity is
+  written the way the code holds it: the `NATIVE-{paypal_subscription_id}` prefix on
+  the unique `reference`, with the provider's own id in
+  `payment_context.customer_payment_reference`. The per-rule statements cite the
+  file each was taken from, because a document describing a field that does not
+  exist is how this round started.
+- **Migrations shipping with 1.6.0:** `Migration20260922120000` (activity-log —
+  `down()` corrected in place, `up()` unchanged) and `Migration20260924120000`
+  (renewal — the new partial unique index, plus the normalization that soft-deletes
+  drifted duplicate cycles and is *not* undone by `down()`). Host upgrade steps:
+  `docs/releases/1.6.0-host-upgrade.md`.
 - All migrations now import `Migration` from `@medusajs/framework/mikro-orm/migrations`,
   removing four direct imports of a package the plugin does not declare; the host
   resolves mikro-orm once.

@@ -48,6 +48,7 @@ It contains:
 
 Key design choices:
 - one renewal cycle represents one concrete due renewal unit for one subscription
+- a subscription that should have an upcoming renewal has exactly **one** live cycle row standing for it, and the database enforces that, not only the code (see *The one-upcoming-cycle invariant* below)
 - attempt history is stored separately from the cycle aggregate
 - the cycle stores operational state and selected execution summary fields directly
 - the subscription remains the source of active subscribed state, while the cycle remains the source of execution history
@@ -101,6 +102,70 @@ The current migrations and model setup optimize the renewal queue for:
 - filtering and ordering by `scheduled_for`
 - Admin filtering and sorting by operational fields
 - attempt history lookup by `renewal_cycle_id`
+
+plus one constraint rather than one lookup:
+
+- `renewal_cycle_one_scheduled_per_subscription`, a partial unique index on
+  `subscription_id` restricted to `status = 'scheduled' and deleted_at is null`
+  (`src/modules/renewal/migrations/Migration20260924120000.ts`). It is
+  hand-authored because the model generator cannot express the extra `status`
+  predicate, and a later `medusa plugin:db:generate` may propose dropping it — that
+  drop would be a regression, not cleanup.
+
+### The one-upcoming-cycle invariant
+
+For a subscription that should have an upcoming renewal, exactly one live
+`renewal_cycle` row stands for it, and it carries `scheduled_for` equal to
+`subscription.next_renewal_at`. Two layers make that true:
+
+**The reconciliation step.** `ensure-next-renewal-cycle` no longer looks for a row
+by exact date and creates another one when it finds nothing; it asks
+`resolveUpcomingCycle` (`src/modules/renewal/utils/upcoming-cycle.ts`) what to do
+with the rows the subscription already carries, and that function answers one of
+four actions:
+
+| action | when | what is written |
+| --- | --- | --- |
+| `match` | a row already sits on `next_renewal_at`, whatever its status | that row's approval state and settings policy — or nothing at all, when the row is `processing`/`succeeded` or its approval state already agrees with what was derived |
+| `adopt` | an open row (`scheduled` or `processing`) sits elsewhere and nothing is in flight under it | the same, plus `scheduled_for` moved onto the entitlement date |
+| `defer` | the row that would be adopted carries a `generated_order_id` or is `processing` | nothing — and one warning line naming the cycle id and the order id |
+| `create` | no open row at all | a fresh `scheduled` cycle |
+
+`match` outranks `adopt` for every status; that precedence is a pinned contract, not
+an accident of the code's order. Adopting a row that sits behind a settled
+(`succeeded`/`failed`) row on the entitlement date would put a second chargeable
+cycle onto a period that already ended, which is the failure the invariant exists to
+remove. A past-dated `scheduled` row with no order is adopted rather than left
+behind, because `process-renewal-cycle` moves anything it works on to `processing`,
+so an untouched `scheduled` row is unclaimed.
+
+`adopt` is a reschedule, not a replacement: the row keeps its id, its
+`renewal_attempt` children and its `generated_order_id` history. The step compensates
+a reconciliation write from one field list shared with the write itself
+(`UpcomingCycleReconcilePatch` and the restore type derived from it), so adding a
+column to the write without adding it to the rollback is a type error rather than a
+half-repaired row. The `deleted` compensation (taken when a subscription should no
+longer have an upcoming cycle) restores at most one row live and recreates any
+extras soft-deleted, because restoring two would violate the index in the middle of
+a rollback.
+
+**The constraint.** The index rejects a write that would leave two live `scheduled`
+rows for one subscription, so drift cannot be created silently any more. On upgrade
+the same migration first normalizes a database that already carries drift: the
+duplicates are **soft-deleted** — never flipped to `failed`, which
+`listDueRenewalCyclesForProcessing` selects alongside `scheduled` and would therefore
+re-arm for a charge — and the row kept is the one already matching
+`subscription.next_renewal_at`, falling back to the most recent one. `down()` drops
+only the index and does not resurrect the normalized rows, because putting a second
+chargeable cycle back on the scheduler's list is worse than the asymmetry.
+
+**Boundary of the repair.** The step only ever deletes rows when the subscription
+should have no upcoming cycle at all; it never deletes a row it does not own. A
+duplicate that predates the migration is therefore removed by the normalization
+above, not by the next purchase, and a live `scheduled` row left behind while the
+entitlement-date row is terminal keeps being charged as soon as it is due. Nothing
+in the selector can close that: the two orderings of `match` against `adopt` differ
+only in which row is written, not in whether the stale row survives.
 
 ## 3. Execution Semantics
 
@@ -417,6 +482,8 @@ This keeps display data separate from drawer-only form state and matches the exi
 
 Implemented test files:
 - `src/modules/renewal/__tests__/service.spec.ts`
+- `src/modules/renewal/__tests__/upcoming-cycle.spec.ts` — the `match | adopt | defer | create` selector, including the pinned `match`-outranks-`adopt` precedence and the shared write/restore field list
+- `integration-tests/http/subscription-from-order.spec.ts` — the stacking purchase end to end: one future `scheduled` row, the `defer` branch through the real workflow, and the index refusing a second live `scheduled` row
 - `integration-tests/http/renewals-workflows.spec.ts`
 - `integration-tests/http/renewals-routes.spec.ts`
 - `integration-tests/http/renewals-admin-flow.spec.ts`

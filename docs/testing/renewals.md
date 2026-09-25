@@ -57,14 +57,25 @@ Repository files involved in the setup:
 Purpose:
 - verify the `renewal` module service in isolation from full Admin flows
 
-Current file:
+Current files:
 - [service.spec.ts](../../src/modules/renewal/__tests__/service.spec.ts)
+- [upcoming-cycle.spec.ts](../../src/modules/renewal/__tests__/upcoming-cycle.spec.ts)
 
 This layer is the right place for:
 - renewal cycle creation behavior
 - renewal attempt creation behavior
 - module-level persistence behavior
 - model-adjacent service behavior
+- the upcoming-cycle reconciliation decision (`resolveUpcomingCycle`), which is a
+  pure selector over rows and is asserted for all four actions, for the pinned
+  "`match` outranks `adopt`" precedence, and for the write/rollback field list the
+  patch and its restore share
+
+Boundary this layer cannot cross: the module runners create their schema from the
+entity models and pass no `pathToMigrations`, so **hand-written migrations do not
+exist here**. Anything asserting the output of a migration — the partial unique
+index `renewal_cycle_one_scheduled_per_subscription`, the normalization that runs
+before it — belongs in the HTTP layer below, which does apply plugin migrations.
 
 ### 3.2 HTTP Integration Tests
 
@@ -78,6 +89,7 @@ Current files:
 - [renewals-routes.spec.ts](../../integration-tests/http/renewals-routes.spec.ts)
 - [renewals-admin-flow.spec.ts](../../integration-tests/http/renewals-admin-flow.spec.ts)
 - [renewals-smoke.spec.ts](../../integration-tests/http/renewals-smoke.spec.ts)
+- [subscription-from-order.spec.ts](../../integration-tests/http/subscription-from-order.spec.ts) — renewal-side cases: a stacked purchase leaves exactly one future `SCHEDULED` cycle, a cycle whose renewal order is already outstanding is deferred rather than rescheduled, and a second live `SCHEDULED` row for one subscription is refused by the database
 
 This layer is the main protection for the implemented Admin behavior and the renewal execution boundary.
 
@@ -112,6 +124,14 @@ These helpers are used to:
 - keep route and workflow tests focused on behavior
 - provide realistic seed data for approval, retry, and execution flows
 - support smoke-level integration across `Renewals`, `Subscriptions`, `Plans & Offers`, and `Cancellation & Retention`
+
+One property of the seed helper is worth knowing before writing a new spec:
+`createRenewalCycleSeed` defaults `status` to `SCHEDULED`
+([renewal-fixtures.ts](../../integration-tests/helpers/renewal-fixtures.ts)), which is
+exactly the state the partial unique index constrains. Seeding two live
+`SCHEDULED` cycles for one subscription is therefore a database error in the HTTP
+layer, and a spec that wants that state deliberately has to say so through the
+subscription id it reuses — which is what the index self-proof case does.
 
 ## 5. Current Coverage
 

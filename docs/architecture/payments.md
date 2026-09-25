@@ -61,6 +61,92 @@ Provider specific requirement for PayPal: the storefront must create the checkou
 
 `source_payment_collection_id` and `source_payment_session_id` document the original checkout. They are never rewritten after the subscription is created, including when the payment method changes.
 
+`payment_mode` and `mechanism` change together: no path updates a stored mode and
+leaves the old label standing. The rule that derives the label from the mode being
+committed — `auto` → `reorder_auto`, `manual` → `manual` — is `buildPaymentModeFields`
+(`src/workflows/utils/payment-mode-mechanism.ts:32-39`), and two sites call it: the
+write step of the auto-renew switch
+(`src/workflows/steps/set-subscription-auto-renew.ts:192-195`) and the payment-method
+update, which keeps the stored mode and re-derives the label that matches it
+(`src/workflows/steps/update-subscription-payment-method.ts:104-122`, the spread at
+`:109`). Because the label is re-derived rather than carried over from the stored
+annotation, a label that had drifted from the mode is corrected by the next write
+through either of those two sites instead of surviving it.
+
+The helper is not the only writer of the column. The paths below write the mode
+themselves instead — for most of them it is a mode being minted for the first time
+with its label, and for the consent flip it is a mode being changed without the
+helper:
+
+- checkout mints the payment context, and the declared mode picks the pair:
+  `manual` → `manual` (`src/workflows/steps/validate-subscription-cart.ts:489-508`)
+  or `auto` → `reorder_auto` (`:525-537`), where the mode is the subscription line
+  item's own `payment_mode` metadata with the step's default behind it
+  (`:197-200,590-601`). The context is persisted with the new row
+  (`src/workflows/steps/create-subscription-record.ts:123`)
+- a proven consent flip writes both in the same update that stores the token. The
+  pair comes from `resolveConsentFlip`'s flip branch
+  (`src/modules/subscription/utils/consent-flip.ts:128-134`) and is merged by
+  `applyConsentFlip` (`:198-212`, the two assignments at `:208-209`). Two paths
+  reach it: the `payment.captured` subscriber
+  (`src/subscribers/payment-captured-save-payment-method.ts:160-174`, written at
+  `:186-189`) and the extend decision taken during cart validation
+  (`src/workflows/steps/validate-subscription-cart.ts:274-285,578-588`, written at
+  `src/workflows/steps/create-subscription-record.ts:187-191,230`)
+- a native mirror row is created with `manual` + `native`
+  (`src/modules/subscription/utils/native-mirror-sync.ts:75-83`). This is the only
+  place `native` is ever written, and the only place a `mechanism` value is not a
+  function of reorder's own mode. No write that *changes* a mode can reach a mirror
+  row: all three of those writers test the `NATIVE-` reference prefix before they
+  write (`isNativeSubscriptionReference`,
+  `src/modules/subscription/utils/native-subscription.ts`; the guards at
+  `src/workflows/steps/set-subscription-auto-renew.ts:105-109`,
+  `src/workflows/steps/update-subscription-payment-method.ts:68-72`, and
+  `src/modules/subscription/utils/consent-flip.ts:113,117` for the flip), the flip's
+  extend target is already filtered on the same predicate
+  (`src/modules/subscription/utils/stacking.ts:164-168`), and the mirror's own
+  reconcile update never touches `payment_context` at all
+  (`src/modules/subscription/utils/native-mirror.ts:274-296`)
+- a subscription created by redeeming a code is written with `payment_mode: "auto"`
+  and **no** `mechanism` key at all (the constant
+  `src/workflows/steps/redeem-redemption-code.ts:287-296`, spread into the trial
+  context at `:298-305`, used for both the free and the trial row, written at
+  `:390-392`). Redemption's extend branch changes no mode: its update names status,
+  free cycles and metadata only (`:502-513`)
+
+So the pair has one derivation rule and several writers, and a row can even be
+created without the `mechanism` key at all. What that label never becomes is a
+SQL or filter predicate: it is a jsonb key rows predating it do not carry, so
+`payment_context->>'mechanism'` is NULL there and `NULL != 'native'` is NULL
+rather than true, and an exclusion filter built on it silently returns zero rows
+— see the `mechanism` bullet under Payment Context above,
+`src/modules/subscription/utils/native-subscription.ts:12-21`, and the
+`.agents/lessons.md` entry *Never Filter On A Missing jsonb Key*, which is the
+same rule stated as a guard. It *is* read back in two places, always to carry a
+value forward and never to classify a row: `resolveConsentFlip` reads the stored
+label and returns it as the mechanism of every "leave the row alone" answer
+(`src/modules/subscription/utils/consent-flip.ts:84,93`; the reader itself is
+documented at `:178-191`), and the `payment.captured` subscriber compares it as
+one of the four conditions under which it skips the write entirely
+(`src/subscribers/payment-captured-save-payment-method.ts:176-184`). Both read a
+row already in hand; neither turns the label into a query, and the native
+question stays decided by the `NATIVE-` reference prefix.
+
+A row that stores no mode at all is readable, and the default is the caller's
+choice. Two callers state it through `readStoredPaymentMode`
+(`src/workflows/utils/payment-mode-mechanism.ts:49-60`): the auto-renew switch
+treats a modeless row as `"manual"`
+(`src/workflows/steps/set-subscription-auto-renew.ts:118,187` — a row nobody
+opted into cannot be overdue), the payment-method update as `"auto"`
+(`src/workflows/steps/update-subscription-payment-method.ts:100` — the
+pre-existing auto-by-default shape). Two more pick the same default inline instead
+of going through the helper: the scheduler's exclusion compares
+`payment_mode === "manual"` on an optional-chained read, so a row with no stored
+mode stays chargeable (`src/modules/renewal/utils/scheduler-query.ts:132-136`),
+and the manual-renewal hygiene job writes `?? "auto"` before comparing for
+`"manual"` (`src/jobs/manual-renewal-hygiene.ts:46`). The helper is where a
+caller names its default explicitly, not the only place a default is picked.
+
 ## Lifecycle
 
 ### 1. Checkout
@@ -79,16 +165,48 @@ A checkout that settles through a redirect provider is created in `"manual"`
 mode, and the vaulted payment method only becomes visible on `payment.captured`.
 The `payment-captured-save-payment-method` subscriber stores that token and, when
 the offer declares `rules.consent_from_session`, decides there and then whether
-the customer consented:
+the customer consented. The decision is the pure function `resolveConsentFlip`
+(`src/modules/subscription/utils/consent-flip.ts`), and every answer that leaves
+the row alone names its own reason in `skip_reason`; the subscriber logs that
+reason verbatim, so "why is this row still manual" is readable from the process
+log without re-running the rule:
 
-- rule off (`null`, the default) → the mode stays manual; the customer opts in
-  later through `POST /store/saas/auto-renew`
-- rule on and the payment session carries a non-empty value in the named field
-  (`customer_id` today) → `payment_mode` becomes `"auto"` and `mechanism` becomes
-  `"reorder_auto"` **in the same update** as the token, so no observer can see a
-  row with a stored method but a mode that still says manual
-- the row mirrors a provider-owned recurrence (`mechanism: "native"`) → never
-  flipped; that would put two systems on one product
+- rule off (`null`, the default) → `consent_from_session_disabled`; the mode stays
+  manual, and the customer opts in later through `POST /store/saas/auto-renew`,
+  which runs the `set-subscription-auto-renew` workflow
+- rule on but the payment session carries no non-empty value in the named field
+  (`customer_id` today) → `consent_field_missing`; the token is still stored, the
+  mode stays manual
+- the row is provider-owned → `native_reference`; never flipped, because that
+  would put two systems on one product. Ownership is decided the same way as
+  everywhere else in the plugin, by the `NATIVE-` prefix on the subscription's own
+  `reference` (`isNativeSubscriptionReference`,
+  `src/modules/subscription/utils/native-subscription.ts`), which the
+  `payment.captured` subscriber reads off the row it loaded
+  (`src/subscribers/payment-captured-save-payment-method.ts`). It is deliberately
+  **not** decided by `payment_context.mechanism`: see `mechanism` under Payment
+  Context above for why that jsonb field can never be a predicate
+- the row already stores `payment_mode: "auto"` → `already_auto`
+- the caller named no readable row → `reference_undecidable`. `reference` is a
+  required input and is typed `string | null`, so an omitted argument is a compile
+  error; the runtime branch covers the case a compiler cannot see — a value that
+  is neither a string nor an explicit `null`, which says nothing about ownership.
+  It is answered "left alone", not "not native", because "not native" is the one
+  answer that must never be reached by silence. Neither checkout path can reach it:
+  the `payment.captured` subscriber passes the reference of the row it loaded, and
+  the stacking decision names the row being folded into
+  (`extend_subscription_reference`, `src/modules/subscription/utils/stacking.ts`),
+  which is what the extend-time flip below consumes
+
+Only when none of those applies does the row flip: `payment_mode` becomes `"auto"`
+and `mechanism` becomes `"reorder_auto"` **in the same update** as the token, so no
+observer can see a row with a stored method but a mode that still says manual.
+
+A repeat purchase that folds into an existing row proves consent through the same
+function, during cart validation rather than on capture, and additionally requires
+the row to already hold a chargeable method
+(`src/workflows/steps/validate-subscription-cart.ts`; see *Repeat purchase of the
+same product* in `architecture/subscriptions.md`).
 
 Every flip writes a `subscription.payment_method_updated` activity-log event
 naming the session field the proof came from, deduped per subscription, so
@@ -133,11 +251,62 @@ Behavior:
 - allowed for subscriptions in `active`, `paused` or `past_due` status
 - the payment method must be a saved payment method of the subscription's own customer for the target provider, otherwise the update is rejected
 - `provider_id` is optional and defaults to the subscription's current `payment_provider_id`; it is required when the subscription has no provider configured
-- only `payment_provider_id`, `payment_method_reference` and `customer_payment_reference` are rewritten
+- the step rejects a provider-owned (`NATIVE-`) row (`src/workflows/steps/update-subscription-payment-method.ts:68-72`) before it looks a payment method up at the provider (`:85-89`) and before it writes (`:102-130`), for the same reason the auto-renew switch does. It does not run first: the row is read to have a `reference` to test (`:52-54`), and the status check (`:56-62`, allowed: `active`/`paused`/`past_due`) and the `payment_method_id` presence check (`:64-66`) are both answered before the mirror rule is consulted
+- `payment_provider_id`, `payment_method_reference` and `customer_payment_reference` take new values. `payment_mode` keeps the stored value (a row with no stored mode is read as `"auto"`) and `mechanism` is re-derived from it through the same pair-writer the auto-renew switch uses, so the two can never disagree; the two source identifiers of the original checkout are carried forward explicitly
+- the change is recorded in `metadata.payment_method_update_context` as `{ triggered_by, updated_at }`, spread over the row's stored metadata rather than replacing it
 - the step compensates by restoring the previous subscription record
 - a `subscription.payment_method_updated` activity-log event records the change
 
 The workflow does not trigger a payment retry. Retrying is an explicit action through the dunning retry routes.
+
+## Automatic Renewal Switch
+
+`POST /store/saas/auto-renew` changes which mode a subscription renews in
+(`manual` ↔ `auto`) by running the `set-subscription-auto-renew` workflow
+(`src/workflows/set-subscription-auto-renew.ts`), not by writing the row from the
+request handler. The route validates the body, applies the request-bound tenant
+rule, runs the workflow and shapes the response.
+
+The workflow is three steps, and both refusals happen before anything is written:
+
+1. `assert-subscription-auto-renew-not-native` — the write-side mirror guard, using
+   the same `isNativeSubscriptionReference` predicate as every other site
+2. `assert-subscription-auto-renew-not-overdue` — switching a row **on** is refused
+   while it is `past_due` or its `next_renewal_at` is more than
+   `AUTO_RENEW_OVERDUE_GRACE_MS` (24 hours) in the past, because the scheduler
+   would charge in the same request that enabled the switch. Switching **off** is
+   never refused, and a row that already stores `payment_mode: "auto"` is not
+   re-checked for being overdue
+3. `update-subscription-payment-mode` — the only state-changing write: it re-reads
+   the row, merges the stored `payment_context`, and replaces just the mode and its
+   label through `buildPaymentModeFields`. It compensates by restoring the previous
+   `payment_context` verbatim
+
+Only two failures are quoted, because only two are declared: the mirror guard and
+the overdue guard, listed as `AUTO_RENEW_CUSTOMER_REFUSALS`
+(`src/workflows/set-subscription-auto-renew.ts:51-62`). Each answers 400 with its
+own customer-facing text.
+
+Anything else is neither blamed on the caller nor quoted: it keeps the HTTP status
+of the `MedusaError` it was thrown as, and the body carries one of the route's own
+fixed strings instead (`src/api/store/saas/auto-renew/route.ts:42-46,123-145`). A
+`not_found` — the row vanishing after this handler validated it
+(`src/workflows/steps/set-subscription-auto-renew.ts:101-103,181-183`) — is
+therefore still a 404 and a `conflict` still a 409; the preserved types and the
+statuses they map to are the `PRESERVED_TYPES` table in
+`src/workflows/utils/store-step-failure.ts`. Only what falls outside that table
+collapses to a 500 — the fallthrough return of `classifyStepFailure` — and that
+class is the one that is genuinely a fault of this plugin: driver and connection
+faults, deserialized Postgres errors, `database_error`, `unauthorized`/`forbidden`,
+`unexpected_state`, `invalid_argument`, an unrecognized shape. For every failure
+that is not quoted, the step name and the serialized error go to the request
+logger (`src/api/store/saas/auto-renew/route.ts:137-142`,
+`store-step-failure.ts`'s `logUnquotedStepFailure`), so engine-reported text never
+reaches the SaaS caller. The per-status contract is documented in
+`api/saas-bridge.md` (*Failure disclosure on the three workflow-backed endpoints*).
+
+A stale stored method reference is not checked here; it surfaces as a failed
+renewal and a `past_due` transition on the scheduler side.
 
 ## Exposed Data
 
@@ -181,3 +350,4 @@ Payment method references, customer payment references and payment session ident
 - `api/admin-subscriptions.md`
 - `api/store-subscription-payment-methods.md`
 - `api/store-subscription-checkout.md`
+- `api/saas-bridge.md`

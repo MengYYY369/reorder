@@ -101,6 +101,41 @@ Why snapshots are used:
 - future renewal logic needs operational data local to the subscription
 - current Admin read models use snapshot fallback when linked records are missing or unresolved
 
+### The `metadata` jsonb column
+
+`metadata` is one JSON object shared by several writers (`source` and
+`source_order_id` from checkout, `cycles_purchased` from stacking,
+`payment_method_update_context` from the payment-method update, `pause_context` from
+pause, the plan-change and cancellation bookkeeping from their own steps), so what a
+write does to the keys it does not mention matters:
+
+- a write through `updateSubscriptions` **merges recursively**: keys the incoming
+  object does not mention keep their stored value, and a value that is a plain
+  object on both sides is merged the same way rather than swapped wholesale
+  (`@medusajs/utils/dist/dal/mikro-orm/mikro-orm-repository.js:224-230` →
+  `@mikro-orm/core/entity/EntityAssigner.js:106-108` →
+  `@mikro-orm/core/utils/Utils.js:289-318`). Everything else — a scalar, an array, an
+  empty string — is assigned over the stored value, so no key is ever dropped by
+  being set to `""`
+- `metadata: null` clears the whole column: the merge only runs when both the stored
+  and the incoming value are plain objects, so an absent, null, or otherwise
+  non-object value is assigned exactly as given
+- a batch/upsert write (`upsertSubscriptions`, `upsertWithReplace`) overwrites the
+  column with the object it is handed and performs no merge at this level, so a
+  partial object there does lose the keys it omits. No code path in this plugin
+  takes that route today
+- because the outcome depends on which DAL method a caller happened to use, each
+  writer of subscription `metadata` in this plugin re-reads the row and spreads the
+  stored object into its own payload instead of relying on the merge: the extend
+  path of `create-subscription-record`, `pause-subscription`, `resume-subscription`,
+  `cancel-subscription`, `schedule-subscription-plan-change`, `skip-next-delivery`,
+  `update-subscription-payment-method`, the retention and cancellation metadata
+  helpers, and the mirror reconciliation in `native-mirror-sync`
+
+Writing `metadata: null` and writing a partial object over a batch path are both
+therefore ways to lose stored keys, and neither is prevented by the framework; the
+spread in each writer is the prevention.
+
 ### `shipping_address` snapshot rule
 
 `shipping_address` is NOT NULL, so every subscription carries one, but a
@@ -144,7 +179,7 @@ A mirror row is **never** charged, extended or dunned by reorder:
 | dunning retry | permanent failure with `native_subscription`, before any charge |
 | manual renewal creation | rejected |
 | forced renewal (Admin) | rejected |
-| `POST /store/saas/auto-renew` | rejected with 400, because it rewrites `payment_context` |
+| `POST /store/saas/auto-renew` | refused by the `assert-subscription-auto-renew-not-native` step of `set-subscription-auto-renew`, before the write step runs |
 | payment method update | rejected, for the same reason |
 
 Recognition is `reference LIKE 'NATIVE-%'`, defined once in
@@ -158,6 +193,38 @@ Mirror rows carry no renewal cycle, no cart link, and an inert shipping-address
 placeholder whose `N/A` country marks the row as a mirror. Their
 `next_renewal_at` is whatever PayPal last reported and may be null; nothing
 infers a date from the event type.
+
+**Known limitation — a mirror moves only as far as the provider reports.** A
+mirror follows the provider as far as the provider talks:
+`paypal.subscription.cancelled` and `paypal.subscription.expired` move the row to
+`cancelled`, and the hourly pass re-reads the provider module's own
+`paypal_subscription` rows and refreshes a mirror for every one of them it can map.
+Two properties of that pass are worth stating exactly, because both limit what can
+ever clear a stale mirror:
+
+- it reads the provider module's **local table** through the query layer
+  (`loadProviderSubscriptionRecords`,
+  `src/modules/subscription/utils/native-mirror-sync.ts`), never the provider
+  account. Reorder only ever reads that table and never deletes a row from it, so a
+  recurrence whose local row keeps reporting a live status keeps its mirror live no
+  matter what the provider account itself looks like
+- the pass is **one-directional**: it creates and refreshes mirrors from provider
+  rows and never enumerates the mirror rows already in the database against that
+  set, so nothing here clears a mirror whose provider row is gone or unreadable
+
+A provider row is also skipped rather than mirrored whenever it cannot be mapped
+without guessing — a provider state with no reorder equivalent (`APPROVAL_PENDING`
+is deliberately mapped to nothing, so a recurrence the customer never finished
+approving cannot block a checkout), a variant that resolves to no product, or a
+cadence that is not a whole positive week/month/year count
+(`src/modules/subscription/utils/native-mirror.ts`).
+
+Reorder never charges these rows, so the residue cannot bill anyone; what it can do
+is refuse a checkout for a recurrence that no longer occupies the billing track. The
+refusal stands on both purchase tracks — the subscription track through
+`assertNoNativeRecurrence` (`src/workflows/steps/validate-subscription-cart.ts`)
+and the one-time track through the completion gate below — until support cancels the
+mirror row.
 
 ### Checkout completion gate
 
@@ -182,12 +249,43 @@ Why this form and not the alternatives:
   order, which is registered ahead of the route for the same path, so this runs
   first and can answer before anything is written.
 
-Behavior: an unauthenticated request, an unreadable cart, or a cart whose products
-match none of the customer's live `NATIVE-` rows is passed through untouched. A
-collision answers `400` with `{ message, type, data: { product_id,
-subscription_id } }` for the **whole cart** — the plugin never edits the cart to
-drop the offending line, because that would move totals, shipping and promo
-thresholds behind the customer's back.
+Behavior: an unauthenticated request, a failed read of the customer's live
+`NATIVE-` rows, an unreadable cart (no cart id, no cart row, or a failing read), or
+a cart whose products match none of those rows is passed through untouched. Each
+read failure is a deliberate **fail-open**, and the decision sits in the pure unit
+`resolveCheckoutGate` (`src/modules/subscription/utils/checkout-gate.ts`;
+`src/api/store/carts/completion-gate.ts` is the thin re-export the middleware
+registration imports): a rejected subscription read returns `allow` — before the
+cart is loaded at all — instead of throwing, so a plugin-side failure can never hang
+or 500 checkout, and the core handler runs and reports cart problems its own way. A
+collision answers `400` with `{ message, type, data: { product_id, subscription_id } }`
+for the **whole cart** — the plugin never edits the cart to drop the offending line,
+because that would move totals, shipping and promo thresholds behind the customer's
+back.
+
+That fail-open is bounded to the reads the rule itself needs, and the bound is part
+of the rule: the product title naming the colliding item is a cosmetic input, read
+only after the verdict exists and behind its own guard (`readBlockingProductTitle`),
+so **a failed title read degrades the wording and never the verdict** — it falls
+back to the product id, the same fallback the production reader uses
+(`readProductTitle`, `src/modules/subscription/utils/native-exclusivity.ts`), and a
+real collision stays a block. Hoisting that read above the decision, or widening the
+decision's `try` to cover it, would answer a cosmetic failure exactly like a rule
+read's failure: by letting the purchase through.
+
+**Known limitation — an empty product title reaches the message text.** The fallback
+above is for a title that cannot be read, not for one that reads back empty: the
+reader substitutes the product id only when the product row is missing or its title
+is `null`/`undefined`, so a product whose stored `title` is an empty string is
+reported as `an active subscription for '' managed by your payment provider` — here
+and in the subscription track's refusal in `assertNoNativeRecurrence`, which
+interpolates the same reader. The structured `data.product_id` and the verdict are
+unaffected; only the sentence is. An empty title is not blocked upstream either: the
+framework's product validators type `title` as `z.string()` with no minimum length
+in both the create and the update schema
+(`@medusajs/medusa/dist/api/admin/products/validators.js:167`, `:207`), so `""` is a
+value nothing rejects. Nothing in this repository pins either the reachability or
+that wording.
 
 ## 3. Read Path
 

@@ -807,12 +807,32 @@ This keeps payload shaping reusable across workflows without mixing normalizatio
 
 The helper should remove or exclude sensitive values from state payloads and metadata.
 
-Current protected categories include:
+The keys are one shared set, `ACTIVITY_LOG_SENSITIVE_KEYS`
+(`src/modules/activity-log/utils/sensitive-keys.ts`), and both writers that sanitize
+before persistence import it — neither keeps a private list:
+
+- `normalize-log-event.ts` **drops** the key from `previous_state`, `new_state` and
+  the allow-listed `metadata` payload, at every nesting level it walks
+- `serialize-error-chain.ts` **replaces** the value with `[redacted]` wherever an
+  error dumps its own fields into the human-readable `reason` that the Admin
+  activity-log screen renders
+
+Protected categories, as the set currently stands:
 - full shipping address lines
 - phone numbers
-- payment context and payment references
-- raw provider payloads
-- stack traces and low-level diagnostics
+- payment context and payment references, including the session and
+  collection identifiers of the original checkout
+- raw provider payloads and provider responses
+- provider and API credentials (`api_key`, `secret`, `token`)
+- raw failure payloads and stack traces
+
+Before the set was shared, the two writers each kept a private list and they had
+drifted apart: the error serializer masked credentials the normalizer did not, and
+the normalizer masked address and payment-reference keys the serializer did not.
+Adding a member to the shared set therefore masks it on both paths at once, and the
+header of `sensitive-keys.ts` states what such an addition costs (one more field
+hidden from the timeline) and which spec pins are expected to go red when it is
+widened.
 
 The goal is to preserve operator-facing business meaning without turning `Activity Log` into a storage area for sensitive or low-level technical data.
 

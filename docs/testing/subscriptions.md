@@ -62,10 +62,28 @@ Purpose:
 Current files:
 - [service.spec.ts](../../src/modules/subscription/__tests__/service.spec.ts)
 - [payment-methods.spec.ts](../../src/modules/subscription/__tests__/payment-methods.spec.ts)
+- [consent-flip.spec.ts](../../src/modules/subscription/__tests__/consent-flip.spec.ts)
+- [checkout-gate.spec.ts](../../src/modules/subscription/__tests__/checkout-gate.spec.ts)
+- [stacking.spec.ts](../../src/modules/subscription/__tests__/stacking.spec.ts)
+- [native-subscription.spec.ts](../../src/modules/subscription/__tests__/native-subscription.spec.ts)
+- [native-mirror.spec.ts](../../src/modules/subscription/__tests__/native-mirror.spec.ts)
+- [shipping-address.spec.ts](../../src/modules/subscription/__tests__/shipping-address.spec.ts)
+- [store-list-serialization.spec.ts](../../src/modules/subscription/__tests__/store-list-serialization.spec.ts)
+
 This layer is the right place for:
 - service creation/update behavior
 - module-level persistence behavior
 - model-adjacent logic
+- pure decision units the HTTP runners cannot reach cheaply: the consent-flip
+  outcome table, the checkout-completion gate's decision, the repeat-purchase
+  stacking decision, mirror-row field mapping, address completeness, and the store
+  list serialization
+
+Why the decision units live here rather than beside the code that calls them: only
+`src/modules/*/__tests__/**/*.spec` and `integration-tests/http/*.spec` are executed
+by any runner, and nothing under `src/api/` matches a `testMatch`. A rule written
+inline in a route or middleware file can therefore never be asserted — not even by a
+test placed beside it.
 
 ### 3.2 HTTP Integration Tests
 
@@ -79,7 +97,16 @@ Current files:
 - [subscriptions-workflows.spec.ts](../../integration-tests/http/subscriptions-workflows.spec.ts)
 - [subscriptions-admin-flow.spec.ts](../../integration-tests/http/subscriptions-admin-flow.spec.ts)
 - [subscription-payment-methods.spec.ts](../../integration-tests/http/subscription-payment-methods.spec.ts)
+- [subscription-from-order.spec.ts](../../integration-tests/http/subscription-from-order.spec.ts) — order-driven creation, stacking/extend purchases, idempotency and the creation-failure log
+- [consent-to-auto-flip.spec.ts](../../integration-tests/http/consent-to-auto-flip.spec.ts) — the `payment.captured` consent path end to end
+- [native-checkout-exclusivity.spec.ts](../../integration-tests/http/native-checkout-exclusivity.spec.ts) — the subscription track's refusal of a provider recurrence
+- [native-checkout-gate.spec.ts](../../integration-tests/http/native-checkout-gate.spec.ts) — the completion-gate middleware on the core `POST /store/carts/:id/complete`, including that a refusal happens before the core handler runs
+- [native-subscription-mirror.spec.ts](../../integration-tests/http/native-subscription-mirror.spec.ts) — mirror rows: event upsert, scheduler exclusion, and both write-side refusals through the real routes
 This layer is the main protection for the implemented Admin behavior.
+
+The middleware-level cases above are the only place the route wiring is exercised: a
+decision unit proves the rule, an HTTP case proves the rule is installed on the path
+that needs it.
 
 Store checkout now emits the initial `subscription.created` activity-log entry through the subscription checkout workflow. When changing that flow, extend the workflow or HTTP integration layer to protect the emitted event.
 
@@ -125,6 +152,18 @@ Covered at the module/service layer:
 - subscription retrieval
 - subscription updates through the module service
 - customer payment method resolution and listing
+- consent-to-auto decisions, one case per outcome the pure function can answer
+  (`consent_from_session_disabled`, `consent_field_missing`, `native_reference`,
+  `already_auto`, `reference_undecidable`)
+- the checkout-completion gate's decision unit: each pass-through case, the
+  structured refusal, and the ordering that keeps a cosmetic title read behind the
+  verdict
+- the repeat-purchase stacking decision: which row is folded into, the
+  accumulated-cycle ceiling, and the reference handed to the consent flip
+- provider-mirror recognition by `reference` prefix and the statuses that occupy the
+  billing track
+- shipping-address completeness and store list serialization
+
 ### Query and Workflow Coverage
 
 Covered through integration tests:
@@ -227,6 +266,23 @@ The current test strategy does not include:
 
 Reason:
 - the initial Playwright PoC focuses on the Subscriptions list page to validate infrastructure and session handling before expanding to complex drawer mutation flows
+
+Two coverage boundaries are facts of the runner configuration rather than choices
+about scope, and they are easy to write a test against by accident:
+
+- `jest.config.js` defines `testMatch` only for `integration-tests/http/*.spec.[jt]s`
+  and `src/modules/*/__tests__/**/*.spec.[jt]s` (plus the i18n suite), so the three
+  specs under `src/workflows/__tests__/` are executed by no runner. Behavior that has
+  to be asserted stays in one of the two executed locations, which is why the gate
+  and consent decisions are pure units under `src/modules/`
+- module runners build their schema from the entity models and never apply plugin
+  migrations, so nothing asserted at that layer can depend on a migration's output
+
+One wording case is knowingly unpinned: the checkout-completion gate renders an empty
+stored product title as `for ''`, and no spec asserts either that rendering or the
+reachability of an empty title. See *Known limitation* under *Checkout completion
+gate* in `docs/architecture/subscriptions.md`.
+
 ## 8. How to Add New Tests
 
 Use this rule of thumb:

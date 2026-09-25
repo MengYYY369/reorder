@@ -96,6 +96,66 @@ Wrong or missing secret → `401` with `{"error": "bad-secret" |
 All request bodies are snake_case; unknown-body drift on the pinned response
 fields breaks the SaaS.
 
+## Failure disclosure on the three workflow-backed endpoints
+
+`renew`, `auto-renew` and `redeem` run a workflow with `throwOnError: false` and
+translate the engine's `errors` into an HTTP answer. The rule is the same on all
+three, and it exists because the engine hands back a **deserialized** failure —
+`{ action, handlerType, error }`, where `error` is a plain object built from the
+thrown value's own properties (`message`, `name`, `type`, and for a driver error
+`code`, `table`, `detail`). Nothing there is an `Error` instance, so no route may
+`instanceof`-check it, and none of its text may be forwarded blindly.
+
+- **A refusal may be repeated only when it is declared.** Each route lists the
+  refusals it is allowed to quote — the step that raises them, the
+  `MedusaError` type they carry, and their exact text. A declared refusal answers
+  **400 `invalid_data`** with its own wording, which is the status these
+  endpoints have always answered a refusal with, so a SaaS screen that shows the
+  message to the end customer keeps working. The text is part of the declaration
+  for *every* step, guard steps included: the engine reports a failure under the
+  `action` of whatever step was running, and a guard that reads the row first can
+  be reported for a driver fault the DAL converted into an `invalid_data` whose
+  message names a column (`db-error-mapper.js`). Step identity alone therefore
+  authorizes nothing.
+- **Anything that is not a declared refusal keeps the status of the
+  `MedusaError` it was thrown as, and never its text:** `not_found` → 404,
+  `invalid_data` / `not_allowed` → 400, `conflict` → 409, `duplicate_error` /
+  `payment_authorization_error` → 422. The body message is the route's own fixed
+  string. A business rejection added later therefore arrives with its own status
+  instead of being flattened into a permanent 500.
+- **Everything else is a 500** (`unexpected_state`) with the route's own fixed
+  string: driver and connection faults, deserialized Postgres errors,
+  `database_error`, `unauthorized` / `forbidden` (the caller's identity is the
+  middleware's question, never a step's), `unexpected_state`,
+  `invalid_argument`, and any unrecognized shape.
+- **No internal text from a failed workflow reaches a customer.** The deserialized
+  value is never rethrown as it stands: `formatException` switches on `err.code`, so
+  a `23505` / `23503` / `23502` that survived serialization would otherwise be
+  rewritten into a 422/404/400 whose body embeds `err.table` and `err.detail`. The
+  cause — step name plus the original serialized error — goes to the request logger
+  instead. A `409` is the one class whose body text is not ours to choose: core
+  replaces every conflict message with its own retry sentence. The rule is not
+  bridge-only: `POST /store/customers/me/redemptions` runs the same redeem workflow
+  and classifies it the same way, differing only in the status a declared refusal
+  keeps. **What this does not cover:** a module read the handler performs *before*
+  the workflow runs (the tenant check's `listSubscriptions` / `retrieveCustomer`) is
+  core's error path, and a DAL fault there still reaches the body in the mapper's
+  own words. That is a property of every store route's reads in this plugin, not of
+  this endpoint family, and it is listed under *Deferred* in
+  `.agents/specs/2026-09-24-1.6.0-acceptance-fixes.md`.
+
+Inventories — all three owned by the workflow that composes the steps, so no
+route decides on its own what may be quoted:
+`AUTO_RENEW_CUSTOMER_REFUSALS` in `src/workflows/set-subscription-auto-renew.ts`,
+`RENEW_CUSTOMER_REFUSALS` in `src/workflows/create-manual-renewal.ts`,
+`REDEEM_CUSTOMER_REFUSALS` in `src/workflows/redeem-redemption-code.ts`. Each
+entry names the step, the `MedusaError` type and the anchored copy
+(`db-error-mapper.js:36-37` is why the copy is mandatory: an `undefined_column`
+surfacing on a guard step's own read arrives as an `invalid_data` carrying that
+step's name). The shared mechanism is `src/workflows/utils/store-step-failure.ts`;
+routes must not re-implement any part of it, and each route keeps only its own
+fixed response texts.
+
 ### `POST /store/saas/ensure-customer`
 
 `{ email?, external_id?, display_name? }` (at least one of email /
@@ -133,6 +193,14 @@ redirect providers such as epay produce one). Runs the create-manual-renewal
 workflow by direct typed import; payment confirmation stays with the
 `payment.captured` subscriber — never here.
 
+Customer-visible refusals (400, own wording): the row is a provider-managed
+mirror, it is not in manual payment mode, or it is not `active`. Not repeated
+verbatim, but still classified: `Renewal '…' is already processing` answers
+**409** (retryable — it was a 400 before the disclosure rule), a row that
+vanished between this handler's existence check and the step answers **404**, and
+a subscription whose `cart_id` is missing answers **400** with the route's own
+text because the message names an internal column. See *Failure disclosure*.
+
 ### `POST /store/saas/auto-renew`
 
 `{ subscription_id, enabled: boolean }` → strictly `{ subscription_id,
@@ -144,6 +212,12 @@ reference marks it as a mirror of a provider-owned recurrence (`NATIVE-…`) is
 rejected with 400 as well: this call rewrites `payment_context`, and one
 request would otherwise turn a row the schedulers ignore into a chargeable one.
 See *Native mirror rows* in `docs/architecture/subscriptions.md`.
+
+Both refusals are the only copy this endpoint repeats: they come from the
+workflow's two guard steps, and each keeps its own wording at 400. Any other
+failure of the write step answers the route's own fixed text — 404 if it is a
+`not_found` (the row vanished after this handler validated it), 409 for a
+`conflict`, 500 for a driver or connection fault. See *Failure disclosure*.
 
 ### `POST /store/saas/carts`
 
@@ -173,6 +247,20 @@ the plan-offer trial rules landed; both neutral — false/null — for non-trial
 grants). Runs the same redeem-redemption-code workflow as the
 customer-scoped store route (direct typed import), so the code lock,
 per-customer dedup and quota checks apply unchanged.
+
+Customer-visible refusals (400, own wording), all raised by
+`resolve-redemption-code`: unknown or malformed code, code disabled, batch
+disabled, outside the validity window, code exhausted, already redeemed by this
+customer, a trial code for a returning customer, an ambiguous target
+(`pass subscription_id`), and "no active subscription of this variant to
+extend". A code the store does not know is thrown as a `not_found` by the
+workflow and is still answered **400** here, which is what the byte-compatible
+bridge contract does — the customer-scoped `/store/customers/me/redemptions`
+route lets the domain error through untouched and answers **404** for the same
+case. Anything else — a batch whose variant row is gone, a driver fault, a core
+error surfacing under the same step name — keeps the status of the
+`MedusaError` it was thrown as (404 / 409 / 422) or answers 500, and always with
+the route's own text. See *Failure disclosure*.
 
 ## Event forwarding
 

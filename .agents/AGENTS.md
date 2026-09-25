@@ -47,6 +47,20 @@ yarn test:integration:modules
 yarn test:e2e                                      # Requires running Medusa backend (ADMIN_BASE_URL)
 ```
 
+Both jest gates need a reachable PostgreSQL server, and `DATABASE_URL` is not what
+gives them one: `@medusajs/test-utils` creates a database per suite from
+`DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD`
+(`@medusajs/test-utils/dist/database.js:12-20`, where `DB_USERNAME` defaults to an
+empty string), so export all four. Two failure patterns that are the machine and
+not the code: `*/__tests__/service.spec.ts` and
+`activity-log/create-subscription-log-event.spec.ts` reporting `AggregateError` →
+`ORM not configured`, and an unattended http run losing ~2 suites to OS-killed
+workers (`SIGTERM`, different suites each run) — treat "green" as the union of runs
+plus an isolated `--runInBand` re-run of whatever was killed, and check that the
+failing files are ones your change touched before believing either.
+`test:integration:modules` passes no `pathToMigrations`, so it never applies a
+migration: an assertion about migration output belongs in the http suite.
+
 ## Task router
 
 Match the task to all relevant rows before researching or coding.

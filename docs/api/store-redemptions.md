@@ -79,6 +79,17 @@ Response:
 
 Validation is enforced under a lock on the code: batch/code active, validity window, per-code `max_redemptions`, one redemption per customer per code (schema-level unique index on (`code_id`, `customer_id`) as backstop).
 
+**Failure disclosure.** This route runs the same workflow as
+`POST /store/saas/redeem`, so a failure that is not one of the refusals that
+workflow declares answers with one of three fixed strings
+(`redemption target not found` / `redemption was refused` / `redemption failed`)
+while the step name and the serialized error go to the server log: a driver fault
+is a 500 and never a 422 quoting `table` and `detail`. What differs from the bridge
+route is only the status a *declared* refusal carries — this route answers it with
+the type the step threw it as, so an unknown code stays **404** here where the
+bridge has always flattened refusals to **400**. The shared mechanism is
+`src/workflows/utils/store-step-failure.ts` and its `preserveQuotedStatus` option.
+
 ### `GET /store/customers/me/redemptions`
 
 Lists the customer's redemption records, newest first.

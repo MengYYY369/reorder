@@ -58,6 +58,7 @@ Purpose:
 
 Current files:
 - [normalize-log-event.spec.ts](../../src/modules/activity-log/__tests__/normalize-log-event.spec.ts)
+- [serialize-error-chain.spec.ts](../../src/modules/activity-log/__tests__/serialize-error-chain.spec.ts)
 - [create-subscription-log-event.spec.ts](../../src/modules/activity-log/__tests__/create-subscription-log-event.spec.ts)
 
 This layer is the right place for:
@@ -66,6 +67,12 @@ This layer is the right place for:
 - `changed_fields` construction
 - idempotent create semantics
 - compensation behavior
+
+The two masking writers are asserted the same way on purpose: each spec builds its
+own copy of the shared sensitive-key union and pins the mask in both directions —
+every key of the set is masked, and nothing outside it is. That is what catches the
+regression the shared set exists to prevent (a writer keeping a private list again),
+which a membership check against the exported set could not.
 
 ### 3.2 HTTP Integration Tests
 
