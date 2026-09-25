@@ -1,11 +1,26 @@
-import { MedusaError } from "@medusajs/framework/utils"
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
 import { assertTenantVisible } from "../lib/tenant-ownership"
-import { isNativeSubscriptionReference } from "../../../../modules/subscription/utils/native-subscription"
+import {
+  AUTO_RENEW_CUSTOMER_REFUSALS,
+  setSubscriptionAutoRenewWorkflow,
+} from "../../../../workflows/set-subscription-auto-renew"
+import {
+  classifyStepFailure,
+  logUnquotedStepFailure,
+  type StepFailureCopy,
+  type StepFailureLogger,
+} from "../../../../workflows/utils/store-step-failure"
+import type { SubscriptionPaymentMode } from "../../../../modules/subscription/types"
+import { SUBSCRIPTION_MODULE } from "../../../../modules/subscription"
+import type SubscriptionModuleService from "../../../../modules/subscription/service"
 
 type CustomerModule = {
   retrieveCustomer: (
@@ -14,40 +29,45 @@ type CustomerModule = {
   ) => Promise<{ metadata?: Record<string, unknown> | null }>
 }
 
-type SubscriptionModule = {
-  listSubscriptions: (f: Record<string, unknown>) => Promise<
-    Array<{
-      id: string
-      reference: string
-      customer_id: string
-      status: string
-      next_renewal_at: Date | string | null
-      payment_context: { payment_mode?: string | null } | null
-    }>
-  >
-  updateSubscriptions: (data: Record<string, unknown>) => Promise<unknown>
-}
+// Named on the service rather than restated here: a resolved-by-string module
+// gives the compiler nothing to check against, so a restated signature turns a
+// rename into a runtime `TypeError` instead of a build failure
+// (`.agents/lessons.md`).
+type SubscriptionModule = Pick<SubscriptionModuleService, "listSubscriptions">
 
-const GRACE_MS = 24 * 60 * 60 * 1000
+/**
+ * The response texts for a failure that is not one of the guards' refusals.
+ * They are ours, fixed, and say nothing about the cause: the cause goes to the
+ * log. `refused` and `failed` are deliberately the same sentence — which status
+ * class a non-refusal failure keeps is the caller's business, not its wording.
+ */
+const AUTO_RENEW_FAILURE_COPY: StepFailureCopy = {
+  notFound: "subscription not found",
+  refused: "auto-renewal could not be updated",
+  failed: "auto-renewal could not be updated",
+}
 
 /**
  * POST /store/saas/auto-renew
  * Body: { subscription_id, enabled: boolean }
  * → { subscription_id, payment_mode }
  *
- * Flips the subscription between manual (cashier-link) and auto
- * (off-session scheduler) payment modes. The auto scheduler charges the
- * stored payment method reference at next_renewal_at; a stale reference
- * (never saved / instrument removed) surfaces as renewal.failed + PAST_DUE
- * on the SaaS side, not here — this route only rewrites the mode.
+ * Flips the subscription between manual (cashier-link) and auto (off-session
+ * scheduler) renewal by running the set-subscription-auto-renew workflow —
+ * the same write side the payment-method update uses, so `payment_mode` and its
+ * `mechanism` annotation always change together. This handler only validates the
+ * body, applies the request-bound tenant rule, and shapes the response.
  *
- * Guards:
- *  - TENANT ISOLATION: subscription → customer → metadata.tenant_id must
- *    match the calling tenant, else 404 (existence is not leaked).
- *  - Overdue: when enabling auto on a subscription whose next_renewal_at is
- *    more than GRACE_MS in the past, the scheduler would charge immediately.
- *    That surprise-charge window is rejected — the SaaS tells the user to
- *    renew manually first.
+ * FAILURE DISCLOSURE: the two guards owned by the workflow — a mirror of a
+ * provider-owned recurrence and an overdue subscription — answer 400 with their
+ * own message before anything is written. No other failure is quoted: it keeps
+ * the HTTP semantics of the `MedusaError` it was thrown as (a vanished row is a
+ * 404, a conflict a 409) or becomes a 500, and its text is replaced by ours
+ * while the cause is logged. See
+ * `src/workflows/utils/store-step-failure.ts`.
+ *
+ * TENANT ISOLATION: subscription → customer → metadata.tenant_id must match the
+ * calling tenant, else 404 (existence is not leaked).
  */
 export async function POST(
   req: MedusaRequest,
@@ -58,6 +78,8 @@ export async function POST(
     enabled?: boolean
   }
 
+  // reorder mints subscription ids without a prefix — accept any non-empty
+  // string; existence + tenant ownership are checked below.
   if (typeof subscription_id !== "string" || !subscription_id.trim()) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
@@ -71,10 +93,10 @@ export async function POST(
     )
   }
 
-  // TENANT ISOLATION: same pattern as /renew — resolve through the owner
-  // customer's tenant stamp before touching anything.
   const customerModule = req.scope.resolve<CustomerModule>(Modules.CUSTOMER)
-  const subscriptionModule = req.scope.resolve<SubscriptionModule>("subscription")
+  const subscriptionModule = req.scope.resolve<SubscriptionModule>(
+    SUBSCRIPTION_MODULE
+  )
 
   const subscriptions = await subscriptionModule.listSubscriptions({
     id: [subscription_id],
@@ -92,48 +114,56 @@ export async function POST(
 
   assertTenantVisible(req, customer?.metadata, "subscription")
 
-  if (isNativeSubscriptionReference(subscription.reference)) {
-    // The read-side exclusions in the scheduler are not enough: this call
-    // rewrites payment_context, so one request could turn a mirror row into a
-    // row the scheduler considers chargeable.
+  const { errors, result } = await setSubscriptionAutoRenewWorkflow(
+    req.scope
+  ).run({
+    input: {
+      subscription_id: subscription.id,
+      enabled,
+    },
+    throwOnError: false,
+  })
+
+  if (errors?.length) {
+    const failure = classifyStepFailure({
+      errors,
+      refusals: AUTO_RENEW_CUSTOMER_REFUSALS,
+      copy: AUTO_RENEW_FAILURE_COPY,
+    })
+
+    if (!failure.quoted) {
+      // Everything that is not a guard refusal is either a fault of ours or a
+      // refusal phrased in someone else's words. Wrapping it in a 400 would
+      // hide the status the SaaS needs to retry, and quoting it would put
+      // internal text (`connect ECONNREFUSED …`, a driver's `table`/`detail`)
+      // in front of a customer reading it as a permanent refusal — so the cause
+      // is logged and the response carries only our own wording.
+      logUnquotedStepFailure(
+        req.scope.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
+        "auto-renew toggle",
+        failure
+      )
+    }
+
+    throw new MedusaError(failure.type, failure.message)
+  }
+
+  const updated = (result ?? {}) as {
+    subscription_id?: string
+    payment_mode?: SubscriptionPaymentMode
+  }
+
+  if (!updated.subscription_id || !updated.payment_mode) {
+    // Same shape as `/store/saas/redeem`: a workflow that reports neither an
+    // error nor a usable result must not answer 200 with an empty body.
     throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      "subscription is a mirror of a PayPal-managed recurrence; manage it at the provider"
+      MedusaError.Types.UNEXPECTED_STATE,
+      "auto-renewal toggle returned no payment mode"
     )
   }
 
-  const currentMode = subscription.payment_context?.payment_mode ?? "manual"
-
-  if (enabled && currentMode !== "auto") {
-    const nextRenewal = subscription.next_renewal_at
-      ? new Date(subscription.next_renewal_at).getTime()
-      : null
-
-    if (
-      subscription.status === "past_due" ||
-      (nextRenewal !== null &&
-        Date.now() - nextRenewal > GRACE_MS)
-    ) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        "subscription is overdue — renew manually before enabling auto-renewal"
-      )
-    }
-  }
-
-  await subscriptionModule.updateSubscriptions({
-    // MedusaService-generated updater takes the entity object (id included).
-    id: subscription.id,
-    // payment_context is a JSON column — write the whole object with the
-    // flipped mode, preserving the stored provider/reference fields.
-    payment_context: {
-      ...(subscription.payment_context ?? {}),
-      payment_mode: enabled ? "auto" : "manual",
-    },
-  })
-
   res.json({
-    subscription_id: subscription.id,
-    payment_mode: enabled ? "auto" : "manual",
+    subscription_id: updated.subscription_id,
+    payment_mode: updated.payment_mode,
   })
 }

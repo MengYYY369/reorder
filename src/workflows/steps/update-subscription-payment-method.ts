@@ -11,6 +11,10 @@ import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import { resolveCustomerPaymentMethod } from "../../modules/subscription/utils/payment-methods"
 import {
+  buildPaymentModeFields,
+  readStoredPaymentMode,
+} from "../utils/payment-mode-mechanism"
+import {
   asSubscriptionUpdateInput,
   asSubscriptionWorkflowRecord,
   SubscriptionWorkflowRecord,
@@ -92,19 +96,20 @@ export const updateSubscriptionPaymentMethodStep = createStep(
 
     const updatedAt = new Date().toISOString()
 
-    const nextPaymentMode = paymentContext?.payment_mode ?? "auto"
+    // A row that stores no mode is the pre-existing auto-by-default shape.
+    const nextPaymentMode = readStoredPaymentMode(paymentContext, "auto")
 
     const updated = await subscriptionModuleService.updateSubscriptions({
       id: input.id,
       payment_context: {
         payment_provider_id: providerId,
-        payment_mode: nextPaymentMode,
+        // Mode and mechanism are written as one pair through the same helper the
+        // auto-renew switch uses, so the two can never disagree. This step keeps
+        // the stored mode and re-derives the label that matches it.
+        ...buildPaymentModeFields(nextPaymentMode),
         // Carried forward: this step rebuilds the whole jsonb object, and
-        // dropping the discriminator here would un-label a row that was
-        // labelled by the consent flip.
-        mechanism:
-          paymentContext?.mechanism ??
-          (nextPaymentMode === "auto" ? "reorder_auto" : "manual"),
+        // dropping the source payment references here would un-label a row that
+        // was labelled by the consent flip.
         source_payment_collection_id:
           paymentContext?.source_payment_collection_id ?? null,
         source_payment_session_id:

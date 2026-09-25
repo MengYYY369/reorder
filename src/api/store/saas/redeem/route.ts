@@ -1,17 +1,44 @@
-import { MedusaError } from "@medusajs/framework/utils"
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
 import { assertTenantVisible } from "../lib/tenant-ownership"
-import { redeemRedemptionCodeWorkflow } from "../../../../workflows/redeem-redemption-code"
+import {
+  redeemRedemptionCodeWorkflow,
+  REDEEM_CUSTOMER_REFUSALS,
+} from "../../../../workflows/redeem-redemption-code"
+import {
+  classifyStepFailure,
+  logUnquotedStepFailure,
+  type StepFailureCopy,
+  type StepFailureLogger,
+} from "../../../../workflows/utils/store-step-failure"
 
 type CustomerModule = {
   retrieveCustomer: (
     id: string,
     config?: Record<string, unknown>
   ) => Promise<{ id: string; metadata?: Record<string, unknown> | null }>
+}
+
+/**
+ * Our own texts for every other failure. Fixed strings — none of them is built
+ * from a failure, so no internal message, table or column name can reach the
+ * customer through this route.
+ *
+ * Which step may speak, and in which words, is the workflow's decision:
+ * `REDEEM_CUSTOMER_REFUSALS` comes from
+ * `src/workflows/redeem-redemption-code.ts`.
+ */
+const REDEEM_FAILURE_COPY: StepFailureCopy = {
+  notFound: "redemption target not found",
+  refused: "redemption was refused",
+  failed: "redemption failed",
 }
 
 /**
@@ -33,6 +60,16 @@ type CustomerModule = {
  *
  * TENANT ISOLATION: the customer's metadata.tenant_id must match the
  * calling tenant, else 404.
+ *
+ * FAILURE DISCLOSURE: only the refusals the workflow declares
+ * (`REDEEM_CUSTOMER_REFUSALS`) are repeated, each as a 400 in its own words —
+ * the statuses this endpoint has always answered with, which the
+ * byte-compatibility promise depends on. (The customer-scoped
+ * `/store/customers/me/redemptions` route lets the domain error through
+ * untouched, so an invalid code is a 404 there and a 400 here.) Every other
+ * failure keeps the HTTP semantics of the `MedusaError` it was thrown as, or
+ * answers 500, and in all of those cases the response text is one of ours while
+ * the cause is logged.
  */
 export async function POST(
   req: MedusaRequest,
@@ -77,11 +114,21 @@ export async function POST(
   })
 
   if (errors?.length) {
-    const first = errors[0] as { error?: { message?: string } }
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      first?.error?.message ?? "redemption failed"
-    )
+    const failure = classifyStepFailure({
+      errors,
+      refusals: REDEEM_CUSTOMER_REFUSALS,
+      copy: REDEEM_FAILURE_COPY,
+    })
+
+    if (!failure.quoted) {
+      logUnquotedStepFailure(
+        req.scope.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
+        "redemption",
+        failure
+      )
+    }
+
+    throw new MedusaError(failure.type, failure.message)
   }
 
   const redemption = (result ?? {}) as {

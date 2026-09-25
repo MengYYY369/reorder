@@ -1,6 +1,10 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import path from "path"
-import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from "@medusajs/framework/utils"
 import type {
   ICartModuleService,
   ILinkModuleService,
@@ -9,16 +13,47 @@ import type {
   MedusaContainer,
 } from "@medusajs/framework/types"
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
+import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
+import { RENEWAL_MODULE } from "../../src/modules/renewal"
+import type RenewalModuleService from "../../src/modules/renewal/service"
+import { RenewalCycleStatus } from "../../src/modules/renewal/types"
+import { REDEMPTION_MODULE } from "../../src/modules/redemption"
+import type RedemptionModuleService from "../../src/modules/redemption/service"
+import { SAAS_BRIDGE_TENANT_KEY } from "../../src/modules/saas-bridge/auth"
+import type { SaasBridgeTenantConfig } from "../../src/modules/saas-bridge/types"
+import { POST as postRenew } from "../../src/api/store/saas/renew/route"
 import { createSubscriptionSeed } from "../helpers/subscription-fixtures"
 import {
   createCustomer,
   createProductWithVariant,
 } from "../helpers/subscription-fixtures"
+import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
 import { createPlanOfferSeed } from "../helpers/plan-offer-fixtures"
 import { createRedemptionBatch } from "../helpers/redemption-fixtures"
 
 jest.setTimeout(120 * 1000)
+
+/**
+ * The seam for the one documented `/store/saas/renew` outcome a real run cannot
+ * produce: a workflow that reports neither an error nor a usable result. Every
+ * path of `create-manual-renewal` either returns an order id or throws, so the
+ * route's guard for that third case can only be pinned against a stub. What this
+ * replaces is the `src` copy — the copy `postRenew` below calls directly — and
+ * nothing else in the file: every other renew case goes over HTTP, which the
+ * plugin's compiled copy serves.
+ */
+let mockRenewRunOutcome: { result: unknown; errors: unknown } | undefined
+
+jest.mock("../../src/workflows/create-manual-renewal", () => ({
+  __esModule: true,
+  // The branch pinned below never consults the inventory; a failure the
+  // workflow *reports* is pinned through real HTTP in this same file.
+  RENEW_CUSTOMER_REFUSALS: [],
+  createManualRenewalWorkflow: () => ({
+    run: async () => mockRenewRunOutcome,
+  }),
+}))
 
 const BRIDGE_SECRET = "test-bridge-secret"
 const DEFAULT_TENANT = { "x-tenant-id": "default" }
@@ -533,7 +568,12 @@ medusaIntegrationTestRunner({
     describe("POST /store/saas/renew", () => {
       async function seedManualSubscriptionForBridge(
         container: MedusaContainer,
-        customer: { id: string; email: string }
+        customer: { id: string; email: string },
+        overrides: {
+          reference?: string
+          status?: SubscriptionStatus
+          payment_mode?: string
+        } = {}
       ): Promise<string> {
         const cartModule = container.resolve<ICartModuleService>(Modules.CART)
         const regionModule = container.resolve<any>(Modules.REGION)
@@ -568,14 +608,15 @@ medusaIntegrationTestRunner({
         } as never)) as unknown as { id: string }
 
         const subscription = (await createSubscriptionSeed(container, {
-          reference: `SUB-BRIDGE-RENEW-${Date.now()}`,
-          status: SubscriptionStatus.ACTIVE,
+          reference:
+            overrides.reference ?? `SUB-BRIDGE-RENEW-${Date.now()}`,
+          status: overrides.status ?? SubscriptionStatus.ACTIVE,
           customer_id: customer.id,
           cart_id: cart.id,
           next_renewal_at: new Date(),
           payment_context: {
             payment_provider_id: "pp_system_default",
-            payment_mode: "manual",
+            payment_mode: overrides.payment_mode ?? "manual",
             source_payment_collection_id: "paycol_manual",
             source_payment_session_id: "payses_manual",
             payment_method_reference: null,
@@ -646,6 +687,287 @@ medusaIntegrationTestRunner({
         )
 
         expect(response.status).toEqual(404)
+      })
+
+      it("answers each declared refusal with 400 and that refusal's own copy", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const stamp = Date.now()
+
+        // `/renew` runs its policy inside the same step that later calls the
+        // core order and payment workflows, so a refusal may be repeated only
+        // when the workflow declared its exact text — and what it repeats is the
+        // plugin's own customer copy, at 400. The whole sentence is asserted, not
+        // a tail of it: a fragment would still match after the message was
+        // reworded, and a reworded message is precisely what stops being
+        // declared copy (it would degrade to the route's generic text).
+        const refusals = [
+          {
+            overrides: { reference: `NATIVE-BRIDGE-${stamp}` },
+            copy: (id: string) =>
+              `Subscription '${id}' is a mirror of a PayPal-managed recurrence and cannot be renewed here`,
+          },
+          {
+            overrides: { payment_mode: "auto" },
+            copy: (id: string) =>
+              `Subscription '${id}' is not in manual payment mode; use the standard renewal flow`,
+          },
+          {
+            overrides: { status: SubscriptionStatus.PAST_DUE },
+            copy: (id: string) =>
+              `Subscription '${id}' is 'past_due'; only active subscriptions can be manually renewed`,
+          },
+        ]
+
+        for (const refusal of refusals) {
+          const subscriptionId = await seedManualSubscriptionForBridge(
+            container,
+            customer,
+            refusal.overrides
+          )
+
+          const response = await api.post(
+            "/store/saas/renew",
+            { subscription_id: subscriptionId },
+            { headers, validateStatus: () => true }
+          )
+
+          expect(response.status).toEqual(400)
+          expect(response.data).toMatchObject({ type: "invalid_data" })
+          expect(String(response.data?.message)).toEqual(
+            refusal.copy(subscriptionId)
+          )
+        }
+      })
+
+      it("keeps a non-refusal conflict a 409 and leaks no cycle id", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedManualSubscriptionForBridge(
+          container,
+          customer
+        )
+
+        // The state the renewal step's compensation leaves behind: a PROCESSING
+        // cycle with no order. The step refuses with `alreadyProcessing`
+        // (a `conflict`), which used to be rewrapped as a permanent 400 and now
+        // keeps its retryable 409.
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscriptionId,
+          status: RenewalCycleStatus.PROCESSING,
+          generated_order_id: null,
+        })
+
+        const response = await api.post(
+          "/store/saas/renew",
+          { subscription_id: subscriptionId },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).not.toEqual(400)
+        expect(response.status).toEqual(409)
+        expect(JSON.stringify(response.data ?? {})).not.toContain(cycle.id)
+      })
+
+      it("keeps a non-refusal MedusaError's status and answers with its own text", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedManualSubscriptionForBridge(
+          container,
+          customer
+        )
+        const stamp = Date.now()
+
+        // A `MedusaError` that is not one of the declared refusals — here the
+        // shape `dbErrorMapper` produces, whose message names a column — keeps
+        // the status it was thrown with, but the body carries the route's own
+        // wording.
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const cycleSpy = jest
+          .spyOn(renewalModule, "createRenewalCycles")
+          .mockRejectedValue(
+            new MedusaError(
+              MedusaError.Types.INVALID_DATA,
+              `Cannot set field 'generated_order_id' of Subscription renewal cycle to null internal-detail-${stamp}`
+            )
+          )
+
+        const response = await api.post(
+          "/store/saas/renew",
+          { subscription_id: subscriptionId },
+          { headers, validateStatus: () => true }
+        )
+
+        cycleSpy.mockRestore()
+
+        expect(response.status).toEqual(400)
+        expect(String(response.data?.message)).toEqual(
+          "manual renewal was refused"
+        )
+        expect(JSON.stringify(response.data ?? {})).not.toContain(
+          "generated_order_id"
+        )
+        expect(JSON.stringify(response.data ?? {})).not.toContain(
+          `internal-detail-${stamp}`
+        )
+      })
+
+      it("keeps a serialized Postgres fault a 500 and out of the response body", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedManualSubscriptionForBridge(
+          container,
+          customer
+        )
+        const stamp = Date.now()
+
+        const table = `renewal_canary_table_${stamp}`
+        const detail = `Key (id)=(canary-value-${stamp}) already exists.`
+        const driverFault = new Error(
+          'duplicate key value violates unique constraint "renewal_canary_pkey"'
+        ) as Error & { code: string; table: string; detail: string }
+        driverFault.code = "23505"
+        driverFault.table = table
+        driverFault.detail = detail
+
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const cycleSpy = jest
+          .spyOn(renewalModule, "createRenewalCycles")
+          .mockRejectedValue(driverFault)
+
+        const response = await api.post(
+          "/store/saas/renew",
+          { subscription_id: subscriptionId },
+          { headers, validateStatus: () => true }
+        )
+
+        cycleSpy.mockRestore()
+
+        // Rethrowing the deserialized value would have let `formatException`
+        // map its `code` to a 422 carrying `table` and `detail`.
+        expect(response.status).not.toEqual(400)
+        expect(response.status).not.toEqual(422)
+        expect(response.status).toEqual(500)
+
+        const body = JSON.stringify(response.data ?? {})
+        expect(body).not.toContain(table)
+        expect(body).not.toContain(detail)
+        expect(body).not.toContain("canary-value-")
+        expect(body).not.toContain("23505")
+      })
+
+      it("answers a vanished row 404 with its own text, not the step's 400", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedManualSubscriptionForBridge(
+          container,
+          customer
+        )
+
+        // The race this route documents: the handler has already seen the row,
+        // so by the time the step reads it the subscription is gone and the step
+        // refuses with its own `not_found` (`Subscription '<id>' was not found`).
+        // That is not a declared refusal — before the disclosure rule it was
+        // rewrapped as a 400 quoting the id, and now it keeps the status a
+        // missing resource has always meant here while the wording becomes the
+        // route's. First read is the handler's, second is the step's.
+        const listSubscriptions = subscriptionModule.listSubscriptions.bind(
+          subscriptionModule
+        )
+        let reads = 0
+        const listSpy = jest
+          .spyOn(subscriptionModule, "listSubscriptions")
+          .mockImplementation(async (...args) =>
+            reads++ === 0 ? listSubscriptions(...args) : []
+          )
+
+        const response = await api.post(
+          "/store/saas/renew",
+          { subscription_id: subscriptionId },
+          { headers, validateStatus: () => true }
+        )
+
+        listSpy.mockRestore()
+
+        expect(response.status).not.toEqual(400)
+        expect(response.status).toEqual(404)
+        expect(String(response.data?.message)).toEqual(
+          "subscription not found"
+        )
+        expect(JSON.stringify(response.data ?? {})).not.toContain(
+          subscriptionId
+        )
+        expect(JSON.stringify(response.data ?? {})).not.toContain(
+          "was not found"
+        )
+
+        // The refusal happens before anything is written.
+        const [row] = await subscriptionModule.listSubscriptions({
+          id: [subscriptionId],
+        })
+
+        expect(row.payment_context).toMatchObject({ payment_mode: "manual" })
+      })
+
+      it("answers 500 with its own text when the workflow reports no result", async () => {
+        const container = getContainer()
+        const customer = await createTenantCustomer(container)
+        const subscriptionId = await seedManualSubscriptionForBridge(
+          container,
+          customer
+        )
+
+        // The third outcome a `throwOnError: false` run can have, and the one no
+        // real run of this workflow produces: neither an error nor a usable
+        // result (every path of `create-manual-renewal` either returns an order
+        // id or throws). The route must not answer 200 with a body of undefined
+        // fields, so that guard is pinned against the stubbed workflow declared
+        // at the top of this file, driven through the handler itself.
+        // `unexpected_state` is core's 500 — a mapping already pinned over HTTP
+        // by the Postgres-fault case above.
+        mockRenewRunOutcome = { result: undefined, errors: undefined }
+
+        // What the bridge auth middleware attaches to the request scope; the
+        // handler reads it through `currentTenant(req)`.
+        const scope = container as unknown as Record<string, unknown>
+        const tenant: SaasBridgeTenantConfig = {
+          tenant_id: "default",
+          shared_secret: BRIDGE_SECRET,
+        }
+        scope[SAAS_BRIDGE_TENANT_KEY] = tenant
+
+        let payload: unknown
+        const request = {
+          body: { subscription_id: subscriptionId },
+          scope: container,
+        } as unknown as Parameters<typeof postRenew>[0]
+        const response = {
+          json: (body: unknown) => {
+            payload = body
+          },
+        } as unknown as Parameters<typeof postRenew>[1]
+
+        try {
+          await expect(postRenew(request, response)).rejects.toMatchObject({
+            type: MedusaError.Types.UNEXPECTED_STATE,
+            message: "manual renewal failed",
+          })
+        } finally {
+          delete scope[SAAS_BRIDGE_TENANT_KEY]
+          mockRenewRunOutcome = undefined
+        }
+
+        expect(payload).toBeUndefined()
       })
     })
 
@@ -881,7 +1203,8 @@ medusaIntegrationTestRunner({
 
     describe("POST /store/saas/redeem", () => {
       async function seedRedeemableCode(
-        container: MedusaContainer
+        container: MedusaContainer,
+        batchOverrides: { expires_at?: Date } = {}
       ): Promise<{ code: string; variant_id: string }> {
         const { product, variant } = await createProductWithVariant(container)
         await createPlanOfferSeed(container, {
@@ -897,6 +1220,7 @@ medusaIntegrationTestRunner({
           free_cycles: 2,
           max_redemptions_per_code: 3,
           generated_code_count: 1,
+          ...batchOverrides,
         })
         return { code: batch.codes[0].code, variant_id: variant.id }
       }
@@ -978,6 +1302,163 @@ medusaIntegrationTestRunner({
         )
 
         expect(response.status).toEqual(404)
+      })
+
+      it("answers each declared refusal with 400 and that refusal's own copy", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const stamp = Date.now()
+
+        // An unknown code is refused as `not_found` by the workflow, and the
+        // bridge contract answers it as the 400 it has always answered: the
+        // route repeats the refusal's own words at a 400, it does not forward
+        // its status. An undeclared refusal would fall to the disclosure rule
+        // and answer 404 with generic text, which is what this case catches.
+        // Both messages are asserted in full, because a tail fragment would keep
+        // passing after a rewording that no longer matches any declared copy.
+        const refusals: {
+          code: string | null
+          expires_at?: Date
+          copy: (seededCode: string) => string
+        }[] = [
+          {
+            code: `NOSUCH-BRIDGE-${stamp}`,
+            copy: () => `Redemption code "NOSUCH-BRIDGE-${stamp}" is invalid`,
+          },
+          {
+            // window closed → `outsideWindow`, which interpolates the code
+            // string, not its id (`steps/redeem-redemption-code.ts:116`)
+            code: null,
+            expires_at: new Date(Date.now() - 60 * 1000),
+            copy: (seededCode) =>
+              `Redemption code ${seededCode} is outside its validity window`,
+          },
+        ]
+
+        for (const refusal of refusals) {
+          const seeded = await seedRedeemableCode(
+            container,
+            refusal.expires_at ? { expires_at: refusal.expires_at } : {}
+          )
+
+          const response = await api.post(
+            "/store/saas/redeem",
+            {
+              code: refusal.code ?? seeded.code,
+              customer_id: customer.id,
+            },
+            { headers, validateStatus: () => true }
+          )
+
+          expect(response.status).toEqual(400)
+          expect(response.data).toMatchObject({ type: "invalid_data" })
+          expect(String(response.data?.message)).toEqual(
+            refusal.copy(seeded.code)
+          )
+        }
+      })
+
+      it("never quotes a MedusaError that is not one of its declared refusals", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const { code } = await seedRedeemableCode(container)
+        const stamp = Date.now()
+
+        // The failure surfaces *inside* the declared step, so the step's name
+        // alone cannot tell it apart from a refusal: only the declared exact
+        // text can. This one carries a column name, and the previous
+        // implementation quoted it to the customer as a 400.
+        const redemptionModule =
+          container.resolve<RedemptionModuleService>(REDEMPTION_MODULE)
+        const listSpy = jest
+          .spyOn(redemptionModule, "listRedemptionCodes")
+          .mockRejectedValue(
+            new MedusaError(
+              MedusaError.Types.INVALID_DATA,
+              `column redemption_code.redemption_cont does not exist internal-detail-${stamp}`
+            )
+          )
+
+        const response = await api.post(
+          "/store/saas/redeem",
+          { code, customer_id: customer.id },
+          { headers, validateStatus: () => true }
+        )
+
+        listSpy.mockRestore()
+
+        expect(response.status).toEqual(400)
+        expect(String(response.data?.message)).toEqual(
+          "redemption was refused"
+        )
+        const body = JSON.stringify(response.data ?? {})
+        expect(body).not.toContain("redemption_code")
+        expect(body).not.toContain(`internal-detail-${stamp}`)
+      })
+
+      it("keeps a non-refusal not_found a 404 and a serialized Postgres fault a 500", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const stamp = Date.now()
+
+        const driverFault = new Error(
+          'insert or update on table "redemption_canary" violates foreign key constraint'
+        ) as Error & { code: string; table: string; detail: string }
+        driverFault.code = "23503"
+        driverFault.table = `redemption_canary_table_${stamp}`
+        driverFault.detail = `Key (batch_id)=(canary-value-${stamp}) is not present in table "redemption_batch".`
+
+        const internalFailures = [
+          {
+            thrown: new MedusaError(
+              MedusaError.Types.NOT_FOUND,
+              `Redemption batch with id: rb_canary_${stamp} was not found`
+            ),
+            status: 404,
+            message: "redemption target not found",
+            leak: `rb_canary_${stamp}`,
+          },
+          {
+            // Same step, same slot: a driver fault is not a business rejection
+            // and must not be mapped by `formatException` from its `code`.
+            thrown: driverFault,
+            status: 500,
+            message: null,
+            leak: driverFault.table,
+          },
+        ]
+
+        for (const internal of internalFailures) {
+          const { code } = await seedRedeemableCode(container)
+          const redemptionModule = container.resolve<RedemptionModuleService>(REDEMPTION_MODULE)
+          const batchSpy = jest
+            .spyOn(redemptionModule, "retrieveRedemptionBatch")
+            .mockRejectedValue(internal.thrown)
+
+          const response = await api.post(
+            "/store/saas/redeem",
+            { code, customer_id: customer.id },
+            { headers, validateStatus: () => true }
+          )
+
+          batchSpy.mockRestore()
+
+          expect(response.status).not.toEqual(400)
+          expect(response.status).not.toEqual(422)
+          expect(response.status).toEqual(internal.status)
+
+          if (internal.message !== null) {
+            expect(String(response.data?.message)).toEqual(internal.message)
+          }
+
+          const body = JSON.stringify(response.data ?? {})
+          expect(body).not.toContain(internal.leak)
+          expect(body).not.toContain("canary-value-")
+          expect(body).not.toContain("23503")
+        }
       })
     })
   },

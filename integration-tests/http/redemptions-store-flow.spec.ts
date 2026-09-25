@@ -1,6 +1,6 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import path from "path"
-import { Modules } from "@medusajs/framework/utils"
+import { MedusaError, Modules } from "@medusajs/framework/utils"
 import {
   createAdminAuthHeaders,
   createCustomer,
@@ -594,6 +594,96 @@ medusaIntegrationTestRunner({
             { headers: { "x-publishable-api-key": pk.token } }
           )
         ).rejects.toMatchObject({ response: { status: 401 } })
+      })
+
+      it("quotes only its declared refusals, and keeps a fault of ours out of the body", async () => {
+        const container = getContainer()
+        const customer = await createCustomer(container)
+        const customerHeaders = await createStoreHeadersWithPublishableKey(
+          container,
+          customer
+        )
+        const { variant } = await createProductWithVariant(container)
+        const batch = await createRedemptionBatch(container, {
+          name: "RDM-STORE-BATCH-DISCLOSURE",
+          variant_id: variant.id,
+          free_cycles: 1,
+          generated_code_count: 1,
+        })
+        const redemptionModule = container.resolve<RedemptionModuleService>(
+          REDEMPTION_MODULE
+        )
+        const stamp = Date.now()
+
+        // A declared refusal keeps its own status here. The bridge route answers
+        // the same refusal as a 400 because that is what its promise was built
+        // on; this one has always let the domain type through, and an unknown
+        // code is a 404.
+        const unknownCode = await api.post(
+          "/store/customers/me/redemptions",
+          { code: `NOSUCH-STORE-${stamp}` },
+          { headers: customerHeaders, validateStatus: () => true }
+        )
+
+        expect(unknownCode.status).toEqual(404)
+        expect(String(unknownCode.data?.message)).toEqual(
+          `Redemption code "NOSUCH-STORE-${stamp}" is invalid`
+        )
+
+        // Same declared step, a failure that is not one of its refusals: the
+        // shape `dbErrorMapper` produces, whose message names a column. Before
+        // this route classified its workflow's failures the serialized error was
+        // rethrown verbatim and its wording reached the customer.
+        const columnFault = new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `column redemption_code.redemption_cont does not exist store-detail-${stamp}`
+        )
+        const listSpy = jest
+          .spyOn(redemptionModule, "listRedemptionCodes")
+          .mockRejectedValue(columnFault)
+
+        const quoted = await api.post(
+          "/store/customers/me/redemptions",
+          { code: batch.codes[0].code },
+          { headers: customerHeaders, validateStatus: () => true }
+        )
+
+        listSpy.mockRestore()
+
+        expect(quoted.status).toEqual(400)
+        expect(String(quoted.data?.message)).toEqual("redemption was refused")
+        expect(JSON.stringify(quoted.data ?? {})).not.toContain("redemption_cont")
+        expect(JSON.stringify(quoted.data ?? {})).not.toContain(
+          `store-detail-${stamp}`
+        )
+
+        // Not a `MedusaError` at all: a driver fault survives serialization with
+        // `code`, `table` and `detail`, and `formatException` would turn a
+        // rethrown `23505` into a 422 that quotes them. It answers 500 and says
+        // nothing about the cause.
+        const driverFault = new Error(
+          'insert or update on table "redemption_canary" violates unique constraint'
+        ) as Error & { code: string; table: string; detail: string }
+        driverFault.code = "23505"
+        driverFault.table = `redemption_canary_table_${stamp}`
+        driverFault.detail = `Key (id)=(canary-value-${stamp}) already exists.`
+        const batchSpy = jest
+          .spyOn(redemptionModule, "retrieveRedemptionBatch")
+          .mockRejectedValue(driverFault)
+
+        const internal = await api.post(
+          "/store/customers/me/redemptions",
+          { code: batch.codes[0].code },
+          { headers: customerHeaders, validateStatus: () => true }
+        )
+
+        batchSpy.mockRestore()
+
+        expect(internal.status).toEqual(500)
+        const body = JSON.stringify(internal.data ?? {})
+        expect(body).not.toContain(driverFault.table)
+        expect(body).not.toContain("canary-value-")
+        expect(body).not.toContain("23505")
       })
     })
   },
