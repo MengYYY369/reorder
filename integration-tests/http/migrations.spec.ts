@@ -775,6 +775,96 @@ medusaIntegrationTestRunner({
         // different survivor cannot pass either.
         expect(await liveScheduled(probeWrapper, "sub_t4")).toEqual(["cyc_t4_keep"])
       })
+
+      /**
+       * The four cases above this one all run on a database where `subscription`
+       * exists. This one runs where it does not, which is the state a FIRST
+       * INSTALL is in: the plugin's module migrators go in module order, so
+       * `renewal` is migrated long before `subscription` creates its table
+       * (renewal is the 7th of the 9 directories in `MIGRATION_PATHS`,
+       * subscription the 9th, and the app bootstrap's own migration log puts
+       * `MODULE: renewal` before `MODULE: subscription` exactly that way round).
+       * `Migration20260924120000`'s normalization SQL then joins `subscription`
+       * only if `to_regclass` says the relation answers — that guard is the only
+       * thing standing between a first install and a failed boot, and nothing but
+       * this case asserts it.
+       */
+      it("normalizes without a subscription table at all", async () => {
+        // The database is built over the renewal directory ALONE, and through
+        // `probeDatabase` + `migrateProbe` rather than a bare
+        // `getProbeWrapperFor(...)` whose `setupDatabase()` the case calls itself:
+        // with exactly one migration path and NOTHING pending, that call falls
+        // through to `orm.schema.refreshDatabase()`, which regenerates the schema
+        // from the entities (`database.js:130-140`) and would hand this case a
+        // `subscription` table the migration never created — the guard would then
+        // be false for the wrong reason and the case would test nothing. `probeDatabase`
+        // drops before it creates, so this name is freshly created here and both
+        // renewal migrations are applied by name. That apply is the first half of
+        // the proof: it IS the first-install boot path, and it must not throw.
+        const soloName = `${PROBE_DB_NAME}_normalize_solo`
+        const solo = await probeDatabase(soloName)
+        let soloWrapper: ProbeWrapper | undefined
+
+        try {
+          soloWrapper = await migrateProbe(solo, [migrationDirOf("renewal")])
+
+          // The negative half, asserted rather than assumed: the table really is
+          // absent in this database. Without it a later change that widens the
+          // directory list, or one that lands this probe on the entity-derived
+          // branch above, would leave the case green while it normalized a
+          // database that has the table after all. Both spellings are read
+          // because the migration guards on the unqualified `'"subscription"'`
+          // — resolved through `search_path`, see its comment — while a
+          // schema-qualified read is the stronger statement about the probe
+          // itself; on this public-schema database they must agree on NULL.
+          expect(
+            await probeQuery(
+              soloWrapper,
+              `select to_regclass('public.subscription') as qualified,
+                      to_regclass('"subscription"') as searched`
+            )
+          ).toEqual([{ qualified: null, searched: null }])
+
+          // Same ordering rule Task 5 hit on the shared probe, and for the same
+          // reason: the renewal directory has just created
+          // `renewal_cycle_one_scheduled_per_subscription`, so a second live
+          // `scheduled` row for one subscription is rejected by the very index
+          // this migration installs unless the drift window is opened first.
+          await openDriftWindow(soloWrapper)
+
+          // No `seedSubscription` here — there is nothing to insert into. The
+          // orphan id is insertable because `renewal_cycle.subscription_id` is a
+          // plain `text not null` column with no foreign key
+          // (`Migration20260329185930.ts:7`).
+          await seedCycle(soloWrapper, { id: "cyc_solo_a", subscriptionId: "sub_solo", scheduledFor: "2026-08-24T00:00:00Z" })
+          await seedCycle(soloWrapper, { id: "cyc_solo_b", subscriptionId: "sub_solo", scheduledFor: "2026-09-24T00:00:00Z" })
+
+          await rerunNormalize(soloName, soloWrapper)
+
+          // The dedup still happened, down to the row the fallback comparator
+          // keeps: with no entitlement date to consult, `scheduled_for desc`
+          // decides, so the later cycle survives. That is what the migration
+          // promises for such a database ("a database with no `subscription`
+          // table cannot hold drift against an entitlement date, so the fallback
+          // ordering is sufficient there") — and it is the half a guard written
+          // the other way round loses. Measured: with `ELSE return;` added to the
+          // guard, so a missing `subscription` skips the normalization outright,
+          // this is the only one of the eight cases that reddens, and it reddens
+          // on the drift the skipped normalization leaves behind
+          // (`could not create unique index ... Key (subscription_id)=(sub_solo)
+          // is duplicated`) because both seeded rows are still live. Forcing the
+          // join the opposite way instead aborts with
+          // `relation "subscription" does not exist`, which is the first-install
+          // boot failure the guard exists to prevent.
+          expect(await liveScheduled(soloWrapper, "sub_solo")).toEqual(["cyc_solo_b"])
+        } finally {
+          try {
+            await soloWrapper?.orm.close()
+          } finally {
+            await solo.drop()
+          }
+        }
+      })
     })
   },
 })
