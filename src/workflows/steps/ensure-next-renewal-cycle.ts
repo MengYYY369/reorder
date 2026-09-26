@@ -24,8 +24,25 @@ export type EnsureNextRenewalCycleStepInput = {
   subscription_id: string
 }
 
-type EnsureNextRenewalCycleStepOutput = {
-  action: "noop" | "created" | "updated" | "adopted" | "deferred" | "deleted"
+/**
+ * What a run did, as the workflow reports it.
+ *
+ * `retired` is the one case where the retire set was the run's only write: a
+ * `match` that held a terminal row on the entitlement date while a live
+ * `scheduled` neighbour sat behind it, cleared and reported as nothing-happened
+ * before Task 15 named the neighbour. `deferred` keeps its own action when it
+ * retires as well, because the promise that branch makes is about the protected
+ * row it refuses to write, and the retirement it does make is on the log.
+ */
+export type EnsureNextRenewalCycleStepOutput = {
+  action:
+    | "noop"
+    | "created"
+    | "updated"
+    | "adopted"
+    | "deferred"
+    | "deleted"
+    | "retired"
   subscription_id: string
   renewal_cycle_id: string | null
 }
@@ -67,19 +84,194 @@ export async function restoreReconciledCycle(
   await writer.updateRenewalCycles(previous)
 }
 
-type EnsureNextRenewalCycleCompensation =
+/**
+ * The one write a retire performs, narrowed to what it calls so the effect is
+ * assertable from a module spec instead of only from a driven workflow.
+ */
+export type UpcomingCycleRetireWriter = {
+  softDeleteRenewalCycles: (ids: string[]) => Promise<unknown>
+}
+
+/**
+ * Act on the rows `resolveUpcomingCycle` named.
+ *
+ * The selector reports the live `scheduled` rows a decision neither moves nor
+ * deletes, and reporting a clean resolution while leaving one of those behind is
+ * the leak: the scheduler's `query.graph` select hands it every `scheduled` row
+ * whose `deleted_at` is null, so the neighbour is charged on its own date. The
+ * protection the naming implies has to be a write, and this is it — the same
+ * soft delete the step already performs on rows a subscription no longer needs,
+ * so the row keeps its history and its `renewal_attempt` children (the model
+ * declares no soft-remove cascade, so retiring cannot orphan them) while the
+ * one-live-cycle index and the scheduler both stop seeing it.
+ *
+ * `madeRoomFor` names the row the run kept or moved, so the warning records both
+ * sides of the decision: what went, and what it went for.
+ */
+export async function retireStaleUpcomingCycles(
+  writer: UpcomingCycleRetireWriter,
+  subscriptionId: string,
+  retired: UpcomingRenewalCycleRecord[],
+  logger: { warn: (message: string) => void },
+  madeRoomFor: string
+): Promise<void> {
+  if (!retired.length) {
+    return
+  }
+
+  const ids = retired.map((row) => row.id)
+
+  await writer.softDeleteRenewalCycles(ids)
+
+  logger.warn(
+    `[reorder] retired ${retired.length} stale upcoming renewal cycle(s) of ` +
+      `subscription '${subscriptionId}' (${ids.join(", ")}) behind '${madeRoomFor}'`
+  )
+}
+
+/**
+ * The rollback of a retire. Narrowed to `restoreRenewalCycles` on purpose: this
+ * is NOT `restoreDeletedUpcomingCycles`, which re-inserts rows by id and is right
+ * only because the `deleted` branch hard-deletes. A soft-deleted row is still in
+ * the table, so re-inserting it fails on `renewal_cycle_pkey`, and a writer type
+ * without `createRenewalCycles` makes that confusion unrepresentable.
+ */
+export type RetiredCycleRestoreWriter = {
+  restoreRenewalCycles: (ids: string[]) => Promise<unknown>
+}
+
+export async function restoreRetiredUpcomingCycles(
+  writer: RetiredCycleRestoreWriter,
+  retiredIds: string[]
+): Promise<void> {
+  if (!retiredIds.length) {
+    return
+  }
+
+  await writer.restoreRenewalCycles(retiredIds)
+}
+
+/**
+ * The `defer` report, with its retire already acted on.
+ *
+ * The branch is one call so that a module spec can pin what it promises: the
+ * protected row is reported untouched and stays the run's `renewal_cycle_id`, the
+ * rows the selector named are the only write the run makes, and they travel to
+ * the compensation as a `retired` rollback because there is no snapshot of a
+ * write to undo. Inlined in the branch, none of that was reachable without a
+ * workflow container — and the branch losing the retirement again is the exact
+ * regression this task was opened for.
+ */
+export async function retireAndDefer(
+  writer: UpcomingCycleRetireWriter,
+  logger: { warn: (message: string) => void },
+  deferred: UpcomingRenewalCycleRecord,
+  retired: UpcomingRenewalCycleRecord[]
+): Promise<
+  StepResponse<
+    EnsureNextRenewalCycleStepOutput,
+    EnsureNextRenewalCycleCompensation
+  >
+> {
+  const retiredIds = retired.map((row) => row.id)
+
+  /**
+   * Refusing to move the protected row is not refusing to clear the row beside
+   * it: `defer` names its neighbour in `retire` too, and a branch that reported
+   * `deferred` without acting on it left that neighbour chargeable. The protected
+   * row is what the retirement made room for.
+   */
+  await retireStaleUpcomingCycles(
+    writer,
+    deferred.subscription_id,
+    retired,
+    logger,
+    deferred.id
+  )
+
+  return new StepResponse(
+    {
+      action: "deferred",
+      subscription_id: deferred.subscription_id,
+      renewal_cycle_id: deferred.id,
+    },
+    retiredCyclesCompensation(retiredIds)
+  )
+}
+
+/**
+ * The report of a run that wrote nothing to the row it chose — a `match` on a
+ * terminal row, or one whose approval state already agrees with what the settings
+ * policy asks for — after clearing the rows the selector named.
+ *
+ * Each of those paths returns early for its own reason, and none of those reasons
+ * says anything about the neighbour left behind, so the retirement happens here
+ * and the action says so: a run that cleared a row is not a run that did
+ * nothing.
+ */
+export async function retireAndReportUnchanged(
+  writer: UpcomingCycleRetireWriter,
+  logger: { warn: (message: string) => void },
+  existingCycle: UpcomingRenewalCycleRecord,
+  retired: UpcomingRenewalCycleRecord[]
+): Promise<
+  StepResponse<
+    EnsureNextRenewalCycleStepOutput,
+    EnsureNextRenewalCycleCompensation
+  >
+> {
+  const retiredIds = retired.map((row) => row.id)
+
+  await retireStaleUpcomingCycles(
+    writer,
+    existingCycle.subscription_id,
+    retired,
+    logger,
+    existingCycle.id
+  )
+
+  return new StepResponse(
+    {
+      action: retiredIds.length ? "retired" : "noop",
+      subscription_id: existingCycle.subscription_id,
+      renewal_cycle_id: existingCycle.id,
+    },
+    retiredCyclesCompensation(retiredIds)
+  )
+}
+
+/**
+ * The retire half a run carries alongside whatever else it has to undo, so a
+ * workflow that fails after the step returns cannot leave the cleared rows
+ * behind. `retired_ids` is always present on the variants that can retire, and
+ * empty when the run retired nothing.
+ */
+type RetiredCyclesCompensation = {
+  retired_ids: string[]
+}
+
+export type EnsureNextRenewalCycleCompensation =
   | {
       action: "created"
       renewal_cycle_id: string
     }
-  | {
+  | ({
       action: "updated"
       previous: UpcomingCycleReconcileSnapshot
-    }
-  | {
+    } & RetiredCyclesCompensation)
+  | ({
       action: "adopted"
       previous: UpcomingCycleReconcileSnapshot
-    }
+    } & RetiredCyclesCompensation)
+  | ({
+      /**
+       * The run's whole write set was the retire — the `deferred` and `noop`
+       * paths that cleared a named neighbour without touching the row they
+       * reported on. Those branches return early, so there is no snapshot of a
+       * write to roll back, only rows to bring back.
+       */
+      action: "retired"
+    } & RetiredCyclesCompensation)
   | {
       action: "deleted"
       previous: Array<{
@@ -100,6 +292,24 @@ type EnsureNextRenewalCycleCompensation =
         metadata: Record<string, unknown> | null
       }>
     }
+
+/**
+ * What a run hands its compensation for the rows it retired, or nothing when it
+ * retired nothing — so a rollback of an ordinary run is exactly what it was
+ * before the retire existed. The `deferred` and `noop` branches use this whole:
+ * on those paths the retire is the run's only write, so the retire is also the
+ * only thing there is to undo.
+ */
+function retiredCyclesCompensation(
+  retiredIds: string[]
+): Extract<
+  EnsureNextRenewalCycleCompensation,
+  { action: "retired" }
+> | undefined {
+  return retiredIds.length
+    ? { action: "retired", retired_ids: retiredIds }
+    : undefined
+}
 
 type EnsureNextRenewalCycleDeletedSnapshot = Extract<
   EnsureNextRenewalCycleCompensation,
@@ -286,15 +496,11 @@ export const ensureNextRenewalCycleStep = createStep(
         }' in flight while the entitlement date is '${scheduledFor.toISOString()}'`
       )
 
-      return new StepResponse<
-        EnsureNextRenewalCycleStepOutput,
-        EnsureNextRenewalCycleCompensation
-      >(
-        {
-          action: "deferred",
-          subscription_id: subscription.id,
-          renewal_cycle_id: deferred.id,
-        }
+      return retireAndDefer(
+        renewalModule,
+        logger,
+        deferred,
+        resolution.retire
       )
     }
 
@@ -340,6 +546,16 @@ export const ensureNextRenewalCycleStep = createStep(
 
     const existingCycle = resolution.cycle
     /**
+     * The rows this resolution named: every live `scheduled` row other than the
+     * one the run keeps or moves. They are cleared on every path that can carry
+     * them, and each of those paths returns early for its own reason — a terminal
+     * row that owns the entitlement date, an approval state with nothing to
+     * re-derive, a reconciliation write that succeeded — none of which says
+     * anything about the neighbour left behind.
+     */
+    const retired = resolution.retire
+    const retiredIds = retired.map((row) => row.id)
+    /**
      * `adopt` is the drift repair: the row a stacked purchase left behind keeps
      * its id, its `renewal_attempt` children and its `generated_order_id`
      * history, and only follows the entitlement date.
@@ -368,15 +584,18 @@ export const ensureNextRenewalCycleStep = createStep(
       existingCycle.status === RenewalCycleStatus.PROCESSING ||
       existingCycle.status === RenewalCycleStatus.SUCCEEDED
     ) {
-      return new StepResponse<
-        EnsureNextRenewalCycleStepOutput,
-        EnsureNextRenewalCycleCompensation
-      >(
-        {
-          action: "noop",
-          subscription_id: subscription.id,
-          renewal_cycle_id: existingCycle.id,
-        }
+      /**
+       * This is the shape Task 15 pinned as a deliberate refusal to adopt: a
+       * terminal row owns the entitlement date and the live `scheduled` neighbour
+       * is named rather than moved. Naming it was the decision's half; clearing
+       * it is the effect's, and the run reports `retired` rather than `noop`
+       * because a row did go.
+       */
+      return retireAndReportUnchanged(
+        renewalModule,
+        logger,
+        existingCycle,
+        retired
       )
     }
 
@@ -388,15 +607,13 @@ export const ensureNextRenewalCycleStep = createStep(
       existingCycle.approval_decided_by === approvalState.approval_decided_by &&
       existingCycle.approval_reason === approvalState.approval_reason
     ) {
-      return new StepResponse<
-        EnsureNextRenewalCycleStepOutput,
-        EnsureNextRenewalCycleCompensation
-      >(
-        {
-          action: "noop",
-          subscription_id: subscription.id,
-          renewal_cycle_id: existingCycle.id,
-        }
+      // Same on the match that needed no write: the row keeps its approval state,
+      // and the neighbour the selector named still goes.
+      return retireAndReportUnchanged(
+        renewalModule,
+        logger,
+        existingCycle,
+        retired
       )
     }
 
@@ -437,6 +654,21 @@ export const ensureNextRenewalCycleStep = createStep(
       ...reconcile,
     })
 
+    /**
+     * After the write, so a run that failed at the write destroyed nothing, and
+     * before the return, so no path reports a clean reconciliation while the
+     * neighbour the selector named is still live. On this path the retire is an
+     * extra to the run's own rollback, so the ids travel inside its compensation
+     * instead of as a `retired` one of their own.
+     */
+    await retireStaleUpcomingCycles(
+      renewalModule,
+      subscription.id,
+      retired,
+      logger,
+      existingCycle.id
+    )
+
     if (adopting) {
       return new StepResponse<
         EnsureNextRenewalCycleStepOutput,
@@ -453,6 +685,7 @@ export const ensureNextRenewalCycleStep = createStep(
             id: existingCycle.id,
             ...restoreForUpcomingCycleReconcile(existingCycle),
           },
+          retired_ids: retiredIds,
         }
       )
     }
@@ -472,6 +705,7 @@ export const ensureNextRenewalCycleStep = createStep(
           id: existingCycle.id,
           ...restoreForUpcomingCycleReconcile(existingCycle),
         },
+        retired_ids: retiredIds,
       }
     )
   },
@@ -490,13 +724,34 @@ export const ensureNextRenewalCycleStep = createStep(
       return
     }
 
-    if (compensation.action === "adopted") {
-      await restoreReconciledCycle(renewalModule, compensation.previous)
+    if (compensation.action === "deleted") {
+      await restoreDeletedUpcomingCycles(renewalModule, compensation.previous)
       return
     }
 
-    if (compensation.action === "deleted") {
-      await restoreDeletedUpcomingCycles(renewalModule, compensation.previous)
+    /**
+     * A run that deferred or changed nothing returns no compensation data, and
+     * the engine then hands this handler the step's own output (`deferred`,
+     * `noop`, `retired`-free): nothing was written, so there is nothing to undo.
+     * Everything that does have a rollback carries the retire half, with or
+     * without a snapshot beside it, so the check that separates the two is the
+     * one the union can actually be narrowed by.
+     */
+    if (!("retired_ids" in compensation)) {
+      return
+    }
+
+    /**
+     * The rows a run retired come back whatever else it also rolls back: a
+     * retired row is never the row the run wrote (`collectRetirable` excludes the
+     * chosen one), so the two restores cannot land on the same row, and a
+     * `retired` run has nothing else to undo.
+     */
+    if (compensation.retired_ids.length) {
+      await restoreRetiredUpcomingCycles(renewalModule, compensation.retired_ids)
+    }
+
+    if (compensation.action === "retired") {
       return
     }
 
