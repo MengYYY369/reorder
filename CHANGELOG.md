@@ -158,8 +158,8 @@ was covered by any assertion in the http suite.
   non-merging branch too. The defect was a payload whose correctness depended on
   which DAL method the caller happened to use; extend now merges into the row's
   stored metadata locally, newest purchase winning `source` and `source_order_id`.
-- **checkout gate: a read failure no longer decides anything (#12).** Ticket 12
-  intends an unreadable state to let the request reach the core handler. The
+- **checkout gate: a read failure no longer decides anything (#12).** Ticket 12's rule
+  is that an unreadable state lets the request reach the core handler. The
   completion middleware called `listSubscriptions` unguarded, so a throw there
   rejected the middleware promise and hung or 500-ed checkout over a plugin-side
   read. The decision is now a pure, injectable unit
@@ -227,6 +227,36 @@ was covered by any assertion in the http suite.
   the same refusal with its promised **400**. A `customer_id` that never existed is
   still stopped by that handler's own `retrieveCustomer` before the workflow runs, so
   on the bridge the new wording appears only when the row goes between the two reads.
+- **renewals: the stale upcoming cycle a reconciliation leaves behind is retired, not
+  left chargeable (#08).** `resolveUpcomingCycle` answered
+  `match | adopt | defer | create` correctly and still left a second live `SCHEDULED`
+  row standing: `match` reports the exact-date hit and never looks at the neighbour,
+  `adopt` moves only the candidate, and `defer` refuses to move anything — and refusing
+  to touch a row is not the same as protecting it. That neighbour stayed in the
+  scheduler's due set (`status in [scheduled, failed]`, `deleted_at` null) and was
+  charged on its own date while the step reported a clean run, and the 1.6.0 index does
+  not close the hole either: its predicate covers only
+  `status = 'scheduled' and deleted_at is null`, so a `SUCCEEDED` or `FAILED` row on the
+  entitlement date with one live `SCHEDULED` neighbour is a shape it permits. The
+  selector now names those rows in a `retire` field that `match`, `adopt` and `defer`
+  each carry (`create` has none, because reaching it means no open row existed), and
+  `ensure-next-renewal-cycle` acts on the set on every path that can carry it — the two
+  that return early, the `defer` report and the unchanged-row report, plus the path
+  that follows a reconciliation write. The write is a soft delete — the row keeps its id, its
+  `renewal_attempt` children, its date and its status, and only `deleted_at` is stamped
+  — taken after a re-read that drops any row which picked up a `generated_order_id`
+  between the two reads and reports it as `withheld`. Every retirement logs, and so does
+  its undo: a workflow failing after the step clears `deleted_at` again and logs the
+  restore, while a retire that throws on the `updated` / `adopted` path is reported as a
+  permanent step failure carrying the rollback instead of throwing out of `invoke`, where
+  the engine would never have compensated the adopt it had already applied. A run whose
+  only write was a retirement reports `retired` rather than `noop`. Behavior to expect
+  after this: a retired cycle leaves the Admin renewals list, its `count`, and
+  `GET /admin/renewals/:id`, which answers `404 not_found` for its id like any cycle
+  that does not exist. A `retired` line in the log does not by itself mean a host lost
+  the index — the terminal-row shape above retires with the constraint standing; two
+  live `SCHEDULED` cycles for one subscription may indicate it, since that is the pair
+  the constraint refuses.
 
 ### Chores
 

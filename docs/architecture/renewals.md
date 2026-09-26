@@ -48,7 +48,7 @@ It contains:
 
 Key design choices:
 - one renewal cycle represents one concrete due renewal unit for one subscription
-- a subscription that should have an upcoming renewal has exactly **one** live cycle row standing for it, and the database enforces that, not only the code (see *The one-upcoming-cycle invariant* below)
+- a subscription that should have an upcoming renewal has exactly **one** live `scheduled` cycle row standing for it. The database refuses a second one on new writes, and the reconciliation step soft-deletes the extra live `scheduled` rows it finds (see *The one-upcoming-cycle invariant* below)
 - attempt history is stored separately from the cycle aggregate
 - the cycle stores operational state and selected execution summary fields directly
 - the subscription remains the source of active subscribed state, while the cycle remains the source of execution history
@@ -116,10 +116,17 @@ plus one constraint rather than one lookup:
 
 For a subscription that should have an upcoming renewal, exactly one live
 `renewal_cycle` row stands for it, and it carries `scheduled_for` equal to
-`subscription.next_renewal_at`. The count is the enforced half: two layers below
-make no subscription ever hold two live rows. The date holds whenever the step can
-write, with one deliberate exception — `defer` leaves a row on its own date rather
-than move money that is already in flight, and says so in the log.
+`subscription.next_renewal_at`. The count is the enforced half, and two layers do
+different jobs in it: the partial unique index below refuses a **new** live
+`scheduled` row for a subscription that already holds one, and the reconciliation
+step soft-deletes the live `scheduled` row it finds beside the row it keeps. Neither
+one is the whole invariant on its own — the index predicate is
+`status = 'scheduled' and deleted_at is null`, so a `succeeded` or `failed` row on
+the entitlement date with one live `scheduled` neighbour is a shape the constraint
+permits and only the step clears, while the step only runs when something re-runs
+its workflow. The date holds whenever the step can write, with one deliberate
+exception — `defer` leaves a row on its own date rather than move money that is
+already in flight, and says so in the log.
 
 **The reconciliation step.** `ensure-next-renewal-cycle` no longer looks for a row
 by exact date and creates another one when it finds nothing; it asks
@@ -129,10 +136,10 @@ four actions:
 
 | action | when | what is written |
 | --- | --- | --- |
-| `match` | a row already sits on `next_renewal_at`, whatever its status | that row's approval state and settings policy — or nothing at all, when the row is `processing`/`succeeded` or its approval state already agrees with what was derived |
-| `adopt` | an open row (`scheduled` or `processing`) sits elsewhere and nothing is in flight under it | the same, plus `scheduled_for` moved onto the entitlement date |
-| `defer` | the row that would be adopted carries a `generated_order_id` or is `processing` | nothing — and one warning line naming the cycle id and the order id |
-| `create` | no open row at all | a fresh `scheduled` cycle |
+| `match` | a row already sits on `next_renewal_at`, whatever its status | that row's approval state and settings policy — or nothing to that row at all, when it is `processing`/`succeeded` or its approval state already agrees with what was derived. Either way the run's `retire` set is still acted on (see *The retire* below) |
+| `adopt` | an open row (`scheduled` or `processing`) sits elsewhere and nothing is in flight under it | the same, plus `scheduled_for` moved onto the entitlement date, and the same `retire` set |
+| `defer` | the row that would be adopted carries a `generated_order_id` or is `processing` | nothing to the protected row, plus the `retire` set — and one warning line naming the cycle id and the order id |
+| `create` | no open row at all | a fresh `scheduled` cycle, and no `retire` set: reaching this action means there was no open row to leave behind |
 
 `match` outranks `adopt` for every status; that precedence is a pinned contract, not
 an accident of the code's order. Adopting a row that sits behind a settled
@@ -152,6 +159,56 @@ longer have an upcoming cycle) restores at most one row live and recreates any
 extras soft-deleted, because restoring two would violate the index in the middle of
 a rollback.
 
+**The retire.** `match`, `adopt` and `defer` each answer with a second field
+alongside the row they chose: `retire`, the subscription's other live `scheduled`
+rows that carry no `generated_order_id` (`collectRetirable`,
+`src/modules/renewal/utils/upcoming-cycle.ts:229-239`) — exactly the rows the
+decision neither moves nor deletes. `ensure-next-renewal-cycle` acts on that set on
+every path that can carry it: the two that return early for their own reason
+(`retireAndDefer`, `retireAndReportUnchanged`) and the one that reports a completed
+reconciliation write (`retireAndReportReconciled`),
+`src/workflows/steps/ensure-next-renewal-cycle.ts:160-413`. Acting on it is a write
+with a re-read in front of it: the step lists the named ids again, keeps only the
+rows that still read `scheduled` with no order, and soft-deletes those. A row that
+took on money between the selector's read and this write — `create-manual-renewal`
+stamps `generated_order_id` on a due `scheduled` row and leaves its status alone, and
+no lock on either side is subscription-scoped — is left live and said out loud as
+`withheld … from retirement: no longer an uncharged scheduled cycle`, so the log
+records which half of the decision the write actually took rather than leaving an
+unexplained survivor.
+
+- The delete is soft. The row keeps its id, its `renewal_attempt` children (the
+  model declares no soft-remove cascade, so a retire cannot orphan them), its
+  `scheduled_for` and its status; what changes is visibility — the scheduler's due
+  read no longer selects it, and neither do the Admin renewal reads.
+- A retirement always logs. There is no silent path: the line is
+  `[reorder] retired N stale upcoming renewal cycle(s) of subscription '<id>' (<row ids>) behind '<kept or moved row id>'`,
+  and it is written after the delete lands, so a line never claims a row that is
+  still live. The soft delete is the step's only write on that row, so `status`,
+  `scheduled_for` and `last_error` keep their values — the
+  `last_error` normalization marker is stamped only by this release's migration,
+  which is how a table read tells the two provenances apart.
+- The run's reported action follows the write. A `match` that wrote nothing to its
+  own row but cleared a neighbour reports `retired` instead of `noop`, while a
+  `defer` keeps reporting `deferred` — the promise that branch makes is about the row
+  it refuses to move, and the retirement it does make is on the log.
+- A rollback undoes it and says so: `restoreRetiredUpcomingCycles` clears
+  `deleted_at` on the ids the run named and logs
+  `restored N retired upcoming renewal cycle(s) … the retirement was rolled back and
+  these rows are chargeable again`
+  (`src/workflows/steps/ensure-next-renewal-cycle.ts:231-248`). On the `updated` /
+  `adopted` paths the retire rides inside the same compensation as the row snapshot,
+  and a retire that throws is reported as a permanent step failure carrying that
+  compensation (`StepResponse.permanentFailure`,
+  `src/workflows/steps/ensure-next-renewal-cycle.ts:396-402`) instead of propagating
+  out of `invoke` — a step that throws without a response is a step the engine never
+  compensates, and the reconciliation write above it would have stayed applied.
+- One retirement line is not evidence that a host lost the index. The
+  `succeeded`/`failed`-on-the-entitlement-date shape above retires on a database
+  where the constraint stands. A subscription holding two live `scheduled` rows may
+  indicate a dropped index, because that pair is precisely what the constraint
+  refuses.
+
 **The constraint.** The index rejects a write that would leave two live `scheduled`
 rows for one subscription, so drift cannot be created silently any more. On upgrade
 the same migration first normalizes a database that already carries drift: the
@@ -162,13 +219,19 @@ re-arm for a charge — and the row kept is the one already matching
 only the index and does not resurrect the normalized rows, because putting a second
 chargeable cycle back on the scheduler's list is worse than the asymmetry.
 
-**Boundary of the repair.** The step only ever deletes rows when the subscription
-should have no upcoming cycle at all; it never deletes a row it does not own. A
-duplicate that predates the migration is therefore removed by the normalization
-above, not by the next purchase, and a live `scheduled` row left behind while the
-entitlement-date row is terminal keeps being charged as soon as it is due. Nothing
-in the selector can close that: the two orderings of `match` against `adopt` differ
-only in which row is written, not in whether the stale row survives.
+**Boundary of the repair.** The step writes a delete in two situations: when the
+subscription should have no upcoming cycle at all (the `deleted` branch, which
+hard-deletes and is compensated by re-inserting the snapshot), and when a
+reconciliation leaves a live `scheduled` row standing beside the row it keeps or
+moves (the retire, which soft-deletes). It never deletes a row it does not own: the
+`defer` row, any `processing` row and any row already carrying a
+`generated_order_id` are outside the retire set by construction, and a row that
+stopped qualifying between the two reads drops out of the write. A duplicate that
+predates the migration is removed by the normalization above at upgrade time; a
+duplicate that appears afterwards exists only where the index no longer stands, and
+the next run of this workflow retires one half of it rather than leaving both
+chargeable. The selector itself still decides nothing about a stale row's fate — it
+names the rows, and the write half above is what clears them.
 
 ## 3. Execution Semantics
 
@@ -485,8 +548,11 @@ This keeps display data separate from drawer-only form state and matches the exi
 
 Implemented test files:
 - `src/modules/renewal/__tests__/service.spec.ts`
-- `src/modules/renewal/__tests__/upcoming-cycle.spec.ts` — the `match | adopt | defer | create` selector, including the pinned `match`-outranks-`adopt` precedence and the shared write/restore field list
-- `integration-tests/http/subscription-from-order.spec.ts` — the stacking purchase end to end: one future `scheduled` row, the `defer` branch through the real workflow, and the index refusing a second live `scheduled` row
+- `src/modules/renewal/__tests__/upcoming-cycle.spec.ts` — the `match | adopt | defer | create` selector, including the pinned `match`-outranks-`adopt` precedence, the `retire` set the first three carry and the absence of one on `create`, and the shared write/restore field list
+- `src/modules/renewal/__tests__/retire-stale-cycles.spec.ts` — the write half: `retireStaleUpcomingCycles` with its re-read qualification and `withheld` report, the `defer` / unchanged / reconciled wrappers and what each reports, and the rollback dispatcher with the retired-row restore
+- `src/modules/renewal/__tests__/reconcile-restore.spec.ts` — `restoreReconciledCycle`, pinned to every column a reconciliation patch may write
+- `integration-tests/http/subscription-from-order.spec.ts` — the stacking purchase end to end: one future `scheduled` row, the `defer` branch through the real workflow, the index refusing a second live `scheduled` row, the retire behind a terminal entitlement-date row with the index up, the retire beside an adopted or deferred row inside an index window, and the applied adopt rolled back when the retirement fails
+- `integration-tests/http/migrations.spec.ts` — the migration harness, including which duplicate shapes a migrated database can actually hold
 - `integration-tests/http/renewals-workflows.spec.ts`
 - `integration-tests/http/renewals-routes.spec.ts`
 - `integration-tests/http/renewals-admin-flow.spec.ts`

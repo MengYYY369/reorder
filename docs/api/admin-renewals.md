@@ -165,6 +165,41 @@ Shape:
 - `400 invalid_data`
   Unsupported sort field.
 
+### Retired (soft-deleted) cycles
+
+When the reconciliation step keeps or moves one upcoming cycle and clears the live
+`scheduled` row it left behind, that clear is a soft delete (see
+[Renewals Architecture](../architecture/renewals.md), *The retire*). Retirement is
+not a cycle status and no field in these payloads reports it; what changes is
+visibility.
+
+Both reads query `renewal_cycle` through `query.graph` and neither passes
+`withDeleted` (`src/modules/renewal/utils/admin-query.ts:650,678,720`), so a retired
+cycle:
+
+- is absent from `renewals` on `GET /admin/renewals`, and is not counted in that
+  response's `count`
+- is not returned by `GET /admin/renewals/:id` for its own id — that answers
+  `404 not_found`, indistinguishable from a cycle that never existed
+  (`src/modules/renewal/utils/admin-query.ts:729-731`)
+- cannot be force-run, approved or rejected. Those workflows resolve the cycle with
+  `retrieveRenewalCycle`, which does not report a soft-deleted row, and answer
+  `RenewalCycle '<id>' was not found`, which the routes map to `404 not_found`
+  (`src/workflows/steps/force-renewal-cycle.ts:57-62`,
+  `src/workflows/steps/shared-renewal-approval.ts:27-33`,
+  `src/api/admin/renewals/utils.ts:59-75`)
+
+What the list does show after a retirement is the row the run kept or moved: same
+`subscription_id`, `status = "scheduled"`, and `scheduled_for` equal to the
+subscription's `next_renewal_at` except where the run deferred. The retired row is
+still in the table — `deleted_at` is stamped and the row's renewal fields keep their
+values, so `status`, `scheduled_for`, `last_error` and its `renewal_attempt` children
+are unchanged, and a step-retired cycle carries none of the normalization marker text
+this release's migration stamps into `last_error`. Reading it back therefore takes
+SQL, never this API. Nothing in a response explains why a cycle disappeared between
+two polls: the retirement, the rows a run withheld from it, and a rolled-back
+retirement are server-log lines only.
+
 ## 2. Get Renewal Details
 
 ### Endpoint
@@ -256,7 +291,8 @@ Notes:
 ### Common Errors
 
 - `404 not_found`
-  The renewal cycle does not exist.
+  The renewal cycle does not exist — or was retired by the reconciliation step, which
+  hides it from this read the same way (see *Retired (soft-deleted) cycles* above).
 
 ## 3. Force Renewal
 

@@ -59,7 +59,9 @@ Purpose:
 
 Current files:
 - [service.spec.ts](../../src/modules/renewal/__tests__/service.spec.ts)
-- [upcoming-cycle.spec.ts](../../src/modules/renewal/__tests__/upcoming-cycle.spec.ts)
+- [upcoming-cycle.spec.ts](../../src/modules/renewal/__tests__/upcoming-cycle.spec.ts) — the `resolveUpcomingCycle` selector and the `retire` set its first three actions carry
+- [retire-stale-cycles.spec.ts](../../src/modules/renewal/__tests__/retire-stale-cycles.spec.ts) — the write half: `retireStaleUpcomingCycles` with its re-read qualification and `withheld` report, the `retireAndDefer` / `retireAndReportUnchanged` / `retireAndReportReconciled` branch wrappers and what each reports, `restoreRetiredUpcomingCycles`, and the `rollBackUpcomingCycleWrites` dispatcher
+- [reconcile-restore.spec.ts](../../src/modules/renewal/__tests__/reconcile-restore.spec.ts) — `restoreReconciledCycle`, pinned to every column a reconciliation patch may write
 
 This layer is the right place for:
 - renewal cycle creation behavior
@@ -67,9 +69,14 @@ This layer is the right place for:
 - module-level persistence behavior
 - model-adjacent service behavior
 - the upcoming-cycle reconciliation decision (`resolveUpcomingCycle`), which is a
-  pure selector over rows and is asserted for all four actions, for the pinned
-  "`match` outranks `adopt`" precedence, and for the write/rollback field list the
-  patch and its restore share
+  pure selector over rows and is asserted for all four actions and for the `retire`
+  set `match`, `adopt` and `defer` each carry — the live `scheduled` rows the decision
+  leaves in place, excluding the one it chose, any `processing` row and any row
+  carrying a `generated_order_id` — while `create` is asserted to carry no such field;
+  for the pinned "`match` outranks `adopt`" precedence, and for the write/rollback
+  field list the patch and its restore share
+- the step's retire and rollback halves, which are reached through narrowed writer
+  types so the effect is assertable here without a workflow engine
 
 Boundary this layer cannot cross: the module runners create their schema from the
 entity models and pass no `pathToMigrations`, so **hand-written migrations do not
@@ -89,7 +96,8 @@ Current files:
 - [renewals-routes.spec.ts](../../integration-tests/http/renewals-routes.spec.ts)
 - [renewals-admin-flow.spec.ts](../../integration-tests/http/renewals-admin-flow.spec.ts)
 - [renewals-smoke.spec.ts](../../integration-tests/http/renewals-smoke.spec.ts)
-- [subscription-from-order.spec.ts](../../integration-tests/http/subscription-from-order.spec.ts) — renewal-side cases: a stacked purchase leaves exactly one future `SCHEDULED` cycle, a cycle whose renewal order is already outstanding is deferred rather than rescheduled, and a second live `SCHEDULED` row for one subscription is refused by the database
+- [subscription-from-order.spec.ts](../../integration-tests/http/subscription-from-order.spec.ts) — renewal-side cases: a stacked purchase leaves exactly one future `SCHEDULED` cycle, a cycle whose renewal order is already outstanding is deferred rather than rescheduled, a second live `SCHEDULED` row for one subscription is refused by the database, the stale neighbour is retired behind a terminal entitlement-date row (with the index standing) and beside an adopted or deferred row (inside an index window), and an applied adopt is rolled back when the retirement fails mid-run
+- [migrations.spec.ts](../../integration-tests/http/migrations.spec.ts) — the migration harness, including which duplicate-cycle shapes survive a re-applied `up()` and which need the index dropped to exist at all
 
 This layer is the main protection for the implemented Admin behavior and the renewal execution boundary.
 
@@ -133,6 +141,25 @@ exactly the state the partial unique index constrains. Seeding two live
 layer, and a spec that wants that state deliberately has to say so through the
 subscription id it reuses — which is what the index self-proof case does.
 
+**Seeding the drift the retire consumes.** A spec that wants two live `SCHEDULED`
+rows for one subscription runs inside the window
+`withUpcomingCycleIndexDropped` opens in
+[subscription-from-order.spec.ts](../../integration-tests/http/subscription-from-order.spec.ts):
+`drop index if exists "renewal_cycle_one_scheduled_per_subscription"`, seed the rows,
+drive the workflow, then re-create the index with the statement
+`Migration20260924120000.up()` ends on. The re-create is half of the assertion, not
+teardown hygiene: a step that left a second live `SCHEDULED` row standing makes
+PostgreSQL refuse the index with `could not create unique index … is duplicated`, and
+the case fails on its way out instead of leaving the suite database drifted for every
+later reader. The rollback case is the one that has to differ — leaving both rows live
+*is* its assertion, so it deletes its own two rows before the window closes, and the
+re-create still runs and still proves the constraint stands afterwards.
+
+The other shape the retire acts on needs no window at all: a terminal
+(`succeeded`) row on the entitlement date with one live `SCHEDULED` neighbour is
+index-legal, because the partial predicate covers only `status = 'scheduled' and
+deleted_at is null`, and that case leaves the index up.
+
 ## 5. Current Coverage
 
 ### Module Coverage
@@ -155,6 +182,50 @@ Covered through integration tests:
 - already processing conflict
 - approval required, approved, and rejected transitions
 - force execution route and workflow behavior
+
+### Upcoming-Cycle Coverage
+
+Covered through the module and HTTP layers above:
+- the `retire` set `resolveUpcomingCycle` names on `match`, `adopt` and `defer`, and
+  its absence on `create`
+- the soft delete of those rows, including the re-read that withholds a row which took
+  on a `generated_order_id` between the selection and the write
+- the three log lines a run can write: `retired …` pinned to its whole text in both
+  the module and the http case, `restored …` pinned to its whole text in the rollback
+  case, and `withheld …` pinned to its count and the row id it names
+- the action a run reports: `retired` when the retire was its only write, `deferred`
+  when a deferral retired as well, `noop` only when nothing went
+- the rolled-back run: an applied adopt whose retirement throws is reported as a
+  permanent step failure, the engine compensates it, and both rows are live again
+
+**Manual check on a real database.** After a repeat purchase of a stacked product this
+returns nothing:
+
+```sql
+select subscription_id, count(*)
+  from renewal_cycle
+ where status = 'scheduled' and deleted_at is null
+ group by subscription_id
+having count(*) > 1;
+```
+
+A row the step cleared is still on the table, so the same query with the predicate
+flipped shows what a run retired:
+
+```sql
+select id, subscription_id, scheduled_for, status, deleted_at
+  from renewal_cycle
+ where deleted_at is not null and status = 'scheduled'
+ order by deleted_at desc;
+```
+
+A step retirement carries no `last_error` marker — that text is stamped only by the
+1.6.0 normalization migration — so the two provenances are told apart by that column,
+and the run that did it is the `[reorder] retired …` line in the server log. A
+retirement line is not proof that the index is gone: the terminal-row shape above
+retires on a database where the constraint stands. A subscription holding two live
+`scheduled` rows may indicate a dropped index, since that pair is what the constraint
+refuses.
 
 ### Admin API Coverage
 
