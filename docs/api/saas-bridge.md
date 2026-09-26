@@ -137,12 +137,19 @@ thrown value's own properties (`message`, `name`, `type`, and for a driver error
   replaces every conflict message with its own retry sentence. The rule is not
   bridge-only: `POST /store/customers/me/redemptions` runs the same redeem workflow
   and classifies it the same way, differing only in the status a declared refusal
-  keeps. **What this does not cover:** a module read the handler performs *before*
-  the workflow runs (the tenant check's `listSubscriptions` / `retrieveCustomer`) is
-  core's error path, and a DAL fault there still reaches the body in the mapper's
-  own words. That is a property of every store route's reads in this plugin, not of
-  this endpoint family, and it is listed under *Deferred* in
-  `.agents/specs/2026-09-24-1.6.0-acceptance-fixes.md`.
+  keeps.
+- **This section covers the workflow run. The routes' own reads are covered by a
+  second boundary, *Tenant-scoping read failures* below**, which is what the
+  pre-workflow reads (the tenant check's `listSubscriptions` / `retrieveCustomer` /
+  `listCustomers`, and `carts` / `reconcile`'s `query.graph` reads) now go through:
+  a DAL fault there no longer reaches the body in `db-error-mapper`'s words. That
+  gap was the *Deferred* item in
+  `.agents/specs/2026-09-24-1.6.0-acceptance-fixes.md`; it is closed for these
+  routes' tenant-scoping reads and for nothing else. Still core's error path: every
+  admin route, the store reads that answer no tenant-scoping question, and the
+  reads under `src/api/store/customers/me/**`, which §D of
+  `.agents/specs/2026-09-25-post-acceptance-backlog.md` classifies and leaves there
+  on purpose.
 
 Inventories — all three owned by the workflow that composes the steps, so no
 route decides on its own what may be quoted:
@@ -161,7 +168,10 @@ fixed response texts.
 `{ email?, external_id?, display_name? }` (at least one of email /
 external_id) → `{ customer: { id, email } }`. Idempotent per tenant; lookup
 priority external_id (tenant-scoped) → email (tenant-scoped, with adoption of
-unstamped customers). Pinned: `customer.id`, `customer.email`.
+unstamped customers). Pinned: `customer.id`, `customer.email`. A candidate read that
+faults answers **404** `customer not found for this tenant` — the only path on which
+this route answers 404; a read that legitimately finds no candidate ends in an
+adopted or created customer, as before. See *Tenant-scoping read failures*.
 
 ### `POST /store/saas/reconcile`
 
@@ -184,6 +194,11 @@ webhook-loss recovery:
   to another tenant, or an unknown id, answers **404** instead — this endpoint
   changed from returning an empty list for both, which the webhook receiver
   could not tell apart from "nothing to reconcile")
+
+This route has no workflow, and all nine of its reads — the three scoping reads and
+the six that shape the response — are behind the boundary, so a fault on any of them
+answers **404** with that branch's own sentence above rather than a 500 or a body
+naming a table and column. See *Tenant-scoping read failures*.
 
 ### `POST /store/saas/renew`
 
@@ -242,6 +257,13 @@ frequency fields).
 > addresses itself and cart completion depends on this placeholder — it is
 > cleanup candidate in appearance only. Do not "fix" it.
 
+Both of this route's reads are behind the boundary: a faulting `retrieveCustomer`
+answers **404** `customer not found for this tenant` — the sentence a customer
+stamped for another tenant already answers with — and a faulting `region`
+`query.graph` answers **404** `No region configured for currency '<code>'`, while a
+currency with no region configured keeps its **400** with that same sentence. Only
+the fault moved; see *Tenant-scoping read failures*.
+
 ### `POST /store/saas/redeem`
 
 `{ code, customer_id, subscription_id? }` → `{ subscription_id,
@@ -266,7 +288,9 @@ not found` — the caller's own id, never a variant id). That last one is the
 race this handler's existence check leaves open: it has already seen the row,
 and the row is gone by the time the step queries it. A `customer_id` with no
 row at all is answered here first, by this handler's own `retrieveCustomer`, at
-**404** with core's wording. A code the store does not know is thrown as a
+**404** with this route's `redemption target not found` — that read is behind the
+boundary, so core's `Customer with id '…' was not found` and the id it echoed no
+longer appear here. A code the store does not know is thrown as a
 `not_found` by the workflow and is still answered **400** here, which is what the
 byte-compatible bridge contract does — the customer-scoped
 `/store/customers/me/redemptions` route lets the domain error through untouched
@@ -274,6 +298,61 @@ and answers **404** for the same case. Anything else — a batch whose variant r
 is gone, a driver fault, a core error surfacing under the same step name — keeps
 the status of the `MedusaError` it was thrown as (404 / 409 / 422) or answers
 500, and always with the route's own text. See *Failure disclosure*.
+
+## Tenant-scoping read failures (all six endpoints)
+
+Every read these six routes make goes through one wrapper, `readTenantScoped`
+(`src/api/store/saas/lib/tenant-ownership.ts`) — the nineteen sites §D of
+`.agents/specs/2026-09-25-post-acceptance-backlog.md` enumerates: the pre-workflow
+scoping reads, `reconcile`'s response reads, and `carts`'s region lookup. Writes are
+not behind it: `ensure-customer`'s `createCustomers` and its adoption
+`updateCustomers` still answer a failure their own way. On success the wrapper is
+`await read()`. On any throw it asks
+`classifyStoreReadFailure` (`src/modules/subscription/utils/store-read-failure.ts`)
+what may be disclosed, and that function consults nothing about the error: whatever
+arrived, the answer is `not_found` with the fixed sentence the caller passes — the
+same sentence the route already answers when the row genuinely is not there. The raw
+cause is logged by the calling route (`[reorder] <context>: tenant-scoped read
+failed`) and never rethrown into the response.
+
+What a caller observes, per route:
+
+| Route | Reads behind the boundary | A read fault now answers | What the same fault answered before |
+| --- | --- | --- | --- |
+| `POST /store/saas/auto-renew` | `listSubscriptions` + `retrieveCustomer` (the tenant check) | **404** `subscription not found` | 500, or a 400/422 quoting a table and column |
+| `POST /store/saas/renew` | `listSubscriptions` + `retrieveCustomer` | **404** `subscription not found` | 500, or a 400/422 quoting a table and column |
+| `POST /store/saas/redeem` | `retrieveCustomer` | **404** `redemption target not found` | 500 / internals-quoting 400; a customer row that is gone answered **404** with core's `Customer with id '…' was not found`, id echoed |
+| `POST /store/saas/carts` | `retrieveCustomer`; `query.graph` `region` | **404** `customer not found for this tenant`; **404** `No region configured for currency '<code>'` | 500 / internals-quoting 400. A region that genuinely is not configured keeps its **400** with the same sentence — only the fault moved |
+| `POST /store/saas/ensure-customer` | the two `listCustomers` candidate reads | **404** `customer not found for this tenant` — a status this route did not answer at all before, on a fault path only | 500 / internals-quoting 400. A lookup that legitimately finds no candidate is unchanged: it ends in an adopted or created customer |
+| `POST /store/saas/reconcile` | all nine reads: the `order` / `subscription` / `customer` scoping reads and the six response reads | **404** with that branch's own absence sentence — `Order '<id>' not found`, `Subscription '<id>' not found`, `Customer '<id>' not found` on the three id lookups, and `order` / `subscription` / `customer` `not found for this tenant` on the tenant check and the response reads | 500 / internals-quoting 400, on any of the nine |
+
+Through the shared helper (`assertCustomerTenantVisible`, reached from `reconcile`'s
+order and subscription branches) a faulting `retrieveCustomer` answers
+`<resource> not found for this tenant`, which replaces core's
+`Customer with id '…' was not found` — the status was 404 either way; the wording is
+what changed. The two 404s that helper authors itself (`<resource> has no customer`,
+`<resource> not found for this tenant`) are unchanged in text and status: one is
+thrown before anything is read, the other after the read succeeded.
+
+**A database outage on a tenant-scoping read of these six routes now presents as a
+404, not as a 500.** That is a deliberate decision, recorded as risk **R1** in §D of
+`.agents/specs/2026-09-25-post-acceptance-backlog.md`: a fault must be
+indistinguishable from the absence the same read answers with, so that no response
+body can be probed for schema internals. The cost is that an operator reading only
+the HTTP layer sees "not found" where the database is down — which is why the raw
+cause is logged at the route, and why the boundary is confined to these scoping
+reads. Widening `readTenantScoped` to reads that carry domain meaning turns the
+masking into the incident; the reads under `src/api/store/customers/me/**` are
+outside it for exactly that reason (their customer id comes from
+`req.auth_context.actor_id`, so a masked 404 would deny a caller its own resource),
+and so are the admin routes.
+
+Pinned per route by the seven cases of the
+`POST /store/saas/* — a tenant-scoping read fault never quotes internals` describe in
+`integration-tests/http/saas-bridge.spec.ts:1538`. Each injects the
+`db-error-mapper` shape into the underlying read and asserts the route's own sentence,
+`type: not_found`, and that neither the canary column name nor the case's marker
+substring reaches the body.
 
 ## Event forwarding
 

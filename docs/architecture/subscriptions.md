@@ -500,6 +500,33 @@ The Store API layer uses:
 - workflow-backed mutations
 - ownership checks before mutation execution
 
+### Tenant-scoping read failures
+
+The six `/store/saas/*` routes decide tenant visibility with their own reads
+(`listSubscriptions`, `retrieveCustomer`, `listCustomers`, `query.graph`) before any
+workflow runs, and every one of those reads is made through `readTenantScoped`
+(`src/api/store/saas/lib/tenant-ownership.ts`). What a failure of such a read may
+disclose is decided by the pure `classifyStoreReadFailure`
+(`src/modules/subscription/utils/store-read-failure.ts`), which reads nothing from
+the error it is given: the answer is always `not_found` with the fixed sentence the
+caller passes — the sentence the same route already answers when the row genuinely
+is not there — while the raw cause is logged by the route. A DAL fault that
+`db-error-mapper` turns into an `invalid_data` naming a table and column therefore
+cannot reach a customer body from these routes.
+
+Two consequences belong to this design and are stated as such: a database outage on
+a tenant-scoping read of `/store/saas/*` presents as a **404**, and a customer row
+that is gone answers with the route's own sentence rather than core's
+`Customer with id '…' was not found`. The first is §D's risk **R1** in
+`.agents/specs/2026-09-25-post-acceptance-backlog.md`, accepted deliberately for
+scoping reads only, because a fault that reads differently from an absence is a
+probeable difference. The boundary is therefore not applied to the customer-account
+routes under `src/api/store/customers/me/**`, whose reads take the customer id from
+`req.auth_context.actor_id`: masking their failure as a 404 would deny an
+authenticated caller a resource it owns. Admin routes and store reads that answer no
+tenant-scoping question are core's error path for the same reason. Per-route statuses
+are in `docs/api/saas-bridge.md` (*Tenant-scoping read failures*).
+
 ## 8. Admin UI Architecture
 
 The Admin UI is implemented as custom Medusa Admin routes.

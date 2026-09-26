@@ -131,3 +131,24 @@ export default defineMiddlewares({
 ```
 
 The `matcher` property can be either a string or a regular expression. The `middlewares` property accepts an array of middleware functions.
+
+## Tenant-scoping reads in this plugin's store routes
+
+A store route that decides tenant visibility with its own read calls it through
+`readTenantScoped(logger, context, copy, read)`
+(`src/api/store/saas/lib/tenant-ownership.ts`) rather than awaiting the module or
+`query.graph` directly: on any throw the wrapper answers `not_found` with the fixed
+sentence the caller passes — the sentence the same route already answers when the row
+genuinely is not there — and logs the raw cause, so a driver fault the DAL turns into
+an `invalid_data` naming a table and column cannot reach the response body. The
+decision of what a failed read may disclose is not in this directory: it is the pure
+`classifyStoreReadFailure` in
+`src/modules/subscription/utils/store-read-failure.ts`, because a unit under
+`src/api/**` is executed by no gate while `src/modules/**` is (see `jest.config.js`
+`integration:modules`), and the wrapper would otherwise be a rule nothing can prove.
+The route supplies only its own copy text. Currently all six `/store/saas/*` routes
+use it; the customer-account routes under `src/api/store/customers/me/**` do not,
+because their customer id comes from `req.auth_context.actor_id` and masking their
+faults as 404 would deny a caller a resource it owns — see
+`docs/api/saas-bridge.md` (*Tenant-scoping read failures*).
+

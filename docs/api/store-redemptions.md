@@ -93,6 +93,22 @@ not found`, naming the id the caller authenticated as and no variant.
 The shared mechanism is
 `src/workflows/utils/store-step-failure.ts` and its `preserveQuotedStatus` option.
 
+That covers the workflow run. The route's own module reads are covered by a separate
+boundary, `readTenantScoped`
+(`src/api/store/saas/lib/tenant-ownership.ts`, deciding through
+`classifyStoreReadFailure` in `src/modules/subscription/utils/store-read-failure.ts`),
+and that boundary is confined to `/store/saas/*`: a tenant-scoping read that faults
+there answers 404 with the route's own sentence instead of `db-error-mapper`'s, and a
+gone customer on `POST /store/saas/redeem` now reads `redemption target not found`
+where it used to carry core's `Customer with id '…' was not found`. Nothing under
+this route's own subtree, `src/api/store/customers/me/**`, is behind it — the reads
+there take the customer id from `req.auth_context.actor_id`, so masking a fault as a
+404 would tell an authenticated customer that a resource they own does not exist. A
+DAL fault on those reads is still core's error path, and `listAndCountRedemptionRecords`
+is named in §D of `.agents/specs/2026-09-25-post-acceptance-backlog.md` as
+classified-and-left on that basis. See *Tenant-scoping read failures* in
+`docs/api/saas-bridge.md`.
+
 ### `GET /store/customers/me/redemptions`
 
 Lists the customer's redemption records, newest first.

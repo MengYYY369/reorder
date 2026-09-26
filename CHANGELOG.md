@@ -257,6 +257,25 @@ was covered by any assertion in the http suite.
   the index — the terminal-row shape above retires with the constraint standing; two
   live `SCHEDULED` cycles for one subscription may indicate it, since that is the pair
   the constraint refuses.
+- **saas: a failed tenant-scoping read no longer quotes internals — and now answers
+  404.** All nineteen reads the six `/store/saas/*` routes make themselves (the tenant
+  check's `listSubscriptions` / `retrieveCustomer` / `listCustomers`, `carts`'s and
+  `reconcile`'s `query.graph` reads, the shared helper's customer read) go through
+  `readTenantScoped` (`src/api/store/saas/lib/tenant-ownership.ts`), which decides what
+  may be disclosed in `classifyStoreReadFailure`
+  (`src/modules/subscription/utils/store-read-failure.ts`) — a unit under
+  `src/modules/**`, where a gate executes it, not under `src/api/**`, where none does.
+  Customer-visible consequences: a read fault that reached core's handler as a 500, or
+  as a 400/422 whose body named a table and a column, answers **404** with the route's
+  own sentence on all six; `POST /store/saas/ensure-customer` gained that 404 on fault
+  paths only; a `carts` region *fault* answers 404 where a region that genuinely is not
+  configured keeps its **400**; and a customer row that is gone still answers 404 but
+  with the route's text, no longer core's `Customer with id '…' was not found`. A
+  database outage on these scoping reads therefore presents as a 404 — risk **R1** of
+  `.agents/specs/2026-09-25-post-acceptance-backlog.md`, accepted deliberately there,
+  with the raw cause logged at `[reorder] … tenant-scoped read failed`. Admin routes,
+  non-tenant store reads and the reads under `src/api/store/customers/me/**` are
+  unchanged and still on core's error path, the last group by that spec's own ruling.
 
 ### Chores
 
