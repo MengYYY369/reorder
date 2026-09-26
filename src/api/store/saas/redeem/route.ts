@@ -1,13 +1,15 @@
-import {
-  ContainerRegistrationKeys,
-  MedusaError,
-} from "@medusajs/framework/utils"
+import { MedusaError } from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { assertTenantVisible } from "../lib/tenant-ownership"
+import type { ICustomerModuleService } from "@medusajs/framework/types"
+import {
+  readFailureLogger,
+  assertTenantVisible,
+  readTenantScoped,
+} from "../lib/tenant-ownership"
 import {
   redeemRedemptionCodeWorkflow,
   REDEEM_CUSTOMER_REFUSALS,
@@ -16,15 +18,13 @@ import {
   classifyStepFailure,
   logUnquotedStepFailure,
   type StepFailureCopy,
-  type StepFailureLogger,
 } from "../../../../workflows/utils/store-step-failure"
 
-type CustomerModule = {
-  retrieveCustomer: (
-    id: string,
-    config?: Record<string, unknown>
-  ) => Promise<{ id: string; metadata?: Record<string, unknown> | null }>
-}
+// Derived from the real interface rather than restated here: a private
+// structural copy checks nothing the container has to satisfy, so renaming
+// `retrieveCustomer` upstream would degrade into a runtime `TypeError` instead
+// of a build failure (`.agents/lessons.md`).
+type CustomerModule = Pick<ICustomerModuleService, "retrieveCustomer">
 
 /**
  * Our own texts for every other failure. Fixed strings — none of them is built
@@ -70,6 +70,12 @@ const REDEEM_FAILURE_COPY: StepFailureCopy = {
  * failure keeps the HTTP semantics of the `MedusaError` it was thrown as, or
  * answers 500, and in all of those cases the response text is one of ours while
  * the cause is logged.
+ *
+ * READ BOUNDARY: the customer read above is a `readTenantScoped` call, so a read
+ * that fails answers the route's own 404 `redemption target not found` — the
+ * text a vanished target already produces — instead of core's
+ * `Customer with id '…' was not found` or a driver message, and the cause only
+ * reaches the log. See `src/modules/subscription/utils/store-read-failure.ts`.
  */
 export async function POST(
   req: MedusaRequest,
@@ -97,8 +103,14 @@ export async function POST(
   // TENANT ISOLATION: the customer must belong to the calling tenant —
   // redeeming for a foreign customer would be a cross-tenant write.
   const customerModule = req.scope.resolve<CustomerModule>(Modules.CUSTOMER)
+  const logger = readFailureLogger(req)
 
-  const customer = await customerModule.retrieveCustomer(customer_id)
+  const customer = await readTenantScoped(
+    logger,
+    "redemption tenant check",
+    REDEEM_FAILURE_COPY,
+    () => customerModule.retrieveCustomer(customer_id)
+  )
 
   assertTenantVisible(req, customer?.metadata, "customer")
 
@@ -122,7 +134,7 @@ export async function POST(
 
     if (!failure.quoted) {
       logUnquotedStepFailure(
-        req.scope.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
+        logger,
         "redemption",
         failure
       )

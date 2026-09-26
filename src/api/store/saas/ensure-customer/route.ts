@@ -1,31 +1,46 @@
 import { MedusaError } from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import type {
+  FilterableCustomerProps,
+  ICustomerModuleService,
+} from "@medusajs/framework/types"
 import { currentTenant } from "../../../../modules/saas-bridge/auth"
 import { isTenantAdoptable } from "../../../../modules/saas-bridge/tenant-ownership"
-import { isOwnedByRequestTenant } from "../lib/tenant-ownership"
+import {
+  readFailureLogger,
+  isOwnedByRequestTenant,
+  readTenantScoped,
+} from "../lib/tenant-ownership"
 
-type CustomerModule = {
-  listCustomers: (
-    filters: Record<string, unknown>,
-    config?: Record<string, unknown>
-  ) => Promise<
-    Array<{
-      id: string
-      email: string | null
-      metadata?: Record<string, unknown> | null
-    }>
-  >
-  createCustomers: (input: {
-    email?: string | null
-    first_name?: string | null
-    metadata?: Record<string, unknown>
-  }) => Promise<{ id: string; email: string | null }>
-  updateCustomers: (
-    id: string,
-    data: { metadata?: Record<string, unknown> }
-  ) => Promise<{ id: string; email: string | null }>
+// Derived from the real interface rather than restated here: a private
+// structural copy checks nothing the container has to satisfy, so renaming a
+// method upstream would degrade into a runtime `TypeError` instead of a build
+// failure (`.agents/lessons.md`).
+type CustomerModule = Pick<
+  ICustomerModuleService,
+  "listCustomers" | "createCustomers" | "updateCustomers"
+>
+
+/**
+ * The candidate filters add the `metadata` column the DAL really filters on,
+ * which the generated `FilterableCustomerProps` does not list. Naming it as an
+ * extension of that type keeps the shape checked — the previous version of this
+ * file passed the same filter through a locally restated
+ * `filters: Record<string, unknown>`, which checked nothing.
+ */
+type CustomerMetadataFilter = FilterableCustomerProps & {
+  metadata: Record<string, unknown>
 }
+
+/**
+ * What a failed candidate read answers: the same 404 the sibling bridge routes
+ * give for a customer that is not this tenant's, so a fault cannot be told apart
+ * from a withheld customer and cannot quote a table or column name. Nothing else
+ * on this route 404s — a lookup that legitimately finds no candidate is the
+ * route's normal business and ends in a created or adopted customer.
+ */
+const CUSTOMER_NOT_VISIBLE = "customer not found for this tenant"
 
 /**
  * POST /store/saas/ensure-customer
@@ -39,6 +54,13 @@ type CustomerModule = {
  * Lookup priority: metadata.external_id (tenant-scoped) → email
  * (tenant-scoped). external_id is the stable key (SaaS session subject);
  * email is optional (Medusa v2 customers allow null email).
+ *
+ * READ BOUNDARY: both candidate reads are `readTenantScoped` calls, so a read
+ * that fails answers 404 `customer not found for this tenant` and the cause only
+ * reaches the log — a fault is never told to the caller as the schema problem it
+ * is. A lookup that answers with no candidate is not a failure and still ends in
+ * an adopted or created customer. See
+ * `src/modules/subscription/utils/store-read-failure.ts`.
  */
 export async function POST(
   req: MedusaRequest,
@@ -68,12 +90,18 @@ export async function POST(
       : null
 
   const customerModule = req.scope.resolve<CustomerModule>(Modules.CUSTOMER)
+  const logger = readFailureLogger(req)
 
   // Lookup 1: by external_id within this tenant.
   if (typeof external_id === "string" && external_id.trim()) {
-    const candidates = await customerModule.listCustomers(
-      { metadata: { external_id: external_id.trim() } },
-      { take: 20 }
+    const byExternalId: CustomerMetadataFilter = {
+      metadata: { external_id: external_id.trim() },
+    }
+    const candidates = await readTenantScoped(
+      logger,
+      "ensure-customer external_id lookup",
+      { notFound: CUSTOMER_NOT_VISIBLE },
+      () => customerModule.listCustomers(byExternalId, { take: 20 })
     )
 
     const owned = candidates.find((candidate) =>
@@ -92,9 +120,12 @@ export async function POST(
   // for the same person. Without adoption the site login and the bridge
   // checkout would split one human into two customers.
   if (normalizedEmail) {
-    const candidates = await customerModule.listCustomers(
-      { email: normalizedEmail },
-      { take: 20 }
+    const candidates = await readTenantScoped(
+      logger,
+      "ensure-customer email lookup",
+      { notFound: CUSTOMER_NOT_VISIBLE },
+      () =>
+        customerModule.listCustomers({ email: normalizedEmail }, { take: 20 })
     )
 
     const owned = candidates.find((candidate) =>

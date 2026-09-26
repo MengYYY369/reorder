@@ -4,6 +4,8 @@ import type { RemoteQueryFunction } from "@medusajs/framework/types"
 import { snapshot } from "../../../../modules/saas-bridge/snapshot"
 import type { SubscriptionRecord } from "../../../../modules/saas-bridge/types"
 import {
+  readFailureLogger,
+  readTenantScoped,
   assertCustomerTenantVisible,
   assertTenantVisible,
 } from "../lib/tenant-ownership"
@@ -17,12 +19,27 @@ type OrderRecord = {
 }
 
 /**
+ * What the order branch answers when it has nothing to show the caller — the
+ * sentence `assertCustomerTenantVisible` throws for a foreign order. Every read
+ * in this route is a `readTenantScoped` call, so a failed read answers that
+ * sentence too, and a driver message naming a table or column cannot reach a
+ * body. The same holds for the customer branch with its own sentence. See
+ * `src/modules/subscription/utils/store-read-failure.ts`.
+ */
+const ORDER_NOT_VISIBLE = "order not found for this tenant"
+const CUSTOMER_NOT_VISIBLE = "customer not found for this tenant"
+
+/**
  * GET-style POST /store/saas/reconcile — authoritative state pulls for the
  * SaaS webhook receiver (webhook lost / out of order / pending row missing).
  *
  * TENANT ISOLATION: every lookup passes through the order/subscription's
  * customer, whose metadata.tenant_id must match the calling tenant.
  * Foreign resources answer 404 (existence is not leaked).
+ *
+ * READ BOUNDARY: this route has no workflow to classify separately and every one
+ * of its reads was uncaught, so each read is a `readTenantScoped` call and each
+ * failure answers one of the fixed sentences above instead of a driver message.
  *
  * Body (exactly one key):
  *   { order_id }         → { order: {...} }
@@ -53,31 +70,47 @@ export async function POST(
   }
 
   const query = req.scope.resolve<RemoteQueryFunction>("query")
+  const logger = readFailureLogger(req)
 
   if (body.order_id) {
+    const orderId = body.order_id
+    const orderNotFound = `Order '${orderId}' not found`
+
     // NOTE: v2.20 dropped the payment_status column on the order entity —
     // requesting it via query.graph is silently ignored. Payment state lives
     // on the payment module: order → payment_collection → payments.status.
     const [orderResult, payLink] = await Promise.all([
-      query.graph({
-        entity: "order",
-        fields: ["id", "currency_code", "total", "customer_id", "metadata"],
-        filters: { id: body.order_id },
-      }),
-      query.graph({
-        entity: "order_payment_collection",
-        fields: ["payment_collection_id"],
-        filters: { order_id: body.order_id },
-      }),
+      readTenantScoped(
+        logger,
+        "reconcile order lookup",
+        { notFound: orderNotFound },
+        () =>
+          query.graph({
+            entity: "order",
+            fields: ["id", "currency_code", "total", "customer_id", "metadata"],
+            filters: { id: orderId },
+          })
+      ),
+      readTenantScoped(
+        logger,
+        "reconcile order payment link",
+        { notFound: ORDER_NOT_VISIBLE },
+        () =>
+          query.graph({
+            entity: "order_payment_collection",
+            fields: ["payment_collection_id"],
+            filters: { order_id: orderId },
+          })
+      ),
     ])
 
     const order = (orderResult.data as unknown as OrderRecord[])[0]
 
+    // The read answered; it simply had no row. That is this route's own 404 and
+    // stays distinct from the two above, which answer for a read that could not
+    // answer at all.
     if (!order) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Order '${body.order_id}' not found`
-      )
+      throw new MedusaError(MedusaError.Types.NOT_FOUND, orderNotFound)
     }
 
     await assertCustomerTenantVisible(req, order.customer_id, "order")
@@ -87,11 +120,17 @@ export async function POST(
     )[0]?.payment_collection_id
     let paymentStatus: string | null = null
     if (paymentCollectionId) {
-      const { data: collections } = await query.graph({
-        entity: "payment_collection",
-        fields: ["status", "payments.status"],
-        filters: { id: paymentCollectionId },
-      })
+      const { data: collections } = await readTenantScoped(
+        logger,
+        "reconcile payment collection",
+        { notFound: ORDER_NOT_VISIBLE },
+        () =>
+          query.graph({
+            entity: "payment_collection",
+            fields: ["status", "payments.status"],
+            filters: { id: paymentCollectionId },
+          })
+      )
       const collection = (
         collections as unknown as Array<{
           status?: string
@@ -117,16 +156,28 @@ export async function POST(
 
     // Cart and subscription identities live in LINK tables, not order
     // columns: order_cart (core) and subscription_order (reorder fork).
-    const cartLink = await query.graph({
-      entity: "order_cart",
-      fields: ["cart_id"],
-      filters: { order_id: body.order_id },
-    })
-    const subLink = await query.graph({
-      entity: "subscription_order",
-      fields: ["subscription_id"],
-      filters: { order_id: body.order_id },
-    })
+    const cartLink = await readTenantScoped(
+      logger,
+      "reconcile order cart link",
+      { notFound: ORDER_NOT_VISIBLE },
+      () =>
+        query.graph({
+          entity: "order_cart",
+          fields: ["cart_id"],
+          filters: { order_id: orderId },
+        })
+    )
+    const subLink = await readTenantScoped(
+      logger,
+      "reconcile order subscription link",
+      { notFound: ORDER_NOT_VISIBLE },
+      () =>
+        query.graph({
+          entity: "subscription_order",
+          fields: ["subscription_id"],
+          filters: { order_id: orderId },
+        })
+    )
     const cartId =
       (cartLink.data as Array<{ cart_id?: string }>)[0]?.cart_id ?? null
 
@@ -135,11 +186,17 @@ export async function POST(
     let cart: { currency_code?: string; items: Array<{ unit_price?: number; quantity?: number }> } | null =
       null
     if (cartId) {
-      const { data: carts } = await query.graph({
-        entity: "cart",
-        fields: ["id", "currency_code", "items.unit_price", "items.quantity"],
-        filters: { id: cartId },
-      })
+      const { data: carts } = await readTenantScoped(
+        logger,
+        "reconcile cart snapshot",
+        { notFound: ORDER_NOT_VISIBLE },
+        () =>
+          query.graph({
+            entity: "cart",
+            fields: ["id", "currency_code", "items.unit_price", "items.quantity"],
+            filters: { id: cartId },
+          })
+      )
       const cartRecord = (
         carts as unknown as Array<{
           currency_code?: string
@@ -176,29 +233,40 @@ export async function POST(
   }
 
   if (body.subscription_id) {
-    const { data } = await query.graph({
-      entity: "subscription",
-      fields: [
-        "id",
-        "reference",
-        "status",
-        "frequency_interval",
-        "frequency_value",
-        "next_renewal_at",
-        "cancel_effective_at",
-        "customer_id",
-        "payment_context",
-        "metadata",
-      ],
-      filters: { id: body.subscription_id },
-    })
+    const subscriptionId = body.subscription_id
+    const subscriptionNotFound = `Subscription '${subscriptionId}' not found`
+
+    const { data } = await readTenantScoped(
+      logger,
+      "reconcile subscription lookup",
+      { notFound: subscriptionNotFound },
+      () =>
+        query.graph({
+          entity: "subscription",
+          fields: [
+            "id",
+            "reference",
+            "status",
+            "frequency_interval",
+            "frequency_value",
+            "next_renewal_at",
+            "cancel_effective_at",
+            "customer_id",
+            "payment_context",
+            "metadata",
+          ],
+          filters: { id: subscriptionId },
+        })
+    )
 
     const subscription = (data as unknown as SubscriptionRecord[])[0]
 
+    // The read answered; it had no row. Distinct from the wrapped read above,
+    // which answers the same sentence for a read that could not answer.
     if (!subscription) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        `Subscription '${body.subscription_id}' not found`
+        subscriptionNotFound
       )
     }
 
@@ -213,41 +281,53 @@ export async function POST(
   // mismatch is a 404, not an empty list — an empty list is also what a caller
   // with no subscriptions gets, so answering with it would hide "you may not
   // see this customer" behind "this customer has nothing".
-  const { data: customerData } = await query.graph({
-    entity: "customer",
-    fields: ["id", "metadata"],
-    filters: { id: body.customer_id as string },
-  })
+  const customerId = body.customer_id as string
+  const customerNotFound = `Customer '${customerId}' not found`
+
+  const { data: customerData } = await readTenantScoped(
+    logger,
+    "reconcile customer lookup",
+    { notFound: customerNotFound },
+    () =>
+      query.graph({
+        entity: "customer",
+        fields: ["id", "metadata"],
+        filters: { id: customerId },
+      })
+  )
 
   const customer = customerData[0] as
     | { id: string; metadata?: Record<string, unknown> | null }
     | undefined
 
   if (!customer) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_FOUND,
-      `Customer '${body.customer_id}' not found`
-    )
+    throw new MedusaError(MedusaError.Types.NOT_FOUND, customerNotFound)
   }
 
   assertTenantVisible(req, customer.metadata, "customer")
 
-  const { data } = await query.graph({
-    entity: "subscription",
-    fields: [
-      "id",
-      "reference",
-      "status",
-      "frequency_interval",
-      "frequency_value",
-      "next_renewal_at",
-      "cancel_effective_at",
-      "customer_id",
-      "payment_context",
-      "metadata",
-    ],
-    filters: { customer_id: body.customer_id as string },
-  })
+  const { data } = await readTenantScoped(
+    logger,
+    "reconcile customer subscriptions",
+    { notFound: CUSTOMER_NOT_VISIBLE },
+    () =>
+      query.graph({
+        entity: "subscription",
+        fields: [
+          "id",
+          "reference",
+          "status",
+          "frequency_interval",
+          "frequency_value",
+          "next_renewal_at",
+          "cancel_effective_at",
+          "customer_id",
+          "payment_context",
+          "metadata",
+        ],
+        filters: { customer_id: customerId },
+      })
+  )
 
   const subscriptions = (data as unknown as SubscriptionRecord[]) ?? []
 

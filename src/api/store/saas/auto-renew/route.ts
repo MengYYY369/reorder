@@ -1,13 +1,17 @@
-import {
-  ContainerRegistrationKeys,
-  MedusaError,
-} from "@medusajs/framework/utils"
+import { MedusaError } from "@medusajs/framework/utils"
 import { Modules } from "@medusajs/framework/utils"
 import type {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
-import { assertTenantVisible } from "../lib/tenant-ownership"
+import type {
+  ICustomerModuleService,
+} from "@medusajs/framework/types"
+import {
+  readFailureLogger,
+  assertTenantVisible,
+  readTenantScoped,
+} from "../lib/tenant-ownership"
 import {
   AUTO_RENEW_CUSTOMER_REFUSALS,
   setSubscriptionAutoRenewWorkflow,
@@ -16,23 +20,17 @@ import {
   classifyStepFailure,
   logUnquotedStepFailure,
   type StepFailureCopy,
-  type StepFailureLogger,
 } from "../../../../workflows/utils/store-step-failure"
 import type { SubscriptionPaymentMode } from "../../../../modules/subscription/types"
 import { SUBSCRIPTION_MODULE } from "../../../../modules/subscription"
 import type SubscriptionModuleService from "../../../../modules/subscription/service"
 
-type CustomerModule = {
-  retrieveCustomer: (
-    id: string,
-    config?: Record<string, unknown>
-  ) => Promise<{ metadata?: Record<string, unknown> | null }>
-}
+// Both readers are derived from the real services rather than restated here: a
+// resolved-by-string module gives the compiler nothing to check against, so a
+// restated signature turns a rename upstream into a runtime `TypeError` instead
+// of a build failure (`.agents/lessons.md`).
+type CustomerModule = Pick<ICustomerModuleService, "retrieveCustomer">
 
-// Named on the service rather than restated here: a resolved-by-string module
-// gives the compiler nothing to check against, so a restated signature turns a
-// rename into a runtime `TypeError` instead of a build failure
-// (`.agents/lessons.md`).
 type SubscriptionModule = Pick<SubscriptionModuleService, "listSubscriptions">
 
 /**
@@ -68,6 +66,12 @@ const AUTO_RENEW_FAILURE_COPY: StepFailureCopy = {
  *
  * TENANT ISOLATION: subscription → customer → metadata.tenant_id must match the
  * calling tenant, else 404 (existence is not leaked).
+ *
+ * READ BOUNDARY: both scoping reads are `readTenantScoped` calls, so a read that
+ * fails answers the same 404 `subscription not found` a read that finds nothing
+ * does, and the cause only reaches the log — a driver message naming a table or
+ * column cannot be quoted here. See
+ * `src/modules/subscription/utils/store-read-failure.ts`.
  */
 export async function POST(
   req: MedusaRequest,
@@ -97,20 +101,34 @@ export async function POST(
   const subscriptionModule = req.scope.resolve<SubscriptionModule>(
     SUBSCRIPTION_MODULE
   )
+  const logger = readFailureLogger(req)
 
-  const subscriptions = await subscriptionModule.listSubscriptions({
-    id: [subscription_id],
-  })
+  const subscriptions = await readTenantScoped(
+    logger,
+    "auto-renew subscription lookup",
+    AUTO_RENEW_FAILURE_COPY,
+    () =>
+      subscriptionModule.listSubscriptions({
+        id: [subscription_id],
+      })
+  )
   const subscription = subscriptions[0] ?? null
 
+  // A read that *answered* with no row is the honest 404 this route has always
+  // given; the wrapper above only covers a read that failed to answer.
   if (!subscription) {
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
-      "subscription not found"
+      AUTO_RENEW_FAILURE_COPY.notFound
     )
   }
 
-  const customer = await customerModule.retrieveCustomer(subscription.customer_id)
+  const customer = await readTenantScoped(
+    logger,
+    "auto-renew tenant check",
+    AUTO_RENEW_FAILURE_COPY,
+    () => customerModule.retrieveCustomer(subscription.customer_id)
+  )
 
   assertTenantVisible(req, customer?.metadata, "subscription")
 
@@ -139,7 +157,7 @@ export async function POST(
       // in front of a customer reading it as a permanent refusal — so the cause
       // is logged and the response carries only our own wording.
       logUnquotedStepFailure(
-        req.scope.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
+        logger,
         "auto-renew toggle",
         failure
       )
