@@ -4,6 +4,7 @@ import {
   transform,
   WorkflowResponse,
 } from "@medusajs/framework/workflows-sdk"
+import { acquireLockStep, releaseLockStep } from "@medusajs/medusa/core-flows"
 import {
   ASSERT_AUTO_RENEW_NOT_NATIVE_STEP_NAME,
   ASSERT_AUTO_RENEW_NOT_OVERDUE_STEP_NAME,
@@ -69,10 +70,22 @@ export const AUTO_RENEW_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
  * (`src/api/store/saas/lib/tenant-ownership.ts`); everything that decides
  * whether the mode may change and what gets written lives here:
  *
+ *  0. `acquire-lock-step` on `auto-renew:<subscription_id>` — taken before the
+ *     first guard so the whole run is covered, and released by
+ *     `release-lock-step` at the end. `acquireLockStep` registers its own
+ *     compensation, so a run that fails between the two releases the lock too;
+ *     nothing here restates it, exactly as in `create-manual-renewal`.
  *  1. `assert-subscription-auto-renew-not-native` — the write-side mirror guard
  *  2. `assert-subscription-auto-renew-not-overdue` — the surprise-charge guard
  *  3. `update-subscription-payment-mode` — the only state-changing write, which
  *     compensates by restoring the previous `payment_context`
+ *
+ * The key names this workflow's own family: it serializes a toggle against
+ * another toggle of the same subscription, which is what makes the overdue
+ * verdict of step 2 and the re-read of step 3 describe one run instead of two
+ * interleaved ones. It does not serialize against the renewal scheduler, which
+ * locks under `renewal:<renewal_cycle_id>` (`docs/architecture/renewals.md`), so
+ * a cycle already in flight is not held off by this lock.
  *
  * A stale stored method reference is not checked here: it surfaces as
  * `renewal.failed` + PAST_DUE on the scheduler side, the documented behavior of
@@ -81,6 +94,14 @@ export const AUTO_RENEW_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
 export const setSubscriptionAutoRenewWorkflow = createWorkflow(
   "set-subscription-auto-renew",
   function (input: SetSubscriptionAutoRenewWorkflowInput) {
+    const lockInput = transform({ input }, ({ input }) => ({
+      key: `auto-renew:${input.subscription_id}`,
+      timeout: 30,
+      ttl: 120,
+    }))
+
+    acquireLockStep(lockInput)
+
     const subscription = assertAutoRenewNotNativeStep({
       subscription_id: input.subscription_id,
     })
@@ -111,6 +132,12 @@ export const setSubscriptionAutoRenewWorkflow = createWorkflow(
     )
 
     const updated = updateSubscriptionPaymentModeStep(writeInput)
+
+    releaseLockStep(
+      transform({ updated }, ({ updated }) => ({
+        key: `auto-renew:${updated.subscription_id}`,
+      }))
+    )
 
     return new WorkflowResponse<SetSubscriptionAutoRenewWorkflowResult>({
       subscription_id: updated.subscription_id,

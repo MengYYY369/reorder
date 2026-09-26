@@ -75,6 +75,36 @@ async function bridgeRequestHeaders(
   }
 }
 
+/**
+ * The members `acquireLockStep` / `releaseLockStep` call on the locking module
+ * (`@medusajs/core-flows/dist/locking/steps/acquire-lock.js`), and nothing else:
+ * the steps go through `acquire`/`release`, never through `execute`, which is
+ * what the locking-interception form in `analytics-workflows.spec.ts` wraps.
+ */
+type LockingServiceLike = {
+  acquire(
+    keys: string | string[],
+    args?: { ownerId?: string; expire?: number; provider?: string }
+  ): Promise<void>
+  release(
+    keys: string | string[],
+    args?: { ownerId?: string; provider?: string }
+  ): Promise<boolean>
+}
+
+/** The lock family this endpoint owns; a second prefix would not serialize it. */
+const AUTO_RENEW_LOCK_PREFIX = "auto-renew:"
+
+function lockKeys(keys: string | string[]): string[] {
+  return Array.isArray(keys) ? keys : [keys]
+}
+
+function autoRenewKeys(calls: [string | string[]][]): string[] {
+  return calls
+    .flatMap(([keys]) => lockKeys(keys))
+    .filter((key) => key.startsWith(AUTO_RENEW_LOCK_PREFIX))
+}
+
 medusaIntegrationTestRunner({
   medusaConfigFile: path.resolve(process.cwd(), "integration-tests"),
   env: {
@@ -363,6 +393,98 @@ medusaIntegrationTestRunner({
         })
 
         updateSpy.mockRestore()
+      })
+
+      it("takes the subscription lock once and releases it, on a run that refuses too", async () => {
+        const container = getContainer()
+        const headers = await bridgeRequestHeaders(container)
+        const customer = await createCustomer(container)
+        const stamp = Date.now()
+
+        // Spied on the resolved module service rather than by replacing the
+        // container's `resolve`: the steps call `acquire`/`release`, and this is
+        // the same seam the toggle's write is asserted through below (a route run
+        // reaches the workflow the instance this container already holds).
+        const locking = container.resolve<LockingServiceLike>(Modules.LOCKING)
+
+        const seeded = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          reference: `SUB-LOCK-${stamp}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          payment_context: {
+            payment_provider_id: "pp_system_default",
+            payment_mode: "manual",
+            payment_method_reference: "pm_lock",
+          },
+        })
+
+        const subscriptionId = Array.isArray(seeded)
+          ? seeded[0].id
+          : seeded.id
+
+        const mirror = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          reference: `NATIVE-LOCK-${stamp}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "manual",
+            mechanism: "native",
+          },
+        })
+
+        const mirrorId = Array.isArray(mirror) ? mirror[0].id : mirror.id
+
+        const acquireSpy = jest.spyOn(locking, "acquire")
+        const releaseSpy = jest.spyOn(locking, "release")
+
+        const response = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: subscriptionId, enabled: true },
+          { headers }
+        )
+
+        expect(response.status).toEqual(200)
+
+        // The count is the assertion: the toggle decides "overdue" from the
+        // guard's snapshot and re-reads at the write, so one run must hold one
+        // lock over both. A second acquire of the same key is the duplicate the
+        // siblings do not have.
+        expect(autoRenewKeys(acquireSpy.mock.calls)).toEqual([
+          `auto-renew:${subscriptionId}`,
+        ])
+        expect(autoRenewKeys(releaseSpy.mock.calls)).toEqual([
+          `auto-renew:${subscriptionId}`,
+        ])
+        // The sibling's lock settings, not a third set: `ttl` is what a run that
+        // dies without compensating leaves the key held for.
+        expect(acquireSpy.mock.calls[0][1]).toMatchObject({ expire: 120 })
+
+        acquireSpy.mockClear()
+        releaseSpy.mockClear()
+
+        // A refusal is the other half: the guard answers after the lock is
+        // taken, so a leaked lock would turn the next legitimate toggle into a
+        // 30-second wait. `acquireLockStep` registers its own compensation, and
+        // this is the only gate that reaches it.
+        const refused = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: mirrorId, enabled: true },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(refused.status).toEqual(400)
+        expect(autoRenewKeys(acquireSpy.mock.calls)).toEqual([
+          `auto-renew:${mirrorId}`,
+        ])
+        expect(autoRenewKeys(releaseSpy.mock.calls)).toEqual([
+          `auto-renew:${mirrorId}`,
+        ])
+
+        acquireSpy.mockRestore()
+        releaseSpy.mockRestore()
       })
 
       it("refuses an overdue row before writing anything", async () => {

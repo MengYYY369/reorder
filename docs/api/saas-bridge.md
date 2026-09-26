@@ -219,6 +219,14 @@ failure of the write step answers the route's own fixed text — 404 if it is a
 `not_found` (the row vanished after this handler validated it), 409 for a
 `conflict`, 500 for a driver or connection fault. See *Failure disclosure*.
 
+The endpoint is serialized against itself — `set-subscription-auto-renew` holds
+the workflow lock `auto-renew:<subscription_id>` for the whole run, so two
+concurrent calls for one subscription cannot interleave the overdue check and the
+write, and a run that refuses releases the lock before it answers — while the
+renewal scheduler, which locks `renewal:<renewal_cycle_id>`, is not serialized
+against it: that race is the open item in §C of
+`.agents/specs/2026-09-25-post-acceptance-backlog.md`, and nothing here closes it.
+
 ### `POST /store/saas/carts`
 
 `{ customer_id, currency_code, variant_id, frequency_interval?, frequency_value? }`

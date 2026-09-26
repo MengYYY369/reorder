@@ -182,6 +182,14 @@ A mirror row is **never** charged, extended or dunned by reorder:
 | `POST /store/saas/auto-renew` | refused by the `assert-subscription-auto-renew-not-native` step of `set-subscription-auto-renew`, before the write step runs |
 | payment method update | rejected, for the same reason |
 
+The toggle's own run is serialized: `set-subscription-auto-renew` acquires the
+workflow lock `auto-renew:<subscription_id>` before that guard and releases it
+when the run ends, so two concurrent `POST /store/saas/auto-renew` calls for one
+subscription cannot interleave the guard's snapshot and the write's re-read —
+while the renewal scheduler, which locks `renewal:<renewal_cycle_id>`, is not
+serialized against them, and that race stays open (§C of
+`.agents/specs/2026-09-25-post-acceptance-backlog.md`).
+
 Recognition is `reference LIKE 'NATIVE-%'`, defined once in
 `src/modules/subscription/utils/native-subscription.ts`. It is deliberately not
 `payment_context->>'mechanism'`: that column is JSON, rows predating the field
