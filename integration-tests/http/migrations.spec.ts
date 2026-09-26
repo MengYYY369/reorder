@@ -756,6 +756,54 @@ async function openDriftWindow(wrapper: ProbeWrapper): Promise<void> {
 }
 
 /**
+ * Opens the drift window, runs `use` over it, and hands the probe back fully
+ * migrated afterwards.
+ *
+ * Task 7 recorded why the restore cannot simply sit at the end of a case body:
+ * `openDriftWindow` drops the index AND deletes the migration's row, so a case
+ * that throws between the two leaves the shared probe in the drifted state for
+ * every later reader of it. The restore is `restoreAppliedMigration` rather than
+ * `rerunNormalize` because `use` usually re-applies the migration itself — with
+ * `up()` already done the latter would throw "not pending", and a helper whose
+ * teardown reports success as a failure is not a teardown. The recorded-name
+ * guard inside it is what makes an unrestored window loud.
+ */
+async function withDriftWindow(
+  dbName: string,
+  wrapper: ProbeWrapper,
+  use: () => Promise<void>
+): Promise<void> {
+  await openDriftWindow(wrapper)
+
+  let failure: Failure | undefined
+
+  try {
+    await use()
+  } catch (error) {
+    failure = { error }
+    throw error
+  } finally {
+    const notes = await runTeardown([
+      {
+        label: `close drift window in ${dbName}`,
+        run: async () => {
+          await restoreAppliedMigration(
+            dbName,
+            migrationDirOf("renewal"),
+            NORMALIZE_MIGRATION,
+            wrapper
+          )
+        },
+      },
+    ])
+
+    if (notes.length > 0) {
+      throw combineFailure(failure, notes.join("; "))
+    }
+  }
+}
+
+/**
  * Re-applies `Migration20260924120000` to `dbName` and proves it ran.
  *
  * The migrator is bound to the renewal directory through `withMigratorFor`,
@@ -1354,6 +1402,101 @@ medusaIntegrationTestRunner({
         expect(await appliedMigrationNames(probeWrapper)).toEqual(
           expectedMigrationNames()
         )
+      })
+
+      /**
+       * Task 17's harness half: which of the two shapes the step's `retire` set
+       * can arise from is reachable in a migrated database, and which only in a
+       * drifted one.
+       *
+       * The set is "live `scheduled` rows other than the one the resolution chose",
+       * so a run can carry one only when the subscription owns two live `scheduled`
+       * rows, or when the row on the entitlement date is terminal and a `scheduled`
+       * row sits beside it. The second is index-legal — the partial unique index
+       * only covers `status = 'scheduled'` — and the http suite pins what the step
+       * does with it. The first is what `Migration20260924120000.up()` normalizes
+       * away, and this case is the proof that it does: the pair below is insertable
+       * only with the index down, the re-apply leaves exactly one live `scheduled`
+       * row behind, and the terminal neighbour keeps its place on the entitlement
+       * date because the ranked CTE never sees a terminal row at all.
+       */
+      it("leaves one live scheduled row per subscription for the step to retire", async () => {
+        await withDriftWindow(PROBE_DB_NAME, probeWrapper, async () => {
+          await seedSubscription(probeWrapper, "sub_t17", "2026-11-24T00:00:00Z")
+          // Terminal and sitting ON the entitlement date. The normalization's CTE
+          // filters `rc."status" = 'scheduled'`, so this row is not even a candidate:
+          // nothing the migration does can tombstone or move it, which is exactly
+          // why the step's `match` can find a live neighbour behind it.
+          await seedCycle(probeWrapper, { id: "cyc_t17_terminal", subscriptionId: "sub_t17", scheduledFor: "2026-11-24T00:00:00Z", status: "succeeded" })
+          // Two live `scheduled` rows, neither on the entitlement date: the shape
+          // the retire consumes and the constraint forbids. With no entitlement hit
+          // in the partition the fallback comparator decides who stays.
+          await seedCycle(probeWrapper, { id: "cyc_t17_live", subscriptionId: "sub_t17", scheduledFor: "2026-09-24T00:00:00Z" })
+          await seedCycle(probeWrapper, { id: "cyc_t17_dupe", subscriptionId: "sub_t17", scheduledFor: "2026-08-24T00:00:00Z" })
+
+          expect(await liveScheduled(probeWrapper, "sub_t17")).toEqual([
+            "cyc_t17_dupe",
+            "cyc_t17_live",
+          ])
+
+          await rerunNormalize(PROBE_DB_NAME, probeWrapper)
+        })
+
+        // The window closed on the way out, so the constraint stands again and the
+        // state below is the one a migrated host actually holds.
+        expect(await upcomingCycleIndexRows(probeWrapper)).toHaveLength(1)
+
+        expect(await liveScheduled(probeWrapper, "sub_t17")).toEqual([
+          "cyc_t17_live",
+        ])
+        expect(
+          await probeQuery(
+            probeWrapper,
+            `select id, status, last_error, deleted_at is not null as tombstoned
+               from renewal_cycle where subscription_id = 'sub_t17' order by id`
+          )
+        ).toEqual([
+          {
+            id: "cyc_t17_dupe",
+            status: "scheduled",
+            last_error: NORMALIZED_NOTE,
+            tombstoned: true,
+          },
+          {
+            id: "cyc_t17_live",
+            status: "scheduled",
+            last_error: null,
+            tombstoned: false,
+          },
+          {
+            id: "cyc_t17_terminal",
+            status: "succeeded",
+            last_error: null,
+            tombstoned: false,
+          },
+        ])
+
+        // The negative half, and the reason the http defer / adopt cases need a
+        // window of their own: with the constraint up, a second live `scheduled`
+        // row for this subscription is uninsertable, so the two-live-rows shape
+        // exists only where the index was dropped — and only for as long as the
+        // migration stays un-applied, since its `up()` is what clears it.
+        const secondLive = await seedCycle(probeWrapper, {
+          id: "cyc_t17_again",
+          subscriptionId: "sub_t17",
+          scheduledFor: "2027-01-24T00:00:00Z",
+        }).then(
+          () => null,
+          (error: Error) => error
+        )
+
+        expect(secondLive).toBeInstanceOf(Error)
+        expect(String(secondLive?.message)).toMatch(
+          /renewal_cycle_one_scheduled_per_subscription|duplicate key value/i
+        )
+        expect(await liveScheduled(probeWrapper, "sub_t17")).toEqual([
+          "cyc_t17_live",
+        ])
       })
     })
 

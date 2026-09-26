@@ -324,6 +324,174 @@ async function captureWarnings<TRunResult>(
   }
 }
 
+/**
+ * The partial unique index `Migration20260924120000` installs: at most one live
+ * `SCHEDULED` cycle per subscription. Every case below that needs the shape the
+ * retire exists for — a free stale row beside the row the step chooses — has to
+ * put it on the table with this index down, because two live `SCHEDULED` rows
+ * are exactly what the constraint rejects.
+ */
+const UPCOMING_CYCLE_INDEX = "renewal_cycle_one_scheduled_per_subscription"
+
+/** The index, re-created with the statement the migration itself ends on. */
+const UPCOMING_CYCLE_INDEX_SQL =
+  `create unique index "${UPCOMING_CYCLE_INDEX}" on "renewal_cycle" ("subscription_id")` +
+  ` where "status" = 'scheduled' and "deleted_at" is null`
+
+/**
+ * The phrase only the retire's own warnings carry. The `defer` branch's warning
+ * names the same protected row the retirement names as `madeRoomFor`, so an id
+ * filter cannot tell the two lines apart and this one can.
+ */
+const RETIRE_WARNING_MARKER = "stale upcoming renewal cycle"
+
+/**
+ * The app's own database handle. Medusa registers the suite connection as a knex
+ * instance, whose `raw()` resolves an envelope carrying `rows` rather than the
+ * bare array the migration harness's MikroORM manager returns.
+ */
+type PgConnectionHandle = {
+  raw(sql: string): Promise<unknown>
+}
+
+/** How an unknown rejection reads when it has to be reported inside another error. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+}
+
+/** The knex half of the two-driver pair: the envelope around a select. */
+function rowsFromRaw(result: unknown): Array<Record<string, unknown>> {
+  const rows = (result as { rows?: unknown }).rows
+
+  if (!Array.isArray(rows)) {
+    throw new TypeError(
+      "knex raw() did not resolve to an object carrying a rows array"
+    )
+  }
+
+  return rows.filter(
+    (row): row is Record<string, unknown> =>
+      typeof row === "object" && row !== null
+  )
+}
+
+/**
+ * How many rows `pg_indexes` carries for the one-live-cycle index: one while it
+ * stands, none while a window has it down. Read after every window below so a
+ * case that seeded outside the constraint cannot pass on a suite database left
+ * in the drifted shape.
+ */
+async function upcomingCycleIndexRowCount(
+  container: MedusaContainer
+): Promise<number> {
+  const raw = await container
+    .resolve<PgConnectionHandle>(ContainerRegistrationKeys.PG_CONNECTION)
+    .raw(
+      `select indexname from pg_indexes where indexname = '${UPCOMING_CYCLE_INDEX}'`
+    )
+
+  return rowsFromRaw(raw).length
+}
+
+/**
+ * Runs `use` with the one-live-cycle index down, then puts it back.
+ *
+ * The window is the only place the retire's own shape can be put on the table:
+ * the constraint is what stops a second chargeable `SCHEDULED` row from being
+ * written, and the rows the selector names are that second row. The re-create is
+ * NOT hygiene, it is half of the assertion — `use` has already run the workflow,
+ * so a stale row the step failed to retire is still live at this statement and
+ * the index comes back as `could not create unique index ... is duplicated`. A
+ * case that retired nothing therefore cannot pass by forgetting to restore, and
+ * it cannot be repaired by dropping the restore either. When the body already
+ * failed, its error is the one reported and the restore problem is appended to
+ * it rather than replacing it.
+ */
+async function withUpcomingCycleIndexDropped(
+  container: MedusaContainer,
+  use: () => Promise<void>
+): Promise<void> {
+  const connection = container.resolve<PgConnectionHandle>(
+    ContainerRegistrationKeys.PG_CONNECTION
+  )
+
+  await connection.raw(`drop index if exists "${UPCOMING_CYCLE_INDEX}"`)
+
+  let bodyFailure: { error: unknown } | undefined
+
+  try {
+    await use()
+  } catch (error) {
+    bodyFailure = { error }
+    throw error
+  } finally {
+    try {
+      await connection.raw(UPCOMING_CYCLE_INDEX_SQL)
+    } catch (restoreError) {
+      const note =
+        `re-creating "${UPCOMING_CYCLE_INDEX}" after the window failed, which means a ` +
+        `second live SCHEDULED cycle is still on the table: ${describeError(
+          restoreError
+        )}`
+
+      if (bodyFailure === undefined) {
+        throw new Error(note)
+      }
+
+      if (bodyFailure.error instanceof Error) {
+        bodyFailure.error.message = `${bodyFailure.error.message} [teardown: ${note}]`
+        throw bodyFailure.error
+      }
+
+      throw new Error(`${describeError(bodyFailure.error)} [teardown: ${note}]`)
+    }
+  }
+}
+
+/**
+ * The lines a run wrote about the retire set: the retirement itself, the
+ * withheld report, and the rollback that undid one.
+ */
+function retireWarningsOf(warnings: string[]): string[] {
+  return warnings.filter((message) => message.includes(RETIRE_WARNING_MARKER))
+}
+
+/** The lines naming one row that are NOT about the retire set. */
+function warningsAboutRow(warnings: string[], rowId: string): string[] {
+  return warnings.filter(
+    (message) =>
+      message.includes(rowId) && !message.includes(RETIRE_WARNING_MARKER)
+  )
+}
+
+/** One captured cycle row by id, or a failure naming the row that is missing. */
+function cycleRowById<T extends { id: string }>(rows: T[], id: string): T {
+  const row = rows.find((candidate) => candidate.id === id)
+
+  if (row === undefined) {
+    throw new Error(`no renewal_cycle row came back for '${id}'`)
+  }
+
+  return row
+}
+
+/**
+ * A persisted date as a comparable number. Throws on a missing column rather
+ * than reading through `null`, because `new Date(null)` is the epoch: a write
+ * that never landed would then fail as a wrong date instead of as the absent
+ * value it is.
+ */
+function timeOf(
+  value: Date | string | null | undefined,
+  what: string
+): number {
+  if (value == null) {
+    throw new Error(`${what} came back null or missing`)
+  }
+
+  return new Date(value).getTime()
+}
+
 type RowOwnedByOtherWriters = {
   subscription_id: string
   customer_id: string
@@ -848,6 +1016,521 @@ medusaIntegrationTestRunner({
         expect(new Date(persisted.next_renewal_at!).getTime()).toEqual(
           entitlementAt.getTime()
         )
+      })
+
+      it("adopts the one open row and retires nothing when the entitlement date moved", async () => {
+        const container = getContainer()
+
+        const entitlementAt = new Date("2026-11-24T10:00:00.000Z")
+        // The row sits on the date the purchase moved AWAY from. The selector
+        // checks for an exact-date hit before it considers anything else, so a
+        // seed on `entitlementAt` would resolve `match` and the `adopt` branch
+        // under test would never run.
+        const driftedAt = new Date("2026-10-24T10:00:00.000Z")
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: `SUB-ADOPT-NO-RETIRE-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: entitlementAt,
+        })
+
+        const open = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          scheduled_for: driftedAt,
+        })
+
+        // No index window anywhere in this case: one live `SCHEDULED` row is the
+        // shape the constraint exists to keep, which is what makes this the
+        // negative half of the retire. The row the run chose is the only row the
+        // subscription has, so a retire that fired on `existingCycles` instead of
+        // on the selector's set would soft-delete the renewal itself and redden
+        // every expectation below.
+        const rowsBefore = await captureRenewalCycleRows(
+          container,
+          subscription.id
+        )
+
+        const {
+          value: { result },
+          warnings,
+        } = await captureWarnings(container, () =>
+          ensureNextRenewalCycleWorkflow(container).run({
+            input: { subscription_id: subscription.id },
+          })
+        )
+
+        expect(result).toMatchObject({
+          action: "adopted",
+          subscription_id: subscription.id,
+          renewal_cycle_id: open.id,
+        })
+
+        const rowsAfter = await captureRenewalCycleRows(
+          container,
+          subscription.id
+        )
+
+        // One row before, one row after, the same id, none of them deleted:
+        // `adopt` is a reschedule, and a delete-and-recreate satisfies the date
+        // below while breaking this.
+        expect(rowsAfter.map((row) => row.id)).toEqual(
+          rowsBefore.map((row) => row.id)
+        )
+        expect(rowsAfter.map((row) => row.deleted)).toEqual([false])
+        expect(cycleRowById(rowsAfter, open.id).scheduled_for).toEqual(
+          entitlementAt.getTime()
+        )
+
+        // And the run says so: an empty retire set writes nothing and therefore
+        // claims nothing, neither retired nor withheld.
+        expect(retireWarningsOf(warnings)).toEqual([])
+        expect(warnings).toEqual([])
+      })
+
+      /**
+       * The third shape the step's `retire` can carry, and the only one a host
+       * reaches WITHOUT anybody dropping an index: the partial unique constraint
+       * covers live `scheduled` rows only, so a `SUCCEEDED` row sitting exactly on
+       * the entitlement date with one free `scheduled` neighbour behind it is a
+       * state a migrated database holds legally — which is precisely what the
+       * normalization in `migrations.spec.ts` leaves behind (its CTE filters
+       * `status = 'scheduled'`, so it never touches a terminal row) and what
+       * `resolveUpcomingCycle`'s pinned contract refuses to adopt.
+       *
+       * The other two retire cases had to drop the index to seed at all; this one
+       * asserts the index is up before it seeds, so the whole case doubles as
+       * proof that the shape is reachable in production without any drift.
+       */
+      it("retires the stale neighbour behind the terminal row that owns the entitlement date", async () => {
+        const container = getContainer()
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+
+        const entitlementAt = new Date("2026-11-24T10:00:00.000Z")
+        const staleAt = new Date("2026-09-24T10:00:00.000Z")
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: `SUB-RETIRE-MATCH-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: entitlementAt,
+        })
+
+        // Asserted rather than assumed: with the constraint down this case would
+        // prove nothing about the shape being reachable, and a leaked window from
+        // an earlier case would be exactly that failure.
+        expect(await upcomingCycleIndexRowCount(container)).toBe(1)
+
+        const settledOrderId = `order_settled_${Date.now()}`
+
+        const settled = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          scheduled_for: entitlementAt,
+          processed_at: entitlementAt,
+          status: RenewalCycleStatus.SUCCEEDED,
+          generated_order_id: settledOrderId,
+        })
+
+        const stale = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          scheduled_for: staleAt,
+        })
+
+        // The before/after pair around the scheduler's own read, so the absence
+        // below cannot be satisfied by the row never having been visible: the
+        // exclusion list (manual mode, native mirrors) does not apply to this
+        // subscription, and `staleAt` is in the past, so a live row here IS one the
+        // scheduler would charge on the next tick.
+        const dueBefore = await listDueRenewalCyclesForProcessing(container, {
+          limit: 500,
+          offset: 0,
+        })
+
+        expect(dueBefore.cycles.map((cycle) => cycle.id)).toContain(stale.id)
+
+        const {
+          value: { result },
+          warnings,
+        } = await captureWarnings(container, () =>
+          ensureNextRenewalCycleWorkflow(container).run({
+            input: { subscription_id: subscription.id },
+          })
+        )
+
+        // `retired`, not `noop`: a row went, and a run that cleared a chargeable
+        // cycle while reporting nothing-happened would make the field signal the
+        // whole feature exists for say the opposite of what it did.
+        expect(result).toMatchObject({
+          action: "retired",
+          subscription_id: subscription.id,
+          renewal_cycle_id: settled.id,
+        })
+
+        const rowsAfter = await captureRenewalCycleRows(
+          container,
+          subscription.id
+        )
+
+        // The terminal row is not a candidate for anything: the settled period
+        // keeps its date, its order and its row.
+        expect(cycleRowById(rowsAfter, settled.id)).toMatchObject({
+          status: RenewalCycleStatus.SUCCEEDED,
+          generated_order_id: settledOrderId,
+          deleted: false,
+        })
+        expect(cycleRowById(rowsAfter, settled.id).scheduled_for).toEqual(
+          entitlementAt.getTime()
+        )
+
+        // Soft, not hard — and nothing else moved: both rows are still on the
+        // table, only one of them is no longer chargeable.
+        expect(cycleRowById(rowsAfter, stale.id).deleted).toBe(true)
+        expect(cycleRowById(rowsAfter, stale.id).scheduled_for).toEqual(
+          staleAt.getTime()
+        )
+        expect(rowsAfter.map((row) => row.id).sort()).toEqual(
+          [settled.id, stale.id].sort()
+        )
+
+        expect(
+          await renewalModule.listRenewalCycles({
+            subscription_id: subscription.id,
+          })
+        ).toHaveLength(1)
+
+        const dueAfter = await listDueRenewalCyclesForProcessing(container, {
+          limit: 500,
+          offset: 0,
+        })
+
+        expect(dueAfter.cycles.map((cycle) => cycle.id)).not.toContain(stale.id)
+
+        expect(retireWarningsOf(warnings)).toEqual([
+          "[reorder] retired 1 stale upcoming renewal cycle(s) of subscription " +
+            `'${subscription.id}' (${stale.id}) behind '${settled.id}'`,
+        ])
+        // The settled row is the one the retirement names as made room for, so an
+        // id filter alone would read the retirement as a second untouched-row
+        // warning; the pin above and the text marker are what keep the two apart.
+        expect(warningsAboutRow(warnings, settled.id)).toEqual([])
+      })
+
+      it("defers the in-flight row and retires the unrelated stale neighbour", async () => {
+        const container = getContainer()
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+
+        const entitlementAt = new Date("2026-11-24T10:00:00.000Z")
+        // The in-flight row is NOT on the entitlement date: `defer` is only
+        // reached when `findUpcomingRenewalCycle` misses, and a seed at
+        // `entitlementAt` resolves `match` instead — the case would then prove
+        // the deferral branch never entered. It is also the LATER of the two
+        // rows, because `preferLaterCycle` picks the candidate: a free row in
+        // front of it would be adopted, and the deferral would name the wrong
+        // row as protected.
+        const inFlightAt = new Date("2026-12-24T10:00:00.000Z")
+        const staleAt = new Date("2026-09-24T10:00:00.000Z")
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: `SUB-RETIRE-DEFER-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: entitlementAt,
+        })
+
+        const outstandingOrderId = `order_outstanding_${Date.now()}`
+
+        await withUpcomingCycleIndexDropped(container, async () => {
+          const stale = await createRenewalCycleSeed(container, {
+            subscription_id: subscription.id,
+            scheduled_for: staleAt,
+          })
+
+          const inFlight = await createRenewalCycleSeed(container, {
+            subscription_id: subscription.id,
+            scheduled_for: inFlightAt,
+            generated_order_id: outstandingOrderId,
+          })
+
+          const rowsBefore = await captureRenewalCycleRows(
+            container,
+            subscription.id
+          )
+
+          // Both rows really are live and chargeable before the run:
+          // `listDueRenewalCyclesForProcessing` selects `scheduled` with
+          // `deleted_at` null, so two of them is one customer charged twice.
+          expect(
+            rowsBefore
+              .filter((row) => !row.deleted)
+              .map((row) => row.id)
+              .sort()
+          ).toEqual([inFlight.id, stale.id].sort())
+
+          const {
+            value: { result },
+            warnings,
+          } = await captureWarnings(container, () =>
+            ensureNextRenewalCycleWorkflow(container).run({
+              input: { subscription_id: subscription.id },
+            })
+          )
+
+          expect(result).toMatchObject({
+            action: "deferred",
+            subscription_id: subscription.id,
+            renewal_cycle_id: inFlight.id,
+          })
+
+          const rowsAfter = await captureRenewalCycleRows(
+            container,
+            subscription.id
+          )
+
+          // The protected row: same id, still live, still on its own date, still
+          // carrying the order in flight. Refusing to move it is the promise the
+          // branch makes, and the retirement beside it must not break it.
+          const survivor = cycleRowById(rowsAfter, inFlight.id)
+          expect(survivor).toMatchObject({
+            status: RenewalCycleStatus.SCHEDULED,
+            generated_order_id: outstandingOrderId,
+            deleted: false,
+          })
+          expect(survivor.scheduled_for).toEqual(inFlightAt.getTime())
+
+          // The neighbour: retired, so it keeps its row and its children and the
+          // scheduler stops seeing it. A hard delete would leave this case green
+          // on the live set and break the history the soft delete exists for.
+          const retiredRow = cycleRowById(rowsAfter, stale.id)
+          expect(retiredRow.deleted).toBe(true)
+          expect(retiredRow.scheduled_for).toEqual(staleAt.getTime())
+          expect(rowsAfter.map((row) => row.id).sort()).toEqual(
+            [inFlight.id, stale.id].sort()
+          )
+
+          const liveScheduledAfter = rowsAfter.filter(
+            (row) =>
+              !row.deleted && row.status === RenewalCycleStatus.SCHEDULED
+          )
+          expect(liveScheduledAfter.map((row) => row.id)).toEqual([inFlight.id])
+          expect(
+            await renewalModule.listRenewalCycles({
+              subscription_id: subscription.id,
+            })
+          ).toHaveLength(1)
+
+          // The two lines that name the protected row, told apart by `stale`:
+          // the deferral warning this run is expected to write, and exactly one
+          // retirement. Nothing was withheld, so the retire set went whole.
+          const deferralWarnings = warningsAboutRow(warnings, inFlight.id)
+          expect(deferralWarnings).toHaveLength(1)
+          expect(deferralWarnings[0]).toContain(outstandingOrderId)
+          expect(deferralWarnings[0]).toContain(subscription.id)
+          expect(deferralWarnings[0]).toContain(entitlementAt.toISOString())
+
+          expect(retireWarningsOf(warnings)).toEqual([
+            "[reorder] retired 1 stale upcoming renewal cycle(s) of subscription " +
+              `'${subscription.id}' (${stale.id}) behind '${inFlight.id}'`,
+          ])
+
+          // The subscription keeps the date the deferral refused to chase.
+          const [persisted] = await subscriptionModule.listSubscriptions({
+            id: subscription.id,
+          })
+          expect(timeOf(persisted.next_renewal_at, "next_renewal_at")).toEqual(
+            entitlementAt.getTime()
+          )
+        })
+
+        // Restored, and asserted rather than assumed: the window above already
+        // could not close over a second live row, and a case that never tried to
+        // reopen it would leave the suite database one index short for every
+        // later case in this file.
+        expect(await upcomingCycleIndexRowCount(container)).toBe(1)
+      })
+
+      it("retires the stale neighbour the adopted row made room for", async () => {
+        const container = getContainer()
+
+        const entitlementAt = new Date("2026-11-24T10:00:00.000Z")
+        // The candidate is the latest open row and carries no order, so the
+        // resolution is `adopt`; the older one is the neighbour the selector
+        // names and this run has to clear. Neither sits on the entitlement date,
+        // which is what keeps the resolution away from `match`.
+        const candidateAt = new Date("2026-12-24T10:00:00.000Z")
+        const staleAt = new Date("2026-09-24T10:00:00.000Z")
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: `SUB-RETIRE-ADOPT-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: entitlementAt,
+        })
+
+        await withUpcomingCycleIndexDropped(container, async () => {
+          const stale = await createRenewalCycleSeed(container, {
+            subscription_id: subscription.id,
+            scheduled_for: staleAt,
+          })
+
+          const adopted = await createRenewalCycleSeed(container, {
+            subscription_id: subscription.id,
+            scheduled_for: candidateAt,
+          })
+
+          const {
+            value: { result },
+            warnings,
+          } = await captureWarnings(container, () =>
+            ensureNextRenewalCycleWorkflow(container).run({
+              input: { subscription_id: subscription.id },
+            })
+          )
+
+          expect(result).toMatchObject({
+            action: "adopted",
+            subscription_id: subscription.id,
+            renewal_cycle_id: adopted.id,
+          })
+
+          const rowsAfter = await captureRenewalCycleRows(
+            container,
+            subscription.id
+          )
+
+          // The reconciliation write and the retire are one run: the row the run
+          // moved follows the entitlement date, and the row it moved past stops
+          // standing for a charge. Either half on its own leaves two live
+          // `SCHEDULED` rows, which the window below reports directly.
+          expect(cycleRowById(rowsAfter, adopted.id)).toMatchObject({
+            deleted: false,
+            status: RenewalCycleStatus.SCHEDULED,
+          })
+          expect(cycleRowById(rowsAfter, adopted.id).scheduled_for).toEqual(
+            entitlementAt.getTime()
+          )
+          expect(cycleRowById(rowsAfter, stale.id).deleted).toBe(true)
+          expect(rowsAfter.map((row) => row.id).sort()).toEqual(
+            [adopted.id, stale.id].sort()
+          )
+
+          expect(retireWarningsOf(warnings)).toEqual([
+            "[reorder] retired 1 stale upcoming renewal cycle(s) of subscription " +
+              `'${subscription.id}' (${stale.id}) behind '${adopted.id}'`,
+          ])
+          expect(warningsAboutRow(warnings, adopted.id)).toEqual([])
+        })
+
+        expect(await upcomingCycleIndexRowCount(container)).toBe(1)
+      })
+
+      it("rolls the applied adopt back when the retirement fails mid-run", async () => {
+        const container = getContainer()
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+
+        const entitlementAt = new Date("2026-11-24T10:00:00.000Z")
+        const candidateAt = new Date("2026-12-24T10:00:00.000Z")
+        const staleAt = new Date("2026-09-24T10:00:00.000Z")
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: `SUB-RETIRE-ROLLBACK-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: entitlementAt,
+        })
+
+        await withUpcomingCycleIndexDropped(container, async () => {
+          const stale = await createRenewalCycleSeed(container, {
+            subscription_id: subscription.id,
+            scheduled_for: staleAt,
+          })
+
+          const adopted = await createRenewalCycleSeed(container, {
+            subscription_id: subscription.id,
+            scheduled_for: candidateAt,
+          })
+
+          // I-4 end to end. The module spec pins that a failed retire is
+          // reported as a permanent step failure carrying the snapshot; what only
+          // a driven workflow can show is that the engine then runs this step's
+          // rollback off that stored response instead of leaving the applied
+          // write in place. The container hands out the module service as a
+          // singleton, so the instance the step resolves is the one spied here —
+          // the same seam the metadata-write case above uses on the subscription
+          // module. `run` throws on a failed step by default
+          // (`workflow-export.js:99`), and the rejection is captured rather than
+          // allowed to propagate so the log and the rows can still be read.
+          const softDeleteSpy = jest
+            .spyOn(renewalModule, "softDeleteRenewalCycles")
+            .mockRejectedValue(new Error("connection terminated unexpectedly"))
+
+          const {
+            value: runFailure,
+            warnings,
+          } = await captureWarnings(container, () =>
+            ensureNextRenewalCycleWorkflow(container)
+              .run({ input: { subscription_id: subscription.id } })
+              .then(
+                () => null,
+                (error: Error) => error
+              )
+          ).finally(() => {
+            softDeleteSpy.mockRestore()
+          })
+
+          const rowsAfter = await captureRenewalCycleRows(
+            container,
+            subscription.id
+          )
+
+          // The write that landed is gone: the row is back on the date it was
+          // seeded with, not the entitlement date the `adopt` moved it to. This is
+          // the whole of I-4 and it is asserted FIRST, because a reverted fix
+          // leaves the row on `entitlementAt` and that leak — not the shape of the
+          // error — is what a reader has to see. A step that threw instead of
+          // reporting a permanent failure never compensates, so the row would stay
+          // moved while the run still "failed".
+          expect(cycleRowById(rowsAfter, adopted.id)).toMatchObject({
+            deleted: false,
+            status: RenewalCycleStatus.SCHEDULED,
+          })
+          expect(cycleRowById(rowsAfter, adopted.id).scheduled_for).toEqual(
+            candidateAt.getTime()
+          )
+
+          // The run did fail, and it failed at the retire rather than somewhere
+          // else in the workflow.
+          expect(runFailure?.message ?? "").toContain("failed to retire")
+
+          // The retire never landed either, and the rollback still said what it
+          // did: no retirement line, and a restore line naming the row it brought
+          // back, so the log cannot read as a retirement that stuck.
+          expect(cycleRowById(rowsAfter, stale.id).deleted).toBe(false)
+          expect(
+            await renewalModule.listRenewalCycles({
+              subscription_id: subscription.id,
+            })
+          ).toHaveLength(2)
+          expect(retireWarningsOf(warnings)).toEqual([])
+          expect(
+            warnings.filter((message) =>
+              message.includes("the retirement was rolled back")
+            )
+          ).toEqual([
+            "[reorder] restored 1 retired upcoming renewal cycle(s) " +
+              `(${stale.id}) — the retirement was rolled back and these rows are ` +
+              "chargeable again",
+          ])
+
+          // Both rows are live again, which is exactly what the rollback
+          // guarantees, so the window cannot close over them. This case's own rows
+          // go first — a hard delete, since nothing here is a retirement to
+          // measure — and the re-create below still gets to enforce the constraint
+          // every later case in this file depends on.
+          await renewalModule.deleteRenewalCycles([stale.id, adopted.id])
+        })
+
+        expect(await upcomingCycleIndexRowCount(container)).toBe(1)
       })
 
       it("refuses a second live scheduled cycle for one subscription in the database", async () => {
