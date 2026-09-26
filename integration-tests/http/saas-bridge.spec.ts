@@ -45,15 +45,30 @@ jest.setTimeout(120 * 1000)
  */
 let mockRenewRunOutcome: { result: unknown; errors: unknown } | undefined
 
-jest.mock("../../src/workflows/create-manual-renewal", () => ({
-  __esModule: true,
-  // The branch pinned below never consults the inventory; a failure the
-  // workflow *reports* is pinned through real HTTP in this same file.
-  RENEW_CUSTOMER_REFUSALS: [],
-  createManualRenewalWorkflow: () => ({
-    run: async () => mockRenewRunOutcome,
-  }),
-}))
+jest.mock("../../src/workflows/create-manual-renewal", () => {
+  // Only `run` is stubbed. The refusal declarations stay the real ones so the
+  // multi-error `errors[0]` case, which drives this handler directly, classifies
+  // against the same list the route ships with rather than a restated copy.
+  const actual = jest.requireActual(
+    "../../src/workflows/create-manual-renewal"
+  ) as {
+    RENEW_CUSTOMER_REFUSALS: readonly {
+      step: string
+      type: string
+      copy: RegExp
+    }[]
+  }
+
+  return {
+    __esModule: true,
+    RENEW_CUSTOMER_REFUSALS: actual.RENEW_CUSTOMER_REFUSALS,
+    createManualRenewalWorkflow: () => ({
+      // The branch pinned below never consults the inventory; a failure the
+      // workflow *reports* is pinned through real HTTP in this same file.
+      run: async () => mockRenewRunOutcome,
+    }),
+  }
+})
 
 const BRIDGE_SECRET = "test-bridge-secret"
 const DEFAULT_TENANT = { "x-tenant-id": "default" }
@@ -1516,6 +1531,363 @@ medusaIntegrationTestRunner({
           expect(body).not.toContain(internal.leak)
           expect(body).not.toContain("canary-value-")
           expect(body).not.toContain("23503")
+        }
+      })
+    })
+
+    describe("POST /store/saas/* — a tenant-scoping read fault never quotes internals", () => {
+      // Structural views of the reads the spies stand behind, typed the way the
+      // routes type them so no `any`/`as never`/non-null assertion is needed at
+      // the spy boundary (the resolved services are singletons, so spying the
+      // container copy is what the compiled route over HTTP also calls).
+      type CustomerReads = {
+        retrieveCustomer: (
+          id: string,
+          config?: Record<string, unknown>
+        ) => Promise<unknown>
+        listCustomers: (
+          filters: Record<string, unknown>,
+          config?: Record<string, unknown>
+        ) => Promise<unknown[]>
+      }
+
+      type GraphQuery = {
+        entity?: string
+        fields?: string[]
+        filters?: Record<string, unknown>
+      }
+      type ScopedQuery = {
+        graph: (query: GraphQuery) => Promise<{ data: unknown[] }>
+      }
+
+      // A driver-shaped fault of exactly the kind `db-error-mapper` turns an
+      // undefined column into: an `invalid_data` whose message names a table and
+      // column and carries a unique canary. `readTenantScoped` must replace it
+      // with the route's own sentence and never quote it into the body.
+      const schemaFault = (context: string, stamp: number): MedusaError =>
+        new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `column subscription.next_renewal__canary does not exist ${context}-${stamp}`
+        )
+
+      const expectBodyCarriesNoCanary = (
+        data: unknown,
+        context: string,
+        stamp: number
+      ): void => {
+        const body = JSON.stringify(data ?? {})
+        expect(body).not.toContain(`${context}-${stamp}`)
+        expect(body).not.toContain("next_renewal__canary")
+      }
+
+      it("auto-renew: a subscription-list read fault answers 404 with its own text", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(subscriptionModule, "listSubscriptions")
+          .mockRejectedValue(schemaFault("auto-renew-canary", stamp))
+
+        const response = await api.post(
+          "/store/saas/auto-renew",
+          { subscription_id: `sub_bridge_${stamp}`, enabled: true },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual("subscription not found")
+        expectBodyCarriesNoCanary(response.data, "auto-renew-canary", stamp)
+      })
+
+      it("renew: a subscription-list read fault answers 404, not a bridge 400", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(subscriptionModule, "listSubscriptions")
+          .mockRejectedValue(schemaFault("renew-canary", stamp))
+
+        const response = await api.post(
+          "/store/saas/renew",
+          { subscription_id: `sub_bridge_${stamp}` },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual("subscription not found")
+        expectBodyCarriesNoCanary(response.data, "renew-canary", stamp)
+      })
+
+      it("redeem: a customer-read fault answers 404 with its own text, not core's wording", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customerModule = container.resolve<CustomerReads>(Modules.CUSTOMER)
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(customerModule, "retrieveCustomer")
+          .mockRejectedValue(schemaFault("redeem-read-canary", stamp))
+
+        const response = await api.post(
+          "/store/saas/redeem",
+          { code: `REDEEM-${stamp}`, customer_id: `cus_bridge_${stamp}` },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        // The read boundary answers 404 even on this bridge route whose declared
+        // refusals are forced to 400 — a failed read is not a refusal.
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual(
+          "redemption target not found"
+        )
+        expect(response.data?.message).not.toMatch(/was not found/)
+        expectBodyCarriesNoCanary(response.data, "redeem-read-canary", stamp)
+      })
+
+      it("carts: a customer-read fault answers 404 with the tenant sentence", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customerModule = container.resolve<CustomerReads>(Modules.CUSTOMER)
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(customerModule, "retrieveCustomer")
+          .mockRejectedValue(schemaFault("carts-read-canary", stamp))
+
+        const response = await api.post(
+          "/store/saas/carts",
+          {
+            customer_id: `cus_bridge_${stamp}`,
+            currency_code: "usd",
+            variant_id: "var_bridge_canary",
+          },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual(
+          "customer not found for this tenant"
+        )
+        expectBodyCarriesNoCanary(response.data, "carts-read-canary", stamp)
+      })
+
+      it("carts: a region query.graph fault answers 404 while genuine absence stays 400", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+        const query = container.resolve<ScopedQuery>(
+          ContainerRegistrationKeys.QUERY
+        )
+        const originalGraph = query.graph.bind(query)
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(query, "graph")
+          .mockImplementation(async (q: GraphQuery) => {
+            if (q.entity === "region") {
+              throw schemaFault("carts-region-canary", stamp)
+            }
+            return originalGraph(q)
+          })
+
+        const response = await api.post(
+          "/store/saas/carts",
+          {
+            customer_id: customer.id,
+            currency_code: "usd",
+            variant_id: "var_bridge_canary",
+          },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual(
+          "No region configured for currency 'usd'"
+        )
+        expectBodyCarriesNoCanary(response.data, "carts-region-canary", stamp)
+      })
+
+      it("ensure-customer: a candidate-list read fault answers the route's new 404", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customerModule = container.resolve<CustomerReads>(Modules.CUSTOMER)
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(customerModule, "listCustomers")
+          .mockRejectedValue(schemaFault("ensure-canary", stamp))
+
+        const response = await api.post(
+          "/store/saas/ensure-customer",
+          { external_id: `ext_bridge_${stamp}` },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual(
+          "customer not found for this tenant"
+        )
+        expectBodyCarriesNoCanary(response.data, "ensure-canary", stamp)
+      })
+
+      it("reconcile: an order query.graph response read fault answers 404 with the route's sentence", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const query = container.resolve<ScopedQuery>(
+          ContainerRegistrationKeys.QUERY
+        )
+        const originalGraph = query.graph.bind(query)
+        const stamp = Date.now()
+        const spy = jest
+          .spyOn(query, "graph")
+          .mockImplementation(async (q: GraphQuery) => {
+            if (q.entity === "order") {
+              throw schemaFault("reconcile-order-canary", stamp)
+            }
+            return originalGraph(q)
+          })
+
+        // A fixed order id with no stamp: the route echoes its own
+        // `Order '<id>' not found`, and only the injected column message may be
+        // absent from the body.
+        const response = await api.post(
+          "/store/saas/reconcile",
+          { order_id: "order_bridge_canary" },
+          { headers, validateStatus: () => true }
+        )
+        spy.mockRestore()
+
+        expect(response.status).toEqual(404)
+        expect(response.data).toMatchObject({ type: "not_found" })
+        expect(String(response.data?.message)).toEqual(
+          "Order 'order_bridge_canary' not found"
+        )
+        expectBodyCarriesNoCanary(
+          response.data,
+          "reconcile-order-canary",
+          stamp
+        )
+      })
+
+      it("renew: with a lock fault and a declared refusal in one run, the refusal is what the caller sees", async () => {
+        const container = getContainer()
+        const customer = await createTenantCustomer(container)
+        const stamp = Date.now()
+
+        // A real manual subscription so the two scoping reads succeed and the
+        // handler reaches the (stubbed) workflow run — this case pins the
+        // classifier's `errors[0]` contract, not the engine's failure timing.
+        const subscription = (await createSubscriptionSeed(container, {
+          reference: `SUB-BRIDGE-CANARY-${stamp}`,
+          status: SubscriptionStatus.ACTIVE,
+          customer_id: customer.id,
+          payment_context: {
+            payment_provider_id: "pp_system_default",
+            payment_mode: "manual",
+            payment_method_reference: null,
+          } as never,
+        })) as unknown as { id: string }
+
+        // The run's `errors` carries BOTH outcomes: the declared refusal the
+        // create step authors (at index 0) and the lock step's compensation
+        // fault (at index 1). `store-step-failure.ts` quotes `errors[0]`; this
+        // is exactly the case that goes red if it ever stops answering the
+        // declared refusal for a multi-error run (spec §D).
+        const { RENEW_CUSTOMER_REFUSALS } = jest.requireActual(
+          "../../src/workflows/create-manual-renewal"
+        ) as {
+          RENEW_CUSTOMER_REFUSALS: readonly {
+            step: string
+            type: string
+            copy: RegExp
+          }[]
+        }
+        const refusalText = `Subscription 'sub_canary_${stamp}' is not in manual payment mode; use the standard renewal flow`
+        const declared = RENEW_CUSTOMER_REFUSALS.find((refusal) =>
+          refusal.copy.test(refusalText)
+        )
+
+        if (!declared) {
+          throw new Error(
+            "RENEW_CUSTOMER_REFUSALS no longer declares the manual-payment-mode refusal; update this case to a refusal the workflow really authors."
+          )
+        }
+
+        mockRenewRunOutcome = {
+          result: undefined,
+          errors: [
+            {
+              action: declared.step,
+              handlerType: "step",
+              error: {
+                __isMedusaError: true,
+                name: "Error",
+                type: declared.type,
+                message: refusalText,
+              },
+            },
+            {
+              action: "acquire-lock",
+              handlerType: "step",
+              error: {
+                name: "Error",
+                message: `inmem lock could not be released lock-${stamp}`,
+                code: "40P01",
+              },
+            },
+          ],
+        }
+
+        // The bridge auth middleware normally attaches the tenant to the request
+        // scope; driven directly, the handler reads it through `currentTenant`.
+        const scope = container as unknown as Record<string, unknown>
+        scope[SAAS_BRIDGE_TENANT_KEY] = {
+          tenant_id: "default",
+          shared_secret: BRIDGE_SECRET,
+        } satisfies SaasBridgeTenantConfig
+
+        const request = {
+          body: { subscription_id: subscription.id },
+          scope: container,
+        } as unknown as Parameters<typeof postRenew>[0]
+        const response = {
+          json: () => undefined,
+        } as unknown as Parameters<typeof postRenew>[1]
+
+        let thrown: unknown
+        try {
+          await postRenew(request, response)
+        } catch (error) {
+          thrown = error
+        } finally {
+          delete scope[SAAS_BRIDGE_TENANT_KEY]
+          mockRenewRunOutcome = undefined
+        }
+
+        expect(thrown).toBeInstanceOf(MedusaError)
+        if (thrown instanceof MedusaError) {
+          // A refusal: `invalid_data` (400), the renewal's own text. The lock
+          // fault at errors[1] — which would have become a 500 (or quoted a
+          // driver code) had it been answered — must never surface.
+          expect(thrown.type).toEqual(MedusaError.Types.INVALID_DATA)
+          expect(thrown.message).toEqual(refusalText)
+          expect(
+            JSON.stringify({ type: thrown.type, message: thrown.message })
+          ).not.toContain(`lock-${stamp}`)
         }
       })
     })
