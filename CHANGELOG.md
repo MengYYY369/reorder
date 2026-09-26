@@ -1,3 +1,124 @@
+## [1.6.1] - 2026-09-26
+
+Post-release round on top of the published 1.6.0: the package now ships only the
+plugin surface a host imports, a reconciliation that leaves a stale upcoming cycle
+chargeable retires it, and a failed tenant-scoping read on the `/store/saas/*` routes
+discloses nothing beyond its own 404.
+
+### Fixes
+
+- **redemption: a vanished customer is reported as a vanished customer.**
+  `resolve-redemption-code` threw `noMatchingSubscription` from its own customer read,
+  so a session that outlived the row was refused with the wrong reason and with a
+  variant id interpolated into the message. `redemptionErrors.customerNotFound`
+  (`not_found`) owns that branch now and `REDEEM_CUSTOMER_REFUSALS` declares it, so
+  `POST /store/customers/me/redemptions` answers **404** `Redemption customer <id> not
+  found` — the caller's own id, no variant id — and `POST /store/saas/redeem` answers
+  the same refusal with its promised **400**. A `customer_id` that never existed is
+  still stopped by that handler's own `retrieveCustomer` before the workflow runs, so
+  on the bridge the new wording appears only when the row goes between the two reads.
+- **redemption: the free-cycle write sets the mode together with its mechanism.**
+  `REDEMPTION_PAYMENT_CONTEXT` was the last mode writer that set `payment_mode` without
+  its companion `mechanism`: the redemption create constant now spreads
+  `buildPaymentModeFields("auto")`, the same helper the two workflow write sides use, so
+  the row a code redeems carries `payment_mode: "auto"` and `mechanism: "reorder_auto"`
+  as one decision instead of an unlabelled pair. `mechanism` stays an annotation and is
+  never a query predicate, so chargeability and dunning selection are unchanged, and the
+  PAST_DUE extension branch still writes no `payment_context` at all.
+- **saas: the auto-renew toggle is serialized against itself.**
+  `set-subscription-auto-renew` decided overdue from the guard step's snapshot and
+  re-read the row at the write step with nothing in between, while its `renew` and
+  `redeem` siblings are serialized. The workflow now acquires the lock
+  `auto-renew:<subscription_id>` before the native guard and releases it at the end of
+  the run, so two concurrent `POST /store/saas/auto-renew` calls for one subscription
+  cannot interleave the overdue check and the write, and a refused run releases the
+  lock before it answers. The renewal scheduler, which locks
+  `renewal:<renewal_cycle_id>`, is not serialized against the toggle; that race stays
+  open (section C of `.agents/specs/2026-09-25-post-acceptance-backlog.md`).
+- **renewals: the stale upcoming cycle a reconciliation leaves behind is retired, not
+  left chargeable (#08).** `resolveUpcomingCycle` answered
+  `match | adopt | defer | create` correctly and still left a second live `SCHEDULED`
+  row standing: `match` reports the exact-date hit and never looks at the neighbour,
+  `adopt` moves only the candidate, and `defer` refuses to move anything — and refusing
+  to touch a row is not the same as protecting it. That neighbour stayed in the
+  scheduler's due set (`status in [scheduled, failed]`, `deleted_at` null) and was
+  charged on its own date while the step reported a clean run, and the 1.6.0 index does
+  not close the hole either: its predicate covers only
+  `status = 'scheduled' and deleted_at is null`, so a `SUCCEEDED` or `FAILED` row on the
+  entitlement date with one live `SCHEDULED` neighbour is a shape it permits. The
+  selector now names those rows in a `retire` field that `match`, `adopt` and `defer`
+  each carry (`create` has none, because reaching it means no open row existed), and
+  `ensure-next-renewal-cycle` acts on the set on every path that can carry it — the two
+  that return early, the `defer` report and the unchanged-row report, plus the path
+  that follows a reconciliation write. The write is a soft delete — the row keeps its id, its
+  `renewal_attempt` children, its date and its status, and only `deleted_at` is stamped
+  — taken after a re-read that drops any row which picked up a `generated_order_id`
+  between the two reads and reports it as `withheld`. Every retirement logs, and so does
+  its undo: a workflow failing after the step clears `deleted_at` again and logs the
+  restore, while a retire that throws on the `updated` / `adopted` path is reported as a
+  permanent step failure carrying the rollback instead of throwing out of `invoke`, where
+  the engine would never have compensated the adopt it had already applied. A run whose
+  only write was a retirement reports `retired` rather than `noop`. Behavior to expect
+  after this: a retired cycle leaves the Admin renewals list, its `count`, and
+  `GET /admin/renewals/:id`, which answers `404 not_found` for its id like any cycle
+  that does not exist. A `retired` line in the log does not by itself mean a host lost
+  the index — the terminal-row shape above retires with the constraint standing; two
+  live `SCHEDULED` cycles for one subscription may indicate it, since that is the pair
+  the constraint refuses.
+- **saas: a failed tenant-scoping read no longer quotes internals — and now answers
+  404.** All nineteen reads the six `/store/saas/*` routes make themselves (the tenant
+  check's `listSubscriptions` / `retrieveCustomer` / `listCustomers`, `carts`'s and
+  `reconcile`'s `query.graph` reads, the shared helper's customer read) go through
+  `readTenantScoped` (`src/api/store/saas/lib/tenant-ownership.ts`), which decides what
+  may be disclosed in `classifyStoreReadFailure`
+  (`src/modules/subscription/utils/store-read-failure.ts`) — a unit under
+  `src/modules/**`, where a gate executes it, not under `src/api/**`, where none does.
+  Customer-visible consequences: a read fault that reached core's handler as a 500, or
+  as a 400/422 whose body named a table and a column, answers **404** with the route's
+  own sentence on all six; `POST /store/saas/ensure-customer` gained that 404 on fault
+  paths only; a `carts` region *fault* answers 404 where a region that genuinely is not
+  configured keeps its **400**; and a customer row that is gone still answers 404 but
+  with the route's text, no longer core's `Customer with id '…' was not found`. A
+  database outage on these scoping reads therefore presents as a 404 — risk **R1** of
+  `.agents/specs/2026-09-25-post-acceptance-backlog.md`, accepted deliberately there,
+  with the raw cause logged at `[reorder] … tenant-scoped read failed`. Admin routes,
+  non-tenant store reads and the reads under `src/api/store/customers/me/**` are
+  unchanged and still on core's error path, the last group by that spec's own ruling.
+
+### Chores
+
+- **the package ships the plugin, not the repository:** `files` packed the whole
+  `.medusa/server` build output, so a host install carried everything `medusa
+  plugin:build` compiles — 29 Playwright files under `.medusa/server/e2e`,
+  `.medusa/server/playwright.config.js` and the compiled `scripts/` tree, whose
+  seed script alone is 193.5 kB — and, under `src`, the 28 compiled
+  `src/**/__tests__/*.spec.js` files (440.5 kB). `files` is now
+  `[".medusa/server/src", "!**/__tests__/**"]`: measured against one and the same
+  build output, 400 files / 929.7 kB became 366 files / 826.7 kB and then
+  338 files / 738.4 kB (5.0 MB unpacked → 4.5 MB → 4.0 MB), and listing the final
+  tarball with `tar -tzf` shows no `__tests__` entry at all. The negation carries
+  no `./` prefix because that prefix makes npm ignore it — measured on one tree:
+  `!./**/__tests__/**` packs 366 files, `!**/__tests__/**` packs 338.
+  Nothing importable was lost, and that is asserted rather than assumed:
+  `scripts/assert-package-surface.mjs` (`npm run verify:package`, or
+  `corepack yarn verify:package`) extracts the tarball with the system `tar` —
+  retrying with GNU tar's `--force-local`, without which that tar refuses an
+  absolute `X:\…\reorder-1.6.0.tgz` argument as a remote host — and fails on any
+  `exports` target missing from the packed tree, on any target left under
+  `.medusa/server/` outside `src` (the exact path class `files` no longer
+  ships), on any pattern target matching no packed file unless the script names
+  it in its own `EMPTY_PATTERN_ALLOWLIST`, and on a packed manifest that leaves
+  the check with nothing to compare. `exports` itself is unchanged from 1.5.0, so
+  the seven keys and nine targets a host resolves through point at the same files
+  they did before; each was resolved through Node's resolver against the final
+  338-file tree, and the repo's own `jest src/modules/renewal` gate still runs the
+  TypeScript specs (3 suites, 24 tests) because the exclusion reaches the package
+  only. `prepublishOnly` still runs the build and nothing else. One target is
+  allowlisted because it is empty, not because it was forgotten: `./providers/*`
+  matches no packed file — `src/providers/` holds only the Medusa template README,
+  as it did in 1.5.0 — so `@mengyyy369/reorder/providers/<name>` never resolved,
+  and the verifier prints that exemption by name instead of passing it quietly.
+
 ## [1.6.0] - 2026-09-22
 
 **Requires Medusa 2.20 / mikro-orm 6.6.14**
@@ -217,65 +338,6 @@ was covered by any assertion in the http suite.
 - **activity log: the log write is typed.** `persist-log-event.ts` carried the only
   real `as any` in the sequence; the helper now takes the module's own input type, so
   a renamed field fails the build instead of arriving untyped at the database.
-- **redemption: a vanished customer is reported as a vanished customer.**
-  `resolve-redemption-code` threw `noMatchingSubscription` from its own customer read,
-  so a session that outlived the row was refused with the wrong reason and with a
-  variant id interpolated into the message. `redemptionErrors.customerNotFound`
-  (`not_found`) owns that branch now and `REDEEM_CUSTOMER_REFUSALS` declares it, so
-  `POST /store/customers/me/redemptions` answers **404** `Redemption customer <id> not
-  found` — the caller's own id, no variant id — and `POST /store/saas/redeem` answers
-  the same refusal with its promised **400**. A `customer_id` that never existed is
-  still stopped by that handler's own `retrieveCustomer` before the workflow runs, so
-  on the bridge the new wording appears only when the row goes between the two reads.
-- **renewals: the stale upcoming cycle a reconciliation leaves behind is retired, not
-  left chargeable (#08).** `resolveUpcomingCycle` answered
-  `match | adopt | defer | create` correctly and still left a second live `SCHEDULED`
-  row standing: `match` reports the exact-date hit and never looks at the neighbour,
-  `adopt` moves only the candidate, and `defer` refuses to move anything — and refusing
-  to touch a row is not the same as protecting it. That neighbour stayed in the
-  scheduler's due set (`status in [scheduled, failed]`, `deleted_at` null) and was
-  charged on its own date while the step reported a clean run, and the 1.6.0 index does
-  not close the hole either: its predicate covers only
-  `status = 'scheduled' and deleted_at is null`, so a `SUCCEEDED` or `FAILED` row on the
-  entitlement date with one live `SCHEDULED` neighbour is a shape it permits. The
-  selector now names those rows in a `retire` field that `match`, `adopt` and `defer`
-  each carry (`create` has none, because reaching it means no open row existed), and
-  `ensure-next-renewal-cycle` acts on the set on every path that can carry it — the two
-  that return early, the `defer` report and the unchanged-row report, plus the path
-  that follows a reconciliation write. The write is a soft delete — the row keeps its id, its
-  `renewal_attempt` children, its date and its status, and only `deleted_at` is stamped
-  — taken after a re-read that drops any row which picked up a `generated_order_id`
-  between the two reads and reports it as `withheld`. Every retirement logs, and so does
-  its undo: a workflow failing after the step clears `deleted_at` again and logs the
-  restore, while a retire that throws on the `updated` / `adopted` path is reported as a
-  permanent step failure carrying the rollback instead of throwing out of `invoke`, where
-  the engine would never have compensated the adopt it had already applied. A run whose
-  only write was a retirement reports `retired` rather than `noop`. Behavior to expect
-  after this: a retired cycle leaves the Admin renewals list, its `count`, and
-  `GET /admin/renewals/:id`, which answers `404 not_found` for its id like any cycle
-  that does not exist. A `retired` line in the log does not by itself mean a host lost
-  the index — the terminal-row shape above retires with the constraint standing; two
-  live `SCHEDULED` cycles for one subscription may indicate it, since that is the pair
-  the constraint refuses.
-- **saas: a failed tenant-scoping read no longer quotes internals — and now answers
-  404.** All nineteen reads the six `/store/saas/*` routes make themselves (the tenant
-  check's `listSubscriptions` / `retrieveCustomer` / `listCustomers`, `carts`'s and
-  `reconcile`'s `query.graph` reads, the shared helper's customer read) go through
-  `readTenantScoped` (`src/api/store/saas/lib/tenant-ownership.ts`), which decides what
-  may be disclosed in `classifyStoreReadFailure`
-  (`src/modules/subscription/utils/store-read-failure.ts`) — a unit under
-  `src/modules/**`, where a gate executes it, not under `src/api/**`, where none does.
-  Customer-visible consequences: a read fault that reached core's handler as a 500, or
-  as a 400/422 whose body named a table and a column, answers **404** with the route's
-  own sentence on all six; `POST /store/saas/ensure-customer` gained that 404 on fault
-  paths only; a `carts` region *fault* answers 404 where a region that genuinely is not
-  configured keeps its **400**; and a customer row that is gone still answers 404 but
-  with the route's text, no longer core's `Customer with id '…' was not found`. A
-  database outage on these scoping reads therefore presents as a 404 — risk **R1** of
-  `.agents/specs/2026-09-25-post-acceptance-backlog.md`, accepted deliberately there,
-  with the raw cause logged at `[reorder] … tenant-scoped read failed`. Admin routes,
-  non-tenant store reads and the reads under `src/api/store/customers/me/**` are
-  unchanged and still on core's error path, the last group by that spec's own ruling.
 
 ### Chores
 
@@ -297,37 +359,6 @@ was covered by any assertion in the http suite.
 - All migrations now import `Migration` from `@medusajs/framework/mikro-orm/migrations`,
   removing four direct imports of a package the plugin does not declare; the host
   resolves mikro-orm once.
-- **the package ships the plugin, not the repository:** `files` packed the whole
-  `.medusa/server` build output, so a host install carried everything `medusa
-  plugin:build` compiles — 29 Playwright files under `.medusa/server/e2e`,
-  `.medusa/server/playwright.config.js` and the compiled `scripts/` tree, whose
-  seed script alone is 193.5 kB — and, under `src`, the 28 compiled
-  `src/**/__tests__/*.spec.js` files (440.5 kB). `files` is now
-  `[".medusa/server/src", "!**/__tests__/**"]`: measured against one and the same
-  build output, 400 files / 929.7 kB became 366 files / 826.7 kB and then
-  338 files / 738.4 kB (5.0 MB unpacked → 4.5 MB → 4.0 MB), and listing the final
-  tarball with `tar -tzf` shows no `__tests__` entry at all. The negation carries
-  no `./` prefix because that prefix makes npm ignore it — measured on one tree:
-  `!./**/__tests__/**` packs 366 files, `!**/__tests__/**` packs 338.
-  Nothing importable was lost, and that is asserted rather than assumed:
-  `scripts/assert-package-surface.mjs` (`npm run verify:package`, or
-  `corepack yarn verify:package`) extracts the tarball with the system `tar` —
-  retrying with GNU tar's `--force-local`, without which that tar refuses an
-  absolute `X:\…\reorder-1.6.0.tgz` argument as a remote host — and fails on any
-  `exports` target missing from the packed tree, on any target left under
-  `.medusa/server/` outside `src` (the exact path class `files` no longer
-  ships), on any pattern target matching no packed file unless the script names
-  it in its own `EMPTY_PATTERN_ALLOWLIST`, and on a packed manifest that leaves
-  the check with nothing to compare. `exports` itself is unchanged from 1.5.0, so
-  the seven keys and nine targets a host resolves through point at the same files
-  they did before; each was resolved through Node's resolver against the final
-  338-file tree, and the repo's own `jest src/modules/renewal` gate still runs the
-  TypeScript specs (3 suites, 24 tests) because the exclusion reaches the package
-  only. `prepublishOnly` still runs the build and nothing else. One target is
-  allowlisted because it is empty, not because it was forgotten: `./providers/*`
-  matches no packed file — `src/providers/` holds only the Medusa template README,
-  as it did in 1.5.0 — so `@mengyyy369/reorder/providers/<name>` never resolved,
-  and the verifier prints that exemption by name instead of passing it quietly.
 
 ## [1.5.0] - 2026-09-19
 
