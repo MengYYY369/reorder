@@ -1,10 +1,12 @@
 # Spec: money basis switch (minor → major), aligned to Medusa's currency system
 
-Status: **DESIGN, revision 2 — reviewed adversarially; implementation not started.**
-Supersedes revision 1 of the same date. Evidence sources are named inline; every rule this
+Status: **DESIGN, revision 3 — reviewed adversarially; implementation not started.**
+Supersedes revisions 1-2 of the same date. Evidence sources are named inline; every rule this
 document applies is either quoted from Medusa's own code/docs or measured read-only on production.
-Revision 2 folds in an adversarial design review whose two Critical findings (currency resolution,
-image ownership) are now first-class design sections.
+Revision 2 folded in an adversarial design review whose two Critical findings (currency resolution,
+image ownership) are now first-class design sections. Revision 3 adds one section of measured fact —
+the actual state of the three working trees on 2026-09-26 evening — because a plan that assumes a
+clean start would be wrong: the provider half already carries uncommitted edits.
 
 ## TLDR & Overview
 
@@ -36,6 +38,21 @@ Risks section states exactly what restore does and does not undo).
 | Q6 | Maintenance window is acceptable. |
 | Q7 | No rollback machinery; the in-window dump is the recovery of last resort. |
 | Q8 | Release unit and version numbers are unimportant — so version identity is fixed by **committing** the vendored package's version and re-vendoring it; publishing to a registry is optional and not a gate. |
+
+## Working-tree state at revision 3 (measured 2026-09-26)
+
+Measured directly with `git status`/`git diff` and file mtimes; the plan's starting point, not an
+assumption:
+
+| Repo | State |
+|---|---|
+| `D:\Projects\reorder` (this plugin) | clean on `main` at `e1b7eb8`; `v1.6.1` published and tagged. No money-switch work here beyond fixture churn (pending). |
+| `D:\Projects\medusa-saas` (host) | DIRTY by its owner: `scripts/money-minor-to-major.sql` modified (the owner's own uncommitted revision — still the OLD global-÷100 semantics at `:85`/`:381`/`:388`/`:392`, i.e. **the per-currency rewrite has NOT been done**), plus the owner's doc changes. No commits by this workstream. |
+| `D:\Projects\medusa-paypal` (provider) | DIRTY by its owner AND by a stopped Phase 0 agent. The agent's uncommitted, **unreviewed** edits: (1) `src/subscription/metadata.ts` gained `moneyAmountSchema = z.number().finite().min(0).multipleOf(0.001)` applied to `price` and `setup_fee`, counts left `.int()`; (2) the stale "minor units" comment on `models/paypal-subscription.ts` corrected to major/`numeric(20,6)`; (3) `Migration20260919000001.ts` `locked_amount` changed `INTEGER` → `NUMERIC(20,6)`; (4) `docs/tutorial.zh-CN.md` money examples moved to major (`9.99` not `999`). The owner's own uncommitted `0.5.0` bump + CHANGELOG remain alongside. |
+
+Two consequences the plan must honour: the provider task is **verify-and-complete**, not
+write-from-scratch, and no sibling-repo commit happens without the user's word — those trees hold
+the owner's in-progress work.
 
 ## The Medusa rule this plan follows (evidence)
 
@@ -249,8 +266,12 @@ the window immediately before the conversion — "due was 0 when the plan was wr
 
 - Revision 1 was reviewed by two parallel seats; the adversarial design review returned
   "implementable core, not implementable as written" with 2 Critical findings (currency resolution,
-  image ownership) and 6 Important ones, all folded into this revision. The fact-check seat was
+  image ownership) and 6 Important ones, all folded into revision 2. The fact-check seat was
   lost to an infrastructure failure (model-service access); its target claims were re-verified
   directly (Medusa 2.20.0 pin, the no-÷100 ruling at `docs/releases/1.6.0-host-upgrade.md:19-24`,
   minor-literal fixtures, major-scale `0.01` epsilon tests) or stand on the controller's own
   read-only measurements recorded in the session ledger.
+- **Open gap, stated rather than hidden:** revision 2's own edits were never independently
+  re-reviewed. Revision 3 only adds measured working-tree state, so the gap now covers both.
+  The plan's first task closes it by construction: its Phase 0 verifies each revision-2 rule
+  against the live schema and the live trees before anything is written.
