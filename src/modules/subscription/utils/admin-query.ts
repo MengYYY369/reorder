@@ -593,6 +593,21 @@ async function getSubscriptionDisplayDataMap(
   const productIds = [...new Set(records.map((record) => record.product_id))]
   const variantIds = [...new Set(records.map((record) => record.variant_id))]
 
+  // Log if we're trying to query but have IDs - helps diagnose snapshot issues
+  if ((customerIds.length || productIds.length || variantIds.length)) {
+    const hasMissingSnapshots = !records[0].customer_snapshot?.full_name && 
+                                !records[0].product_snapshot?.product_title
+    
+    if (hasMissingSnapshots) {
+      console.warn('[Reorder Subscription] Missing snapshot display names, attempting live fetch:', {
+        customerCount: customerIds.length,
+        productCount: productIds.length,
+        variantCount: variantIds.length,
+        sampleCustomerId: customerIds[0]?.slice(0, 12), // Truncate for privacy
+      })
+    }
+  }
+
   const [customersResult, productsResult, variantsResult] = await Promise.all([
     customerIds.length
       ? query.graph({
@@ -622,6 +637,22 @@ async function getSubscriptionDisplayDataMap(
         })
       : Promise.resolve({ data: [] }),
   ])
+
+  // Log if queries returned no data despite having IDs
+  if (customerIds.length && !(customersResult.data?.length)) {
+    console.warn('[Reorder Subscription] No live customer data found for', 
+                 customerIds.length, 'IDs - snapshots are your only source')
+  }
+
+  if (productIds.length && !(productsResult.data?.length)) {
+    console.warn('[Reorder Subscription] No live product data found for', 
+                 productIds.length, 'IDs - check products table')
+  }
+
+  if (variantIds.length && !(variantsResult.data?.length)) {
+    console.warn('[Reorder Subscription] No live variant data found for', 
+                 variantIds.length, 'IDs - check variants table')
+  }
 
   const customers = new Map(
     ((customersResult.data ?? []) as LiveCustomerRecord[]).map((customer) => [
