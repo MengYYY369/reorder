@@ -660,27 +660,55 @@ came up on a partially migrated schema" is reachable and needs an explicit failu
 branch. The dump must therefore be **validated and its restore rehearsed before** the
 upgrade, not after — v2 checked it only in step 6.5.
 
-### Measured on 2026-09-25, which rewrites what "deploy" means
+### Measured on 2026-09-25, superseded on 2026-09-26 by the Phase 6.1 survey
 
-- The running production image has **no `@mengyyy369/*` package at all**
-  (`ls /app/node_modules/@mengyyy369` → absent), and the backend workspace's
-  manifests declare no such dependency. So 1.6.0 onto `medusa-prod` is a **first
-  install, not an upgrade**: the plugin's tables are created from scratch, which
-  means the acceptance round's normalize step, the drift path and the index's
-  dedup behaviour will **not** be exercised there at all — they can only be
-  exercised by the §B harness. Anything that claims production "verified the
-  invariant" after a first install is claiming the wrong thing.
+- **Corrected 2026-09-26: the "no `@mengyyy369/*` at all / first install" finding
+  was wrong — it probed the wrong path.** `/app/node_modules/@mengyyy369` is indeed
+  absent, but the app root is `/app/apps/backend`, and
+  `docker exec medusa-prod-store-1 ls /app/apps/backend/node_modules/@mengyyy369`
+  lists `reorder` beside the five other scoped packages; the `reorder` entry is a
+  symlink into `vendor/@mengyyy369/reorder` at **version 1.5.0**, registered in
+  `medusa-config.ts` under `plugins`. Production therefore holds live plugin data —
+  16 subscriptions, 13 live `scheduled` + 5 `succeeded` renewal cycles — and
+  **20 of the plugin's 22 migrations are already in `mikro_orm_migrations`**; the
+  two missing by name are `Migration20260922120000` (activity-log) and
+  `Migration20260924120000` (renewal), exactly the two 1.6.0 ships. So 1.6.x onto
+  `medusa-prod` is an **upgrade from 1.5.0**, not a first install: the expected
+  migration delta is two rows, not "every plugin migration applied fresh", and the
+  normalize/drift/index paths *can* fire here — though with `having count(*) > 1`
+  returning 0 rows and no soft-deleted cycles today, the dedup branch stays vacuous
+  unless duplicate rows are seeded deliberately. The full correction, with the
+  commands and outputs, is in `docs/releases/1.6.0-host-upgrade.md`
+  (*Production rehearsal*).
 - The backend is a **pnpm workspace**, not an npm app:
   `/home/ubuntu/medusa-saas/src` holds `pnpm-workspace.yaml`, `pnpm-lock.yaml`,
   `turbo.json` and `apps/`. Registry credentials therefore belong to pnpm's
   config at the place `pnpm install` actually runs — and that is a build-time
   concern, not a runtime one.
-- **No Dockerfile was found anywhere under `/home/ubuntu/medusa-saas`** (maxdepth 2),
-  yet `medusa-saas-backend:0.4.14` exists locally with `labels=null` and a
-  2026-09-21 build date. Open question Phase 6.1 must answer before anything
-  installs: **where is that image built?** If it is built off-box, the registry
-  credential belongs in that build environment and must never be copied onto the
-  production host.
+- **The earlier "no Dockerfile exists" claim was a maxdepth artifact.**
+  `apps/backend/Dockerfile` and `apps/backend/Dockerfile.prod` exist at
+  `/home/ubuntu/medusa-saas/src/apps/backend/` (maxdepth 4); the maxdepth-2 survey
+  could not see past `apps/`. The open question is answered, with a split verdict:
+  the image is built by **both** documented routes — `docs/deploy.md` 方式 B (source
+  tarball + BuildKit npmrc secret, host build cache active 2026-09-25, host-built
+  tags ≤ `0.4.15`) and 方式 A (local build + `docker save | gzip` + `scp` + load).
+  The **running image `0.4.20` (and `0.4.16`-`0.4.19`) was built off-box, on the
+  developer machine**: those tags exist locally in `D:\Projects\medusa-saas` with
+  byte-identical image IDs, the host buildx cache holds zero records dated 2026-09-26,
+  and the host source tree (better-auth `0.2.4`, 239-line config) cannot produce the
+  image's contents (better-auth `0.3.0`, 219-line config). Consequence: the
+  `write:packages`-capable local `~/.npmrc` stays on the local machine; the host's
+  separate `/home/ubuntu/.medusa-npmrc` (mode 600, own token, different hash) is the
+  only credential that has ever sat on it. Neither this plugin nor the vendor swap
+  consumes a token at all — `@mengyyy369/reorder` is `workspace:*` /
+  `link:vendor/@mengyyy369/reorder` — it is replaced as a copied tree.
+- `medusa migrate` runs **by hand**, never at start: image
+  `Cmd=["npx","medusa","start","-p","9000"]`, no healthcheck, `start.js` contains no
+  migration call, and the host runbook's own line is
+  `docker compose run --rm … npx medusa db:migrate`. The compose service is named
+  `store` (the deploy doc says `backend` — stale), and `db:migrate --all-or-nothing`
+  exists in the image, which is the only lever against the per-module loop
+  atomicity gap above.
 - Network path is fine: `npm.pkg.github.com` answers from the box (a clean 401
   with no token supplied). `ubuntu/.npmrc` today holds a mirror `registry=` line
   and **no token**, and `/root/.npmrc` exists separately. The local
@@ -688,26 +716,42 @@ upgrade, not after — v2 checked it only in step 6.5.
   publish-capable: copying it to a production host would trade a private-repository
   read need for a write-capable secret sitting on a box that does not consume the
   package. What this host needs, when the dependency is actually added, is a
-  separate token scoped to `read:packages` only.
+  separate token scoped to `read:packages` only — whether the existing host token
+  has exactly that scope is **UNKNOWN** (answering it means spending the token).
+- One premise that survives its own re-check: the running stack is now
+  `medusa-prod-store-1` on `medusa-saas-backend:0.4.20` (`compose.yaml:27`, up since
+  2026-09-26T04:28Z), not `0.4.14`; `0.4.14` is what `rollback-20260925{,b}` point
+  at. No `medusa-dtc` stack is running (its compose file sits at
+  `/opt/medusa-dtc/docker-compose.yml` with no containers) — "one Medusa instance at
+  a time" currently holds by absence, and the scale-down decision stays in Task 26.
+  Money units: production `price` rows are still minor (`990|usd`, `69900|cny`), the
+  vendored paypal is `0.4.0`, and `money-minor-to-major.sql` is not on the host —
+  the stop point stands.
 
 Order:
 
-1. Answer the open question above — where `medusa-saas-backend` is built and where
-   `pnpm install` runs — then decide where a **read-only** registry credential
-   belongs. Record in the runbook.
+1. ~~Answer the open question above~~ — answered 2026-09-26 (see the two corrected
+   bullets). A **read-only** registry credential decision remains with the user for
+   the sibling packages that install from GitHub Packages; it is a build-time secret
+   either way and must never be widened on the developer machine's behalf.
 2. `pg_dump` the prod database, **restore it into a scratch database on the same box
    and boot the new version against that**, then throw the scratch away. The runbook
    is `docs/releases/1.6.0-host-upgrade.md` (tracked) — an untracked file is an
    unrecorded residual, `lessons.md:99`.
 3. Scale dtc down; confirm exactly one Medusa store in `docker ps`.
-4. Add the dependency through the pnpm workspace and migrate. Because this is a
-   first install, the expected `mikro_orm_migrations` result is *every* plugin
-   migration applied fresh, and the drift assertions below are vacuous unless rows
-   are seeded deliberately — say which of them are asserted against seeded data and
-   which against the empty schema. Then assert the two invariants a live store
+4. Install as an **upgrade over the running 1.5.0** (see the first corrected bullet:
+   this host already has the plugin, its tables, and 20 of its 22 migrations), and
+   migrate. The expected `mikro_orm_migrations` delta here is exactly the two 1.6.0
+   names — `Migration20260922120000` and `Migration20260924120000` — not *every*
+   plugin migration applied fresh; that phrasing only fits a genuine first install,
+   and the runbook records the corrected expectation plus which assertions stay
+   vacuous on this data (the duplicate-cycle normalize, until rows are seeded) and
+   which do not (the `to_regclass` guard, reachable over 13 live scheduled cycles).
+   Then assert the two invariants a live store
    shows: no subscription holds more than one live `SCHEDULED` cycle
    (`group by subscription_id having count(*) > 1` returns nothing), and
-   `renewal_cycle_one_scheduled_per_subscription` exists.
+   `renewal_cycle_one_scheduled_per_subscription` exists. The table is
+   `renewal_cycle` — `subscription_renewal_cycle` does not exist and psql says so.
 5. Smoke the changed contracts, failures included: unknown redemption code stays 404
    on the customer route and 400 on the bridge, an auto-renew toggle on a provider
    mirror refuses with its own sentence, a retired-drift case logs its warning, and no
