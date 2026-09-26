@@ -40,6 +40,27 @@ const cycle = (
   ...overrides,
 })
 
+/**
+ * The retire set of a resolution, as ids. `create` is the only branch without a
+ * `retire` field, so the three that have one are narrowed out first, and
+ * throwing on `create` is what keeps a wrong-branch resolution from reading as
+ * an empty retire set.
+ */
+function retireIds(resolution: UpcomingCycleResolution): string[] {
+  if (resolution.action === "create") {
+    throw new Error(
+      `resolution has no retire set (action '${resolution.action}')`
+    )
+  }
+
+  return resolution.retire.map((row) => row.id)
+}
+
+/** The row the selector chose, as an id, for the branches that choose one. */
+function chosenId(resolution: UpcomingCycleResolution): string | null {
+  return resolution.action === "create" ? null : resolution.cycle.id
+}
+
 describe("resolveUpcomingCycle", () => {
   describe("match", () => {
     it("matches the cycle already dated at the entitlement date", () => {
@@ -52,6 +73,7 @@ describe("resolveUpcomingCycle", () => {
       ).toEqual<UpcomingCycleResolution>({
         action: "match",
         cycle: scheduled,
+        retire: [],
       })
     })
 
@@ -65,7 +87,11 @@ describe("resolveUpcomingCycle", () => {
 
       expect(
         resolveUpcomingCycle([processing], new Date("2026-11-24T10:00:00.000Z"))
-      ).toEqual<UpcomingCycleResolution>({ action: "match", cycle: processing })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "match",
+        cycle: processing,
+        retire: [],
+      })
     })
 
     it("prefers the exact-date hit over a differently dated scheduled row", () => {
@@ -80,7 +106,11 @@ describe("resolveUpcomingCycle", () => {
           [stale, exact],
           new Date("2026-11-24T10:00:00.000Z")
         )
-      ).toEqual<UpcomingCycleResolution>({ action: "match", cycle: exact })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "match",
+        cycle: exact,
+        retire: [stale],
+      })
     })
 
     /**
@@ -92,7 +122,9 @@ describe("resolveUpcomingCycle", () => {
      * Closing the seam needs a step that deletes a row it does not own, and
      * neither the normalize migration nor
      * `renewal_cycle_one_scheduled_per_subscription` can produce this shape from
-     * a new write any more.
+     * a new write any more. What the selector does instead is name the row it
+     * refuses to adopt — every case below carries it in `retire`, and the
+     * `retire` group is where the naming itself is pinned.
      */
     it("matches a failed cycle on the entitlement date instead of adopting a stale scheduled row", () => {
       const stale = cycle({
@@ -110,7 +142,11 @@ describe("resolveUpcomingCycle", () => {
           [stale, failed],
           new Date("2026-11-24T10:00:00.000Z")
         )
-      ).toEqual<UpcomingCycleResolution>({ action: "match", cycle: failed })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "match",
+        cycle: failed,
+        retire: [stale],
+      })
     })
 
     it("matches a succeeded cycle on the entitlement date instead of adopting a stale scheduled row", () => {
@@ -133,6 +169,7 @@ describe("resolveUpcomingCycle", () => {
       ).toEqual<UpcomingCycleResolution>({
         action: "match",
         cycle: succeeded,
+        retire: [stale],
       })
     })
   })
@@ -145,7 +182,11 @@ describe("resolveUpcomingCycle", () => {
 
       expect(
         resolveUpcomingCycle([stale], new Date("2026-11-24T10:00:00.000Z"))
-      ).toEqual<UpcomingCycleResolution>({ action: "adopt", cycle: stale })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "adopt",
+        cycle: stale,
+        retire: [],
+      })
     })
 
     it("adopts the future-dated scheduled row a stacked purchase left behind", () => {
@@ -155,7 +196,11 @@ describe("resolveUpcomingCycle", () => {
 
       expect(
         resolveUpcomingCycle([folded], new Date("2026-11-24T10:00:00.000Z"))
-      ).toEqual<UpcomingCycleResolution>({ action: "adopt", cycle: folded })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "adopt",
+        cycle: folded,
+        retire: [],
+      })
     })
 
     it("adopts the latest scheduled row when drift left two of them", () => {
@@ -171,7 +216,11 @@ describe("resolveUpcomingCycle", () => {
       ]) {
         expect(
           resolveUpcomingCycle(input, new Date("2027-01-24T10:00:00.000Z"))
-        ).toEqual<UpcomingCycleResolution>({ action: "adopt", cycle: newer })
+        ).toEqual<UpcomingCycleResolution>({
+          action: "adopt",
+          cycle: newer,
+          retire: [older],
+        })
       }
     })
 
@@ -199,6 +248,7 @@ describe("resolveUpcomingCycle", () => {
       ).toEqual<UpcomingCycleResolution>({
         action: "adopt",
         cycle: scheduled,
+        retire: [],
       })
     })
   })
@@ -213,7 +263,11 @@ describe("resolveUpcomingCycle", () => {
 
       expect(
         resolveUpcomingCycle([inFlight], new Date("2026-11-24T10:00:00.000Z"))
-      ).toEqual<UpcomingCycleResolution>({ action: "defer", cycle: inFlight })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "defer",
+        cycle: inFlight,
+        retire: [],
+      })
     })
 
     it("defers a processing row, whose renewal is already under way", () => {
@@ -228,12 +282,15 @@ describe("resolveUpcomingCycle", () => {
       ).toEqual<UpcomingCycleResolution>({
         action: "defer",
         cycle: processing,
+        retire: [],
       })
     })
 
     it("defers on a free scheduled row that carries an order before adopting a later in-flight one", () => {
       // The in-flight manual row wins the latest-date comparison, so the step
-      // must not reschedule anything: the older unpaid row keeps its date too.
+      // must not reschedule anything: the older free row keeps its date too. It
+      // is not, however, protected by that refusal — defer names it for the
+      // caller instead of leaving it chargeable and unmentioned.
       const unpaid = cycle({
         id: "renewal_cycle_unpaid",
         scheduled_for: new Date("2026-09-24T10:00:00.000Z"),
@@ -249,10 +306,21 @@ describe("resolveUpcomingCycle", () => {
           [unpaid, free],
           new Date("2026-11-24T10:00:00.000Z")
         )
-      ).toEqual<UpcomingCycleResolution>({ action: "defer", cycle: unpaid })
+      ).toEqual<UpcomingCycleResolution>({
+        action: "defer",
+        cycle: unpaid,
+        retire: [free],
+      })
     })
   })
 
+  /**
+   * `create` is the one branch with no `retire` field, so the exact-shape
+   * equality below is the pin: were a retire set ever added to it, the extra
+   * property would fail these cases rather than pass unnoticed. It is reached
+   * only when no open row exists, and a row qualified for `retire` has to be
+   * open, so its retire set would be empty by construction anyway.
+   */
   describe("create", () => {
     it("creates when there is no row at all", () => {
       expect(
@@ -277,6 +345,78 @@ describe("resolveUpcomingCycle", () => {
           new Date("2026-11-24T10:00:00.000Z")
         )
       ).toEqual<UpcomingCycleResolution>({ action: "create" })
+    })
+  })
+
+  /**
+   * The half of the decision that does not choose a row: the live `scheduled`
+   * rows a decision leaves in place. `match` can report a terminal hit while a
+   * stale chargeable row sits elsewhere, `adopt` moves exactly one row, and
+   * `defer` refuses to move anything — in all three the untouched rows survive
+   * the reconciliation and stay chargeable unless the caller acts on them, so
+   * they have to be named here first.
+   */
+  describe("retire", () => {
+    const DATE = new Date("2026-11-24T10:00:00.000Z")
+    const earlier = new Date("2026-08-24T10:00:00.000Z")
+    const later = new Date("2026-12-24T10:00:00.000Z")
+
+    it("names a stale live row when the entitlement date is held by a settled row", () => {
+      const resolution = resolveUpcomingCycle(
+        [
+          cycle({
+            id: "rcy_done",
+            status: RenewalCycleStatus.SUCCEEDED,
+            scheduled_for: DATE,
+          }),
+          cycle({ id: "rcy_stale", scheduled_for: earlier }),
+        ],
+        DATE
+      )
+
+      expect(resolution.action).toBe("match")
+      expect(chosenId(resolution)).toBe("rcy_done")
+      expect(retireIds(resolution)).toEqual(["rcy_stale"])
+    })
+
+    it("never retires the row it matched or adopted", () => {
+      const ahead = cycle({ id: "rcy_a", scheduled_for: later })
+      const behind = cycle({ id: "rcy_b", scheduled_for: earlier })
+
+      // The exact-date hit is chosen, so only its neighbour is named.
+      const matched = resolveUpcomingCycle([ahead, behind], later)
+      expect(matched.action).toBe("match")
+      expect(retireIds(matched)).toEqual(["rcy_b"])
+
+      // Nothing holds the entitlement date, so the latest open row is adopted —
+      // the row that moves is excluded from retire just like the matched one.
+      const adopted = resolveUpcomingCycle([ahead, behind], DATE)
+      expect(adopted.action).toBe("adopt")
+      expect(retireIds(adopted)).toEqual(["rcy_b"])
+    })
+
+    it("leaves a row with an order in flight out of the retire set", () => {
+      const resolution = resolveUpcomingCycle(
+        [
+          cycle({ id: "rcy_match", scheduled_for: DATE }),
+          cycle({
+            id: "rcy_billed",
+            scheduled_for: earlier,
+            generated_order_id: "order_1",
+          }),
+        ],
+        DATE
+      )
+
+      expect(resolution.action).toBe("match")
+      expect(retireIds(resolution)).toEqual([])
+    })
+
+    it("reports create without a retire set", () => {
+      const resolution = resolveUpcomingCycle([], DATE)
+
+      expect(resolution).toEqual<UpcomingCycleResolution>({ action: "create" })
+      expect(resolution).not.toHaveProperty("retire")
     })
   })
 })

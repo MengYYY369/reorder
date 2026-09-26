@@ -35,11 +35,29 @@ export type UpcomingRenewalCycleRecord = {
 /**
  * The four things the upcoming-cycle step can do with the rows a subscription
  * already carries. See `resolveUpcomingCycle` for the decision rules.
+ *
+ * `match`, `adopt` and `defer` each also name, in `retire`, the live `scheduled`
+ * rows the decision leaves in place: rows no branch moves or deletes, so a
+ * caller that does not act on them leaves them chargeable. `create` carries no
+ * `retire` at all — it is reached only when no open row exists, and only an open
+ * row can qualify.
  */
 export type UpcomingCycleResolution =
-  | { action: "match"; cycle: UpcomingRenewalCycleRecord }
-  | { action: "adopt"; cycle: UpcomingRenewalCycleRecord }
-  | { action: "defer"; cycle: UpcomingRenewalCycleRecord }
+  | {
+      action: "match"
+      cycle: UpcomingRenewalCycleRecord
+      retire: UpcomingRenewalCycleRecord[]
+    }
+  | {
+      action: "adopt"
+      cycle: UpcomingRenewalCycleRecord
+      retire: UpcomingRenewalCycleRecord[]
+    }
+  | {
+      action: "defer"
+      cycle: UpcomingRenewalCycleRecord
+      retire: UpcomingRenewalCycleRecord[]
+    }
   | { action: "create" }
 
 /**
@@ -193,6 +211,34 @@ function preferLaterCycle(
 }
 
 /**
+ * The live `scheduled` rows a decision leaves behind, excluding the row it chose.
+ *
+ * Every branch except `create` picks exactly one row to keep or move, so a second
+ * chargeable row survives the reconciliation untouched: `match` reports the
+ * exact-date hit and never looks at the neighbour, `adopt` moves only the
+ * candidate, and `defer` refuses to move anything at all. Refusing to touch such
+ * a row is not the same as protecting it, so the selector names the rows instead
+ * of leaving them unmentioned, and the caller decides what happens to them.
+ *
+ * The qualifications mirror the ones a row has to pass to be adopted at all:
+ * `processing` money is already in motion, a row carrying a
+ * `generated_order_id` is billed or awaiting payment, and `succeeded` / `failed`
+ * belong to a period that already settled. What is left is a row the scheduler
+ * can still charge.
+ */
+function collectRetirable(
+  cycles: UpcomingRenewalCycleRecord[],
+  chosen?: UpcomingRenewalCycleRecord
+): UpcomingRenewalCycleRecord[] {
+  return cycles.filter(
+    (row) =>
+      row.id !== chosen?.id &&
+      row.status === RenewalCycleStatus.SCHEDULED &&
+      row.generated_order_id == null
+  )
+}
+
+/**
  * Decide how the subscription's existing rows relate to the entitlement date
  * (`subscription.next_renewal_at`), so the step reconciles one row instead of
  * appending a second future `scheduled` row: a stacked purchase extends the
@@ -209,13 +255,20 @@ function preferLaterCycle(
  *               leave every row alone and let the operator resolve the overlap
  * - `create`    no open row at all: the next period starts a fresh cycle
  *
+ * The first three carry `retire` alongside the chosen row — the live
+ * `scheduled` rows this decision leaves in place, which it neither moves nor
+ * deletes and therefore cannot be said to protect. `create` has no such field,
+ * because reaching it means there was no open row to leave behind.
+ *
  * `match` outranks `adopt` for every status, pinned contract (see the `match`
  * block below and its spec cases).
  *
- * Deliberately unaware of the persistence boundary: when drift left more than
- * one live `scheduled` row, the candidate pick keeps the invariant repair
- * local, and `renewal_cycle_one_scheduled_per_subscription` rejects the write
- * that would tolerate the duplicate instead of surfacing it.
+ * Deliberately unaware of the persistence boundary: the duplicate a stacked
+ * purchase used to append is prevented by `adopt` and, for new writes, by the
+ * partial unique index `renewal_cycle_one_scheduled_per_subscription`. A
+ * duplicate that already exists in the rows is not repaired here — it is
+ * named, so the step can act on it instead of returning a resolution that looks
+ * clean while a second chargeable cycle sits behind it.
  */
 export function resolveUpcomingCycle(
   cycles: UpcomingRenewalCycleRecord[],
@@ -226,19 +279,23 @@ export function resolveUpcomingCycle(
   /**
    * Pinned contract: an exact-date hit wins even when it is terminal, so a
    * stale live `scheduled` row sitting behind a `succeeded` or `failed` row on
-   * the entitlement date is reported as `match`, not adopted. Both halves of
-   * the invariant are then restored by the constraint, not by this selector:
-   * adopting that stale row would put a second chargeable cycle on a period a
-   * terminal row already settled (a double charge), and the same seam exists
-   * for an exact-date `scheduled` hit with a stale `scheduled` sibling, which
-   * no reordering here can repair either. The state needs the step to delete a
-   * row it does not own, and the normalize migration plus
-   * `renewal_cycle_one_scheduled_per_subscription` make it unreachable for new
-   * writes: the duplicate cycle a stacked purchase used to append is exactly
-   * what `adopt` now prevents.
+   * the entitlement date is reported as `match`, not adopted. Adopting it would
+   * put a second chargeable cycle on a period a terminal row already settled (a
+   * double charge), and the same seam exists for an exact-date `scheduled` hit
+   * with a stale `scheduled` sibling, which no reordering here can repair
+   * either. What the selector now does instead of leaving that neighbour
+   * unmentioned is name it in `retire`: the invariant is not restored by picking
+   * a row, and neither the normalize migration nor
+   * `renewal_cycle_one_scheduled_per_subscription` deletes a row a drift already
+   * left behind — those only stop a new duplicate from being written. Clearing
+   * the named rows is the caller's write, not this decision's.
    */
   if (exactMatch) {
-    return { action: "match", cycle: exactMatch }
+    return {
+      action: "match",
+      cycle: exactMatch,
+      retire: collectRetirable(cycles, exactMatch),
+    }
   }
 
   const candidate = cycles
@@ -253,8 +310,16 @@ export function resolveUpcomingCycle(
   }
 
   return hasInFlightRenewal(candidate)
-    ? { action: "defer", cycle: candidate }
-    : { action: "adopt", cycle: candidate }
+    ? {
+        action: "defer",
+        cycle: candidate,
+        retire: collectRetirable(cycles, candidate),
+      }
+    : {
+        action: "adopt",
+        cycle: candidate,
+        retire: collectRetirable(cycles, candidate),
+      }
 }
 
 export function isPendingUpdateApplicable(
