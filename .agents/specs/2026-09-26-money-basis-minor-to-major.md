@@ -1,6 +1,6 @@
 # Spec: money basis switch (minor → major), aligned to Medusa's currency system
 
-Status: **DESIGN, revision 3 — reviewed adversarially; implementation not started.**
+Status: **IMPLEMENTED — production switched to major units 2026-09-27 (Tasks 1-11 complete; see docs/releases/2026-09-money-basis-switch.md).**
 Supersedes revisions 1-2 of the same date. Evidence sources are named inline; every rule this
 document applies is either quoted from Medusa's own code/docs or measured read-only on production.
 Revision 2 folded in an adversarial design review whose two Critical findings (currency resolution,

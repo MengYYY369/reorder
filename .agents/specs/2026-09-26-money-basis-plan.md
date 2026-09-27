@@ -569,7 +569,7 @@ git add docs/releases/2026-09-money-basis-switch.md
 git commit -m "docs(release): record the plugin migration on the converted rehearsal copy"
 ```
 
-- [ ] **Step 4: STOP — present the evidence and ask for the window**
+- [x] **Step 4: STOP — presented 2026-09-27; user authorized the window ("授权执行任务 10,不用备份,因为没有客户"); Task 10 executed same day.**
 
 This is the plan's designated authorization point. Present to the user: the dry-run output, the three negative-test errors, the spot checks, the migration delta, the two invariants, and the image tag. **Do not proceed to Task 10 without the user's explicit word.**
 
@@ -585,7 +585,7 @@ This is the plan's designated authorization point. Present to the user: the dry-
 - Consumes: everything above; the user's explicit authorization from Task 9 Step 4.
 - Produces: production running major-unit data on the new image, with all assertions repeated.
 
-- [ ] **Step 1: Preconditions, asserted not assumed**
+- [x] **Step 1: Preconditions, asserted not assumed**
 
 ```bash
 ssh ubuntu@170.106.132.210 "docker ps --format '{{.Names}}' | grep -c medusa-prod-store"   # expect 1
@@ -597,7 +597,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa 
 
 Note: These preconditions mirror the SQL script's mixed-basis guard (Task 2 Step 3); performing them in SSH first avoids opening a stopped-store window if they already fail.
 
-- [ ] **Step 2: Stop the store, then dump**
+- [x] **Step 2: Stop the store, then dump**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker stop medusa-prod-store-1"
@@ -606,7 +606,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 pg_dump -U medu
 
 Record size and `sha256sum`. This dump is the recovery of last resort.
 
-- [ ] **Step 3: Convert, then assert**
+- [x] **Step 3: Convert, then assert**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec -i medusa-prod-db-1 psql -U medusa -d medusa_store -v ON_ERROR_STOP=1 -v DO_COMMIT=1 < /path/to/money-minor-to-major.sql"
@@ -616,15 +616,15 @@ Then repeat Task 8 Step 4's five spot checks against `medusa_store`. Any deviati
 
 Note: `-v DO_COMMIT=1` switches from dry-run (ROLLBACK) to commit; `-v ON_ERROR_STOP=1` aborts on first error per Medusa's migration conventions.
 
-- [ ] **Step 4: Deploy the image, migrate, assert**
+- [x] **Step 4: Deploy the image, migrate, assert**
 
 Deploy Task 6's image (compose tag swap), run `medusa db:migrate`, then re-assert the two invariants (Task 9 Step 2).
 
-- [ ] **Step 5: Failure branch — written down before it is needed**
+- [x] **Step 5: Failure branch — written down before it is needed**
 
 If any step fails: restore `/tmp/prod-pre-money-switch.dump` into `medusa_store`, leave the store **stopped** (restored data is minor under an image whose code expects major), and restart the window from Step 2 with a rebuilt image. Never attempt `medusa migrate down` — the 1.6.1 rehearsal proved a failed `--all-or-nothing` migrate is unrecoverable by re-run.
 
-- [ ] **Step 6: Start the store and smoke the enumerated contracts**
+- [x] **Step 6: Start the store and smoke the enumerated contracts**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker start medusa-prod-store-1"
@@ -632,7 +632,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker start medusa-prod-store-1"
 
 Then, in order: (a) admin loads and a known product shows its price at the correct magnitude; (b) a saas-bridge response's `total` for a seeded order reads major; (c) the transactional email for that order renders the converted amount; (d) the duplicate-cycle query returns nothing; (e) watch the scheduler's first run — with no due cycles it must write nothing (check `renewal_cycle` for new `PROCESSING` rows after 5 minutes).
 
-- [ ] **Step 7: Record and commit**
+- [x] **Step 7: Record and commit**
 
 Append the whole window to the runbook; commit:
 
@@ -652,7 +652,7 @@ git commit -m "docs(release): record the production money basis switch window"
 - Consumes: Task 10's production state.
 - Produces: analytics repopulated from major-unit orders; the spec marked implemented; the residual list written down.
 
-- [ ] **Step 1: Rebuild analytics**
+- [x] **Step 1: Rebuild analytics**
 
 Trigger the plugin's `subscription_metrics_daily` rebuild (the table was deleted by the conversion) and verify it repopulates with major-unit values:
 
@@ -663,11 +663,11 @@ select count(*), min(mrr_amount), max(mrr_amount) from subscription_metrics_dail
 
 Note: Unlike Task 10's failure branch (restore dump), this is a soft recovery path — one retry is reasonable given no transactional data loss risk.
 
-- [ ] **Step 2: Close out the documents**
+- [x] **Step 2: Close out the documents**
 
 Update the spec's status line to implemented, and append to the runbook: what was not verified (the scheduler charge path against a real renewal — none was due), the currency-less jsonb limitation, and the follow-ups (variant-metadata currency column; the `medusa-paypal` release if the user wants one).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/releases/2026-09-money-basis-switch.md .agents/specs/2026-09-26-money-basis-minor-to-major.md

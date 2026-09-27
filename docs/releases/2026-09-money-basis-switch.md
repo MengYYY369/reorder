@@ -292,7 +292,142 @@ deploy step swaps compose from 0.4.21 → 0.4.22.
 
 ---
 
-## Task 10 — production window
+## Task 10 — production window (executed 2026-09-27, ~10:45–10:55 +08)
 
-NOT PERFORMED. Requires the user's explicit authorization after Task 9's
-evidence is presented (plan Task 9 Step 4 is the designated stop point).
+Executed with the user's explicit authorization. The user waived the fresh
+pre-window dump ("no customers, data disposable"); the retained
+2026-09-26T18:14Z 1.6.1-rehearsal dump remains on the host as an incidental
+recovery anchor (identical money content: zero rows were created after the
+cutoff). Downtime: store stopped ~10:45Z→10:55Z window (stop → convert →
+migrate → start ≈ 12 minutes total, conversion itself seconds).
+
+**Step 1 — preconditions, asserted:**
+
+```text
+store containers: 1 (medusa-prod-store-1)
+due cycles now (expect 0): 0
+post-cutoff rows across 16 audited money tables (expect 0): 0000000000000000
+money_unit_migration table in prod (expect absent): 0
+```
+
+**Step 2 — store stopped** (`docker stop medusa-prod-store-1` → exited). No
+fresh dump per user authorization.
+
+**Step 3 — conversion, first attempt ABORTED by the mixed-basis guard (by
+design, and it caught a real script flaw):**
+
+```text
+ERROR: mixed basis: 48 money row(s) in subscription_metrics_daily created after
+       the major-unit code went live (2026-09-26 04:18:56+00)
+```
+
+Finding: `subscription_metrics_daily` and `paypal_plan` are DERIVED tables the
+script itself deletes and rebuilds (Step 5) — their rows are analytics
+aggregates refreshed by the running store's daily jobs, so `created_at >
+cutoff` is normal, not mixed-basis evidence. The rehearsal did not catch this
+because the scratch was restored from the 18:14Z dump, predating the daily
+job's post-restart refreshes. Fix: both tables removed from the guard's audit
+list (comment in the script documents why). Rollback verified clean (table
+absent, amounts still minor, 49 orders), script re-uploaded, re-run:
+
+```text
+exit=0; 35 × "sum identity ok"  (rehearsal had 42: prod has no jpy/kwd probes)
+mixed-basis guard passed / unresolved-join guard passed / store-default guard passed
+paypal_subscription.locked_amount altered to numeric(20,6)
+normalized string-form variant metadata without money keys to objects (2 rows)
+ALL ASSERTIONS PASSED → COMMIT → "Migration committed successfully"
+```
+
+**Independent spot checks (hand-run, all matching rehearsal minus probes):**
+
+```text
+price: cny n=7 5..699   usd n=8 5..99.9            (identical to rehearsal)
+dd>0 fractional rows: 9      (rehearsal 10 = 9 + kwd probe)
+dd=0 fractional rows: 0
+locked_amount: 9.99 ×6, no truncation; locked_amount=9 count: 0
+payment cny max: 64.9   capture max: 64.9   order_line_item usd max: 59.9
+order_summary usd paid_total max: 64.9
+variant setup_fee: 2 (was 200 minor; rehearsal pre-sum 1199 = 999 probe + 200)
+string-form metadata remaining: 0
+money_unit_migration rows: 1
+derived tables empty after cleanup: 0 | 0
+```
+
+**Step 4 — deploy + migrate:**
+
+```bash
+# compose tag swap (backup kept: /opt/medusa-prod/compose.yaml.bak-0.4.21)
+sed -i 's#image: medusa-saas-backend:0.4.21#image: medusa-saas-backend:0.4.22#' /opt/medusa-prod/compose.yaml
+cd /opt/medusa-prod && docker compose run --rm --no-deps store \
+  npx medusa db:migrate --all-or-nothing --execute-safe-links
+# → exit 0, "Migrations completed", exactly:
+#   Migration20260922120000 (activityLog), Migration20260924120000 (renewal)
+#   mikro_orm_migrations: 208 → 210
+```
+
+Invariants re-asserted on production: unique index exists and `indisvalid`;
+duplicate-scheduled-cycle query returns 0 rows; scheduled cycles still 13.
+
+**Step 6 — store started on 0.4.22, smoke:**
+
+- `docker compose up -d store` → Up; `Server is ready on port: 9000`; health
+  `200`; 10+ minutes uptime with **0 error-level log lines**.
+- (a) Admin route `/app` → 200. Price magnitude verified at the DB level
+  (major: 5..699 cny / 5..99.9 usd); the plugin does no rescaling.
+- (b/c) A live saas-bridge order response and a rendered transactional email
+  were NOT exercised (no new order was placed in the window). The image-level
+  proof stands: `transactional-emails.ts` contains 0 `/100` occurrences and
+  the same code path rendered correct amounts in the plugin's http gates
+  (255/255) against major-unit fixtures.
+- (d) duplicate-cycle query: 0 rows (above).
+- (e) scheduler first runs: `process-renewal-cycles` at 10:05:00Z —
+  `scanned_count:0, processed_count:0, failure_count:0`, **nothing written**;
+  `renewal_cycle` has 0 PROCESSING rows and 13 scheduled untouched.
+
+---
+
+## Task 11 — post-switch: analytics rebuild and close-out
+
+**Analytics rebuild: DONE (manual trigger).** The daily job
+(`process-analytics-daily-snapshots`, cron `0 0 * * *`, 3-day lookback) would
+only have repopulated 3 days at midnight UTC; the conversion deleted the whole
+table, so the rebuild workflow was triggered for the full order window via a
+one-off `medusa exec` script (same workflow the admin rebuild route invokes):
+
+```bash
+docker run --rm --user root --network medusa-prod_default --env-file /opt/medusa-prod/.env \
+  -e DATABASE_URL=postgres://medusa:$DB_PASSWORD@db:5432/medusa_store?ssl_mode=disable \
+  -e EPAY_NOTIFY_URL=... (compose-derived vars the plain env-file lacks) \
+  -v /tmp/money-basis-analytics-rebuild.ts:/app/apps/backend/src/scripts/...:ro \
+  medusa-saas-backend:0.4.22 npx medusa exec src/scripts/money-basis-analytics-rebuild.ts
+```
+
+Two exec gotchas (recorded for the next person): the script param is
+`{container, args}` (not the container itself), and the workflow must be run
+with `run({ input, container })` — the default fork built from the module
+snapshot has no `logger`, which the rebuild step resolves.
+
+Result: exit 0; **27 days processed, 137 rows upserted, 0 blocked, 0 failed**;
+one benign quality warning (`analytics.mrr.spike` on 09-19: daily MRR 19.81 →
+209.51, +957.6%) — expected, adjacent-day comparison across the basis switch.
+Post-rebuild: `subscription_metrics_daily` = 137 rows, `mrr_amount` range
+0.01..64.9 (major units, matching converted order totals), 0 rows at
+minor-scale magnitude. `paypal_plan` remains empty (0 rows) — it is rebuilt
+lazily by the paypal plugin's own sync flow on first subscription touch; no
+action required.
+
+**Residuals / not verified (written down per plan):**
+
+- The scheduler CHARGE path against a real due renewal was not exercised — no
+  cycle was due today (0 due before the window; 13 scheduled, earliest
+  2026-10-18). The due-renewal flow must be watched at the first real renewal.
+- `paypal_plan` rebuild is lazy (first paypal subscription sync).
+- Store API / saas-bridge / email smoke items (b)(c) were covered by image
+  proof + gates, not by a live order.
+- Scratch DB `medusa_money_rehearsal` (converted rehearsal copy) is left on
+  the host, as `medusa_rehearsal_161` was; drop it when convenient
+  (`dropdb -U medusa medusa_money_rehearsal` in medusa-prod-db-1).
+- Sibling repos remain edits-only/uncommitted per the standing constraint:
+  medusa-saas (script + Dockerfile + seeds + vendor trees), medusa-paypal
+  (0.5.0 working tree incl. the regression spec). Commits are the owner's.
+
