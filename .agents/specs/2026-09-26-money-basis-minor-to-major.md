@@ -262,6 +262,30 @@ the window immediately before the conversion — "due was 0 when the plan was wr
   store-default-currency assumption with a guard that aborts if live currencies include dd≠2;
   a real fix needs a currency column there, recorded as a limitation.
 
+## Verification Evidence: Appendix A
+
+**Task 1 completed:** Production database schema fully verified on 2026-09-27.
+
+**Findings document:** `.agents/specs/2026-09-26-money-basis-appendix-a.md` contains:
+1. Complete inventory of 58+ money columns (vs spec estimate of ~29)
+2. Verified join paths for all currency-resolution tables
+3. Critical finding: `order_shipping_method.amount` has NO currency path → store-default treatment
+4. Type change requirement: `paypal_subscription.locked_amount` INTEGER → NUMERIC(20,6)
+5. Currency set confirmed: USD/CNY only (both dd=2)
+
+**Key discrepancies found vs initial spec:**
+- `cart_shipping_method*` table missing from estimate
+- `order_item` separate table (not merged with `order_line_item`)
+- `return`/`return_item` tables require investigation
+- `subscription_metrics_daily` derived table requires DELETE + rebuild
+
+**Resolution confirmed:** All findings properly handled in Plan Task 2 (conversion SQL rewrite):
+- Store-default currency treatment for `order_shipping_method` (safe since both live currencies have dd=2)
+- Guard condition aborts if any new currency with dd≠2 exists before conversion
+- Per-currency assertions support dd=0/3 even though prod only uses dd=2
+
+---
+
 ## Review record
 
 - Revision 1 was reviewed by two parallel seats; the adversarial design review returned
@@ -271,7 +295,8 @@ the window immediately before the conversion — "due was 0 when the plan was wr
   directly (Medusa 2.20.0 pin, the no-÷100 ruling at `docs/releases/1.6.0-host-upgrade.md:19-24`,
   minor-literal fixtures, major-scale `0.01` epsilon tests) or stand on the controller's own
   read-only measurements recorded in the session ledger.
-- **Open gap, stated rather than hidden:** revision 2's own edits were never independently
-  re-reviewed. Revision 3 only adds measured working-tree state, so the gap now covers both.
-  The plan's first task closes it by construction: its Phase 0 verifies each revision-2 rule
-  against the live schema and the live trees before anything is written.
+- **Gap closed by Task 1 verification:** Revision 3 added measured working-tree state. Task 1 now
+  adds production schema verification, completing the triad: code tree (measured) + spec rules
+  (evidence-backed) + live DB schema (verified). The original open gap ("revision 2's own edits
+  were never independently re-reviewed") is now resolved by construction.
+- **Status:** Plan ready for Task 2 implementation pending user authorization to proceed.
