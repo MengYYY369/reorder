@@ -299,4 +299,6 @@ the window immediately before the conversion — "due was 0 when the plan was wr
   adds production schema verification, completing the triad: code tree (measured) + spec rules
   (evidence-backed) + live DB schema (verified). The original open gap ("revision 2's own edits
   were never independently re-reviewed") is now resolved by construction.
+- **Known behavior documented:** `src/lib/currency-digits.ts:FALLBACK_DIGITS = 2` - cached per process,
+  never invalidated, warns once if decimal_digits missing. This is acceptable as documented in spec revision 3.
 - **Status:** Plan ready for Task 2 implementation pending user authorization to proceed.
