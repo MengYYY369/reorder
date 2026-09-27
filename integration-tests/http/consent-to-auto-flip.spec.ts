@@ -100,13 +100,13 @@ async function seedCaptureContainer(
 
   const paymentCollection = await paymentModule.createPaymentCollections({
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
   })
 
   await paymentModule.createPaymentSession(paymentCollection.id, {
     provider_id: "pp_system_default",
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
     data: {
       payment_method: VAULT_TOKEN,
       ...(options.consentFromSession && options.sessionCarriesConsent !== false

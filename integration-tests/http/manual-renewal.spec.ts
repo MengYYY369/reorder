@@ -67,7 +67,7 @@ async function seedManualSubscription(
       {
         title: "Subscription renewal",
         subtitle: "Monthly plan",
-        unit_price: input.unit_price ?? 1800,
+        unit_price: input.unit_price ?? 18,
         quantity: 1,
         requires_shipping: false,
       } as never,

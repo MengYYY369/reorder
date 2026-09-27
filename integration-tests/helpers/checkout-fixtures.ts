@@ -83,7 +83,7 @@ export async function seedSubscriptionCheckoutCart(
     items: [
       {
         title: "Subscription item",
-        unit_price: 1800,
+        unit_price: 18,
         quantity: 1,
         variant_id: variantId,
         metadata: lineItemMetadata,
@@ -93,13 +93,13 @@ export async function seedSubscriptionCheckoutCart(
 
   const paymentCollection = await paymentModule.createPaymentCollections({
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
   })
 
   await paymentModule.createPaymentSession(paymentCollection.id, {
     provider_id: "pp_system_default",
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
     data: {},
   } as never)
 
@@ -112,7 +112,7 @@ export async function seedSubscriptionCheckoutCart(
       {
         title: "Subscription item",
         quantity: 1,
-        unit_price: 1800,
+        unit_price: 18,
         variant_id: variantId,
         metadata: lineItemMetadata,
       } as never,

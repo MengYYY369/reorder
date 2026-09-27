@@ -68,7 +68,7 @@ function buildRow(
     currency_code: "USD",
     is_active: true,
     active_subscriptions_count: 1,
-    mrr_amount: 100,
+    mrr_amount: 1.00,
     churned_subscriptions_count: 0,
     churn_reason_category: null,
     source_snapshot: null,
@@ -237,32 +237,32 @@ describe("analytics admin-query read model", () => {
       buildRow("current_day_one", {
         metric_date: "2026-04-01T00:00:00.000Z",
         subscription_id: "sub_a",
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("current_day_two", {
         metric_date: "2026-04-02T00:00:00.000Z",
         subscription_id: "sub_a",
-        mrr_amount: 120,
+        mrr_amount: 1.20,
       }),
       buildRow("current_day_three", {
         metric_date: "2026-04-02T00:00:00.000Z",
         subscription_id: "sub_b",
-        mrr_amount: 80,
+        mrr_amount: 0.80,
       }),
       buildRow("previous_day_one", {
         metric_date: "2026-03-30T00:00:00.000Z",
         subscription_id: "sub_prev_a",
-        mrr_amount: 90,
+        mrr_amount: 0.90,
       }),
       buildRow("previous_day_two", {
         metric_date: "2026-03-31T00:00:00.000Z",
         subscription_id: "sub_prev_a",
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("previous_day_three", {
         metric_date: "2026-03-31T00:00:00.000Z",
         subscription_id: "sub_prev_b",
-        mrr_amount: 50,
+        mrr_amount: 0.50,
         churned_subscriptions_count: 1,
       }),
     ]
@@ -293,8 +293,8 @@ describe("analytics admin-query read model", () => {
     expect(response.kpis).toEqual([
       expect.objectContaining({
         key: AnalyticsMetricKey.MRR,
-        value: 200,
-        previous_value: 150,
+        value: 2.00,
+        previous_value: 1.50,
         currency_code: "USD",
       }),
       expect.objectContaining({
@@ -305,7 +305,7 @@ describe("analytics admin-query read model", () => {
       expect.objectContaining({
         key: AnalyticsMetricKey.LTV,
         value: null,
-        previous_value: 225,
+        previous_value: 2.25,
         currency_code: "USD",
       }),
       expect.objectContaining({
@@ -321,28 +321,28 @@ describe("analytics admin-query read model", () => {
       buildRow("day_one_a", {
         metric_date: "2026-04-01T00:00:00.000Z",
         subscription_id: "sub_a",
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("day_one_b", {
         metric_date: "2026-04-01T00:00:00.000Z",
         subscription_id: "sub_b",
-        mrr_amount: 40,
+        mrr_amount: 0.40,
       }),
       buildRow("day_two_a", {
         metric_date: "2026-04-08T00:00:00.000Z",
         subscription_id: "sub_a",
-        mrr_amount: 110,
+        mrr_amount: 1.10,
       }),
       buildRow("day_two_b", {
         metric_date: "2026-04-08T00:00:00.000Z",
         subscription_id: "sub_b",
-        mrr_amount: 50,
+        mrr_amount: 0.50,
         churned_subscriptions_count: 1,
       }),
       buildRow("day_three_a", {
         metric_date: "2026-05-01T00:00:00.000Z",
         subscription_id: "sub_a",
-        mrr_amount: 125,
+        mrr_amount: 1.25,
       }),
     ]
     const { container } = createContainer(rows)
@@ -515,7 +515,7 @@ describe("analytics admin-query read model", () => {
         status: "active",
         frequency_interval: "month",
         frequency_value: 1,
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("keep_b", {
         metric_date: "2026-04-02T00:00:00.000Z",
@@ -524,7 +524,7 @@ describe("analytics admin-query read model", () => {
         status: "active",
         frequency_interval: "month",
         frequency_value: 1,
-        mrr_amount: 50,
+        mrr_amount: 0.50,
       }),
       buildRow("filter_by_status", {
         metric_date: "2026-04-02T00:00:00.000Z",
@@ -533,13 +533,13 @@ describe("analytics admin-query read model", () => {
         status: "paused",
         is_active: false,
         active_subscriptions_count: 0,
-        mrr_amount: 999,
+        mrr_amount: 9.99,
       }),
       buildRow("filter_by_product", {
         metric_date: "2026-04-02T00:00:00.000Z",
         subscription_id: "sub_other_product",
         product_id: "prod_other",
-        mrr_amount: 999,
+        mrr_amount: 9.99,
       }),
       buildRow("filter_by_frequency", {
         metric_date: "2026-04-02T00:00:00.000Z",
@@ -547,7 +547,7 @@ describe("analytics admin-query read model", () => {
         product_id: "prod_target",
         frequency_interval: "year",
         frequency_value: 1,
-        mrr_amount: 999,
+        mrr_amount: 9.99,
       }),
     ]
     const { container } = createContainer(rows)
@@ -564,7 +564,7 @@ describe("analytics admin-query read model", () => {
     expect(response.kpis).toEqual([
       expect.objectContaining({
         key: AnalyticsMetricKey.MRR,
-        value: 150,
+        value: 1.50,
       }),
       expect.objectContaining({
         key: AnalyticsMetricKey.CHURN_RATE,
@@ -587,13 +587,13 @@ describe("analytics admin-query read model", () => {
         metric_date: "2026-04-02T00:00:00.000Z",
         subscription_id: "sub_usd",
         currency_code: "USD",
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("eur", {
         metric_date: "2026-04-02T00:00:00.000Z",
         subscription_id: "sub_eur",
         currency_code: "EUR",
-        mrr_amount: 80,
+        mrr_amount: 0.80,
       }),
     ]
     const mixedCurrencyContainer = createContainer(mixedCurrencyRows).container
@@ -670,19 +670,19 @@ describe("analytics admin-query read model", () => {
         metric_date: "2026-05-25T00:00:00.000Z",
         subscription_id: "sub_live_a",
         active_subscriptions_count: 1,
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("previous_live_snapshot_a", {
         metric_date: "2026-05-24T00:00:00.000Z",
         subscription_id: "sub_prev_a",
         active_subscriptions_count: 1,
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
       buildRow("previous_live_snapshot_b", {
         metric_date: "2026-05-24T00:00:00.000Z",
         subscription_id: "sub_prev_b",
         active_subscriptions_count: 1,
-        mrr_amount: 100,
+        mrr_amount: 1.00,
       }),
     ]
     const subscriptions = [

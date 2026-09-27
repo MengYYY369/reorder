@@ -169,7 +169,7 @@ async function seedSubscriptionOrder(
       {
         title: "Subscription item",
         subtitle: product.title,
-        unit_price: 1800,
+        unit_price: 18,
         quantity: 1,
         variant_id: variant.id,
         metadata: itemMetadata,
@@ -179,13 +179,13 @@ async function seedSubscriptionOrder(
 
   const paymentCollection = await paymentModule.createPaymentCollections({
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
   })
 
   await paymentModule.createPaymentSession(paymentCollection.id, {
     provider_id: "pp_system_default",
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
     data: options.sessionCarriesConsent ? { customer_id: customer.id } : {},
   } as never)
 

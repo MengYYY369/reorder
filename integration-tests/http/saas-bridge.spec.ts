@@ -159,7 +159,7 @@ async function seedBridgeOrder(
       {
         title: "Subscription item",
         subtitle: "Monthly plan",
-        unit_price: 1800,
+        unit_price: 18,
         quantity: 1,
         metadata: {
           is_subscription: true,
@@ -173,12 +173,12 @@ async function seedBridgeOrder(
 
   const paymentCollection = await paymentModule.createPaymentCollections({
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
   })
   await paymentModule.createPaymentSession(paymentCollection.id, {
     provider_id: "pp_system_default",
     currency_code: "usd",
-    amount: 1800,
+    amount: 18,
     data: {},
   } as never)
 
@@ -197,7 +197,7 @@ async function seedBridgeOrder(
         title: "Subscription item",
         subtitle: "Monthly plan",
         quantity: 1,
-        unit_price: 1800,
+        unit_price: 18,
         metadata: { is_subscription: true },
       } as never,
     ],
@@ -463,7 +463,7 @@ medusaIntegrationTestRunner({
         expect(order.metadata.email).toEqual(customer.email)
         expect(order.metadata.frequency_interval).toEqual("month")
         expect(order.cart.currency_code).toEqual("usd")
-        expect(order.cart.items[0].unit_price).toEqual(1800)
+        expect(order.cart.items[0].unit_price).toEqual(18)
         expect(order.cart.items[0].quantity).toEqual(1)
       })
 
@@ -620,7 +620,7 @@ medusaIntegrationTestRunner({
             {
               title: "Subscription renewal",
               subtitle: "Monthly plan",
-              unit_price: 1800,
+              unit_price: 18,
               quantity: 1,
               requires_shipping: false,
             } as never,
@@ -1115,7 +1115,7 @@ medusaIntegrationTestRunner({
         // link it to the variant
         const pricingModule = container.resolve<any>(Modules.PRICING)
         const priceSet = await pricingModule.createPriceSets({
-          prices: [{ amount: 1800, currency_code: "usd" }],
+          prices: [{ amount: 18, currency_code: "usd" }],
         })
         const link = container.resolve<ILinkModuleService>(
           ContainerRegistrationKeys.LINK

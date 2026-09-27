@@ -83,7 +83,7 @@ medusaIntegrationTestRunner({
               data: [
                 {
                   id: "ord_analytics_rerun",
-                  total: 129,
+                  total: 1.29,
                   currency_code: "USD",
                 },
               ],
@@ -124,7 +124,7 @@ medusaIntegrationTestRunner({
             is_active: true,
             active_subscriptions_count: 1,
             churned_subscriptions_count: 0,
-            mrr_amount: 129,
+            mrr_amount: 1.29,
           },
           {
             metric_date: "2026-04-02T00:00:00.000Z",
@@ -133,7 +133,7 @@ medusaIntegrationTestRunner({
             is_active: true,
             active_subscriptions_count: 1,
             churned_subscriptions_count: 0,
-            mrr_amount: 129,
+            mrr_amount: 1.29,
           },
         ])
 

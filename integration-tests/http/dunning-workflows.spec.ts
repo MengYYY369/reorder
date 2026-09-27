@@ -263,7 +263,7 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_success", total: 129, currency_code: "usd" }],
+              data: [{ id: "ord_dun_success", total: 1.29, currency_code: "usd" }],
             }
           }
 
@@ -271,7 +271,7 @@ medusaIntegrationTestRunner({
         })
         jest
           .spyOn(paymentModule, "authorizePaymentSession")
-          .mockResolvedValue({ id: "pay_1", amount: 129 } as any)
+          .mockResolvedValue({ id: "pay_1", amount: 1.29 } as any)
         jest
           .spyOn(paymentModule, "capturePayment")
           .mockResolvedValue({ id: "pay_1" } as any)
@@ -467,7 +467,7 @@ medusaIntegrationTestRunner({
         jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
           if (input.entity === "order") {
             return {
-              data: [{ id: "ord_dun_retry", total: 129, currency_code: "usd" }],
+              data: [{ id: "ord_dun_retry", total: 1.29, currency_code: "usd" }],
             }
           }
 
@@ -543,7 +543,7 @@ medusaIntegrationTestRunner({
           if (input.entity === "order") {
             return {
               data: [
-                { id: "ord_dun_unrecovered", total: 129, currency_code: "usd" },
+                { id: "ord_dun_unrecovered", total: 1.29, currency_code: "usd" },
               ],
             }
           }
