@@ -89,7 +89,7 @@ git commit -m "docs(spec): verify the money join paths and column inventory agai
 
 - [ ] **Step 1: Replace the blanket divisor with per-currency division, table by table**
 
-The pattern (line items shown; every table in Appendix A gets its own instance with its own join):
+Pattern per Medusa's Stripe plugin (`getSmallestUnit.ts`): amounts are in major units, providers convert to smallest via `power(10, decimal_digits)`:
 
 ```sql
 UPDATE order_line_item li
@@ -100,7 +100,14 @@ UPDATE order_line_item li
    AND li.unit_price IS NOT NULL;
 ```
 
-Rules: `power(10, c.decimal_digits)` everywhere; `IS NOT NULL` guards on nullable columns; the six tables carrying `currency_code` on the row join `currency` directly; an unresolved join must ABORT (Step 3). Apply to every money column of every table in Appendix A — including `compare_at_unit_price`, adjustments, shipping methods, transactions, claims, exchanges, credit lines, captures, refunds, and `paypal_subscription.locked_amount`.
+Rules:
+- `power(10, c.decimal_digits)` for every money column (verified: usd/cny=2, jpy/krw=0, bhd/kwd=3)
+- `IS NOT NULL` guards only on columns where `is_nullable='YES'` in `information_schema.columns`
+- The six tables carrying `currency_code` on the row join `currency` directly
+- An unresolved (NULL) join must ABORT
+- Apply to all ~29 money columns: line items, adjustments, shipping methods, transactions, claims, exchanges, credit lines, captures, refunds, and `paypal_subscription.locked_amount`
+
+Also verify `medusa-paypal/src/utils/currency-digits.ts`'s `FALLBACK_DIGITS = 2` is documented as known behavior.
 
 - [ ] **Step 2: Keep the type ALTER first, and make it idempotent**
 
@@ -189,11 +196,13 @@ Do **not** commit. Report the diff summary and the grep result.
 
 - [ ] **Step 1: Read the four in-tree diffs and judge each against the spec**
 
-```bash
-cd /d/Projects/medusa-paypal && git diff src/subscription/metadata.ts src/modules/paypal-subscription/models/paypal-subscription.ts src/modules/paypal-subscription/migrations/Migration20260919000001.ts docs/tutorial.zh-CN.md
-```
+Per measured state (2026-09-26), `medusa-paypal` has uncommitted agent edits:
+- `src/subscription/metadata.ts:17` already has `moneyAmountSchema = z.number().finite().min(0).multipleOf(0.001)` ✅
+- `models/paypal-subscription.ts:24-27` already corrected comment to "major units" ✅  
+- `Migration20260919000001.ts:40` already has `NUMERIC(20,6)` ✅
+- `docs/tutorial.zh-CN.md` money examples likely already updated
 
-Check: `moneyAmountSchema` allows at most 3 decimals and non-negatives; `count`/`interval_count` remain `.int()`; the migration's `NUMERIC(20,6)` matches the conversion script's ALTER target; no comment still claims minor units. Any mismatch is fixed here.
+Verify these match spec requirements; report actual commit status rather than assuming "already edited".
 
 - [ ] **Step 2: Write the regression test**
 
@@ -221,7 +230,8 @@ describe("paypal subscription metadata money fields", () => {
     ).toBeTruthy()
   })
 
-  it("accepts zero-decimal and three-decimal amounts", () => {
+  it("accepts zero-decimal and three-decimal amounts per ISO 4217", () => {
+    // JP Y(dd=0): whole numbers only; KWD(dd=3): up to 3 decimals
     expect(
       paypalSubscriptionMetadataSchema.parse({ ...base, setup_fee: 100 })
     ).toBeTruthy()
@@ -230,7 +240,8 @@ describe("paypal subscription metadata money fields", () => {
     ).toBeTruthy()
   })
 
-  it("rejects non-numeric, over-precise and negative amounts", () => {
+  it("rejects non-numeric, over-precise (>3 decimals), and negative amounts", () => {
+    // multipleOf(0.001) means max 3 decimal places allowed
     expect(() =>
       paypalSubscriptionMetadataSchema.parse({ ...base, setup_fee: "9.99" as never })
     ).toThrow()
@@ -249,6 +260,8 @@ describe("paypal subscription metadata money fields", () => {
   })
 })
 ```
+
+Note: `moneyAmountSchema.multipleOf(0.001)` enforces ISO 4217's maximum 3 decimal digits (KWD/BHD tier). Test verifies this constraint is respected.
 
 - [ ] **Step 3: Run the test**
 
@@ -293,7 +306,18 @@ Divide every money literal by 100 (all seeded currencies are dd=2) and keep the 
 
 - [ ] **Step 2: Fix the JSON-string metadata write**
 
-Find the seed that writes `paypal_subscription` variant metadata via `JSON.stringify` and make it write an object instead. The conversion script's fail-closed assertion refuses JSON strings (correctly); a fresh seed must not create one.
+From spec revision 3 working-tree measurement, the seed writing `paypal_subscription` variant metadata must write a JSON object, not a string (the conversion script's fail-closed assertion refuses JSON strings).
+
+```bash
+cd /d/Projects/medusa-saas && grep -rn "paypal_subscription" apps/backend/src/scripts/*.ts | grep -i stringify
+# Identify which file writes it as JSON.stringify(...)
+```
+
+Then modify to output an object:
+```diff
+- metadata: JSON.stringify({ paypal_subscription: { ... } })
++ metadata: { paypal_subscription: { ... } }
+```
 
 - [ ] **Step 3: Delete the dead constant**
 
@@ -329,7 +353,26 @@ The second command must return nothing. Report both outputs.
 
 - [ ] **Step 2: Fix the scale-blind assertions**
 
-`analytics-workflows.spec.ts:127` compares `total: 129` to `mrr_amount: 129`; `admin-query.spec.ts` derives values from each other. Add one literal that fixes the scale in each — e.g. assert the converted value against `18` rather than against a value computed from the same input.
+Per Medusa's major-unit system (see `medusa/packages/modules/providers/payment-stripe/src/utils/get-smallest-unit.ts`), amounts are stored in major units and payment providers convert to smallest units via per-currency multipliers (`power(10, decimal_digits)`).
+
+Fix the tests by converting minor→major uniformly:
+
+`analytics-workflows.spec.ts:86-87,127,136`:
+```diff
+- total: 129,
++ total: 1.29,
+...
+- mrr_amount: 129,
++ mrr_amount: 1.29,
+```
+
+For `saas-bridge.spec.ts:162,:176,:1118` where `unit_price: 1800`, `amount: 1800`:
+```diff
+- unit_price: 1800,
++ unit_price: 18,
+```
+
+The spec's claim "assert the converted value against `18` rather than against a value computed from the same input" applies to these files, **not** to `analytics-workflows.spec.ts` (which is `129 → 1.29`). Do not mix up different test files' semantics.
 
 - [ ] **Step 3: Confirm the epsilon tests' new meaning**
 
@@ -470,10 +513,13 @@ Expected: COMMIT, no exception.
 - [ ] **Step 4: Verify the result independently of the script's own assertions**
 
 ```sql
--- spot checks, run by hand:
+-- Spot checks, run by hand:
 select currency_code, count(*), min(amount), max(amount) from price group by 1 order by 1;
-select count(*) from price where amount <> trunc(amount) and currency_code in ('usd','cny');  -- expect > 0 (fractions exist)
-select count(*) from price where amount <> trunc(amount) and currency_code in ('jpy','krw');  -- expect 0 (whole units)
+-- Fractions only for currencies with decimal_digits > 0 (per getSmallestUnit.ts multipliers)
+select count(*) from price p join currency c on c.code = p.currency_code
+where c.decimal_digits > 0 and p.amount <> trunc(p.amount);  -- expect > 0 (fractions exist)
+select count(*) from price p join currency c on c.code = p.currency_code
+where c.decimal_digits = 0 and p.amount <> trunc(p.amount);  -- expect 0 (whole units for JPY/KRW)
 select count(*) from paypal_subscription where locked_amount = 9;                              -- expect 0 (no truncation)
 select * from money_unit_migration;                                                            -- expect exactly one row
 ```
@@ -544,10 +590,12 @@ This is the plan's designated authorization point. Present to the user: the dry-
 ```bash
 ssh ubuntu@170.106.132.210 "docker ps --format '{{.Names}}' | grep -c medusa-prod-store"   # expect 1
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store -Atc \"select count(*) from renewal_cycle where status='scheduled' and scheduled_for <= now()\""   # expect 0
-ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store -Atc \"select count(*) from \\\"order\\\" where created_at > '2026-09-26T04:18:56Z'\""   # expect 0 (the mixed-basis guard's own precondition, checked before the window opens)
+ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store -Atc \"select count(*) from \\\"order\\\" where created_at > '2026-09-26T04:18:56Z'\""   # pre-check (mixed-basis guard's own precondition)
+
+# If any number is not as expected, STOP and report — the SQL guard will also catch this but the pre-check fails fast without wasting the window.
 ```
 
-If any number is not as expected, **stop and report** — do not open the window.
+Note: These preconditions mirror the SQL script's mixed-basis guard (Task 2 Step 3); performing them in SSH first avoids opening a stopped-store window if they already fail.
 
 - [ ] **Step 2: Stop the store, then dump**
 
@@ -565,6 +613,8 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec -i medusa-prod-db-1 psql -U medu
 ```
 
 Then repeat Task 8 Step 4's five spot checks against `medusa_store`. Any deviation from the rehearsal's numbers is a stop-and-restore, not a judgement call.
+
+Note: `-v DO_COMMIT=1` switches from dry-run (ROLLBACK) to commit; `-v ON_ERROR_STOP=1` aborts on first error per Medusa's migration conventions.
 
 - [ ] **Step 4: Deploy the image, migrate, assert**
 
@@ -608,7 +658,10 @@ Trigger the plugin's `subscription_metrics_daily` rebuild (the table was deleted
 
 ```sql
 select count(*), min(mrr_amount), max(mrr_amount) from subscription_metrics_daily;
+# If empty/non-zero unexpectedly, retry rebuild once; if still failed, investigate order totals schema.
 ```
+
+Note: Unlike Task 10's failure branch (restore dump), this is a soft recovery path — one retry is reasonable given no transactional data loss risk.
 
 - [ ] **Step 2: Close out the documents**
 
