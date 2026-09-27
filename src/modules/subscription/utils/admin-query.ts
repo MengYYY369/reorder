@@ -28,6 +28,26 @@ import {
 } from "./payment-methods"
 import { subscriptionErrors } from "./errors"
 
+/**
+ * Builds a formatted ID suffix for fallback display names.
+ * 
+ * When product/customer/variant names are completely missing, we show
+ * something like "Unknown product (prod_xyz)" instead of just "Unknown product".
+ * The truncated ID helps admins identify and search for the item.
+ * 
+ * @param id The raw ID string from database
+ * @param length Number of characters to truncate to, default 8
+ * @returns Formatted string like " (prod_xxx)" or empty string if no ID provided
+ */
+function buildTruncatedId(id?: string | null, length = 8): string {
+  if (!id) {
+    console.warn('[Reorder] Missing ID in buildTruncatedId - type system may be bypassed')
+    return ""
+  }
+  return ` (${id.slice(0, length)})`
+}
+
+
 export type ListAdminSubscriptionsInput = {
   limit?: number
   offset?: number
@@ -274,22 +294,27 @@ function mapListItem(
 ): SubscriptionAdminListItem {
   const fallbackCustomer = record.customer_snapshot ?? {}
   const fallbackProduct = record.product_snapshot ?? {}
+  // Enhanced fallback with truncated IDs (consistent with getSubscriptionDisplayDataMap)
   const customerName =
     displayData?.customer_name ??
     fallbackCustomer.full_name ??
-    "Unknown customer"
+    `Unknown customer${buildTruncatedId(record.customer_id)}`
+  
   const customerEmail =
     displayData?.customer_email ??
     fallbackCustomer.email ??
     ""
+  
   const productTitle =
     displayData?.product_title ??
     fallbackProduct.product_title ??
-    "Unknown product"
+    `Unknown product${buildTruncatedId(record.product_id)}`
+  
   const variantTitle =
     displayData?.variant_title ??
     fallbackProduct.variant_title ??
-    "Unknown variant"
+    `Unknown variant${buildTruncatedId(record.variant_id)}`
+  
   const sku = displayData?.sku ?? fallbackProduct.sku ?? null
 
   const frequency: SubscriptionAdminFrequency = {
@@ -687,7 +712,7 @@ async function getSubscriptionDisplayDataMap(
           customer_name:
             buildCustomerDisplayName(customer) ??
             fallbackCustomer.full_name ??
-            "Unknown customer",
+            `Unknown customer${buildTruncatedId(record.customer_id)}`,
           customer_email:
             customer?.email ??
             fallbackCustomer.email ??
@@ -696,11 +721,11 @@ async function getSubscriptionDisplayDataMap(
             product?.title ??
             variant?.product?.title ??
             fallbackProduct.product_title ??
-            "Unknown product",
+            `Unknown product${buildTruncatedId(record.product_id)}`,
           variant_title:
             variant?.title ??
             fallbackProduct.variant_title ??
-            "Unknown variant",
+            `Unknown variant${buildTruncatedId(record.variant_id)}`,
           sku: variant?.sku ?? fallbackProduct.sku ?? null,
         },
       ]
