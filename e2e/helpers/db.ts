@@ -403,7 +403,7 @@ export async function createAdminProduct(title: string): Promise<SeededProduct> 
       variants: [
         {
           title: "Default Variant",
-          prices: [{ currency_code: "usd", amount: 1000 }],
+          prices: [{ currency_code: "usd", amount: 10.00 }],
           options: { Default: "Default" },
         },
       ],

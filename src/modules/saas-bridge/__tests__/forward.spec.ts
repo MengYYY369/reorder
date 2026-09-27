@@ -161,7 +161,7 @@ describe("buildPayload — enrichment", () => {
         email: "ada@medusa.test",
         payment_status: "captured",
         currency_code: "usd",
-        total: 1800,
+        total: 18,
         metadata: { plan: "monthly" },
       },
       "cart_1"
@@ -179,7 +179,7 @@ describe("buildPayload — enrichment", () => {
     expect(payload.data.display_id).toEqual(42)
     expect(payload.data.payment_status).toEqual("captured")
     expect(payload.data.currency_code).toEqual("usd")
-    expect(payload.data.total).toEqual(1800)
+    expect(payload.data.total).toEqual(18)
     expect(payload.data.metadata).toEqual({ plan: "monthly" })
   })
 

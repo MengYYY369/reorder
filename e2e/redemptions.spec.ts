@@ -38,7 +38,7 @@ test.describe("Redemption Codes - batch lifecycle through the Admin UI", () => {
           variants: [
             {
               title: "E2E Redemption Variant",
-              prices: [{ currency_code: "usd", amount: 1000 }],
+              prices: [{ currency_code: "usd", amount: 10.00 }],
               options: { Default: "Default" },
             },
           ],
