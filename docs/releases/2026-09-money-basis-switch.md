@@ -218,7 +218,77 @@ ERROR:  money basis migration already completed at 2026-09-27 06:27:45.108505+00
 
 ## Task 9 — rehearsal part 3: plugin migration on the converted copy
 
-(results appended as they run)
+**Step 1 — migrate, migrate-only: PASSED (exit 0).**
+
+The converted scratch copy was migrated with the 0.4.22 image, app never
+started (no scheduler, no credentials beyond DATABASE_URL):
+
+```bash
+DB_PASSWORD=$(grep -E '^DB_PASSWORD=' /opt/medusa-prod/.env | head -1 | cut -d= -f2- | tr -d '"')
+MEDUSA_DOMAIN_VAL=$(grep -E '^MEDUSA_DOMAIN=' /opt/medusa-prod/.env | head -1 | cut -d= -f2- | tr -d '"')
+sudo -n docker run --rm --user root --network medusa-prod_default \
+  --env-file /opt/medusa-prod/.env \
+  -e DATABASE_URL="postgres://medusa:$DB_PASSWORD@db:5432/medusa_money_rehearsal?ssl_mode=disable" \
+  -e EPAY_NOTIFY_URL="https://$MEDUSA_DOMAIN_VAL/epay/notify" \
+  -e EPAY_DEFAULT_RETURN_URL="https://dayzcloud.com/payment/return" \
+  -e EPAY_DEFAULT_CLIENTIP="127.0.0.1" -e EPAY_ALLOW_HTTP="false" \
+  medusa-saas-backend:0.4.22 npx medusa db:migrate --all-or-nothing --execute-safe-links
+```
+
+Command notes (each earned by a rehearsal failure):
+- `--user root`: the compose store service already runs as `root`
+  (`compose.yaml`), so production's migrate has this implicitly; a plain
+  `docker run` from the image runs as `node` and Medusa's migration loader
+  fails with EACCES mkdir-ing module migrations dirs under the read-only
+  node_modules. Production must keep using the compose path (`docker compose
+  run --rm --no-deps store npx medusa db:migrate --all-or-nothing
+  --execute-safe-links`), which inherits `user: root`.
+- `EPAY_*`/`*_RETURN_URL`/`EPAY_ALLOW_HTTP`: these exist only in compose's
+  `environment:` block (interpolated from `MEDUSA_DOMAIN`), not in `.env`; a
+  plain `--env-file` run cannot load the Payment module without them. The
+  compose path gets them automatically.
+- `Migration20260919000001` (paypal) is already registered in the restored
+  database under its pre-0.5.0 content — MikroORM tracks by name and will not
+  re-run it, which is why the conversion script's own conditional
+  `locked_amount` ALTER (numeric(20,6)) is load-bearing. Verified: prod's
+  `locked_amount` is still integer today, and the rehearsal's ALTER ran first.
+
+Result: `Migrations completed`; exactly the plan's expected delta applied —
+
+```text
+MODULE: activityLog  → ● Migrating Migration20260922120000 → ✔ Migrated
+MODULE: renewal      → ● Migrating Migration20260924120000 → ✔ Migrated
+mikro_orm_migrations: 208 → 210 (exactly two rows added)
+```
+
+**Step 2 — the two invariants: both hold.**
+
+```text
+select count(*) from pg_indexes where indexname='renewal_cycle_one_scheduled_per_subscription';
+→ 1   (index exists; pg_index.indisvalid = true)
+
+select subscription_id from renewal_cycle where status='scheduled' and deleted_at is null
+group by subscription_id having count(*) > 1;
+→ 0 rows   (and scheduled cycles still 13 — untouched)
+```
+
+**Rehearsal finding — what a failed migrate does to a database (why the fence
+matters).** Two earlier rehearsal attempts failed mid-run (a plain-`docker
+run` EACCES as user `node`, then a module-loader failure for the Payment
+module) and each time `--all-or-nothing`'s failure path ran `down()` for
+migrations in its transaction scope and **deleted their rows from
+`mikro_orm_migrations`** (208 → 179), damaging the scratch schema. The
+database was rebuilt from the dump each time (the restore → seed → convert
+pipeline is fully scripted and reproducible, ~3 minutes). No production data
+was touched at any point. Consequence for the window: if the production
+migrate fails mid-run, do not retry blindly — restore
+`/tmp/prod-pre-money-switch.dump` per Task 10 Step 5 and restart the window.
+
+**Image transfer:** 0.4.22 has been loaded on the prod host
+(`docker images` → `0.4.22 5bfb28596d73`). The stale `0.4.21` tag exists both
+locally and on the host and carries vendor reorder **1.5.0** + paypal **0.4.0**;
+production currently RUNS 0.4.21 (started 2026-09-26T17:31Z). The window's
+deploy step swaps compose from 0.4.21 → 0.4.22.
 
 ---
 

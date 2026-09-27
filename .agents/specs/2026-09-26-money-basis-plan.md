@@ -36,7 +36,7 @@
 - Consumes: the spec's currency-resolution table (its draft form).
 - Produces: a verified, query-backed join path **per money table**, and the complete inventory of money columns — the exact list Task 2 implements against. Later tasks reference Appendix A by table name.
 
-- [ ] **Step 1: Inventory every money-bearing column**
+- [x] **Step 1: Inventory every money-bearing column**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store -Atc \"select table_name||' | '||column_name||' | '||data_type||' | '||coalesce(numeric_precision::text,'-')||' | '||coalesce(numeric_scale::text,'-') from information_schema.columns where table_schema='public' and (column_name ilike '%amount%' or column_name ilike '%total%' or column_name ilike '%price%' or column_name ilike '%fee%' or column_name ilike '%mrr%' or column_name ilike '%cost%' or column_name ilike '%balance%') order by table_name, column_name\""
@@ -44,13 +44,13 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa 
 
 Record the output verbatim in Appendix A. Reconcile against the spec's ~29-column list: **any column present in the DB but absent from the list, or vice versa, is a finding** — write it down, do not skip it silently.
 
-- [ ] **Step 2: Discover the real parent links for tables that lack `currency_code`**
+- [x] **Step 2: Discover the real parent links for tables that lack `currency_code`**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store -Atc \"select table_name||' | '||column_name from information_schema.columns where table_schema='public' and table_name in ('order_line_item','order_transaction','order_claim','order_exchange','order_credit_line','credit_line','order_change_action','order_line_item_adjustment','order_shipping_method','order_shipping_method_adjustment','cart_line_item','capture','refund','payment_session') and (column_name like '%_id' or column_name = 'currency_code') order by table_name, column_name\""
 ```
 
-- [ ] **Step 3: Prove each join returns rows**
+- [x] **Step 3: Prove each join returns rows**
 
 For every table that resolves through a parent, count through the join you intend to use; line items shown, every other table gets its own query:
 
@@ -60,7 +60,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa 
 
 A join returning 0 rows where the table itself has rows means the path is wrong — fix it before writing it down. Record every proven path in Appendix A as `table → parent → currency column` with its proving query.
 
-- [ ] **Step 4: Record the currency set and the guard's baseline**
+- [x] **Step 4: Record the currency set and the guard's baseline**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store -Atc \"select code||' dd='||decimal_digits from currency where code in (select distinct currency_code from price) order by 1\""
@@ -68,7 +68,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa 
 
 Expected today: `cny dd=2`, `usd dd=2`. Record it; Task 2's store-default guard is built on this.
 
-- [ ] **Step 5: Append Appendix A and commit**
+- [x] **Step 5: Append Appendix A and commit**
 
 ```bash
 git add .agents/specs/2026-09-26-money-basis-minor-to-major.md
@@ -87,7 +87,7 @@ git commit -m "docs(spec): verify the money join paths and column inventory agai
 - Consumes: Appendix A's verified join paths (Task 1).
 - Produces: a script whose conversion expressions divide by `power(10, c.decimal_digits)` through the verified joins, with the mixed-basis guard and per-currency assertions. Task 8 runs it against the rehearsal copy; Task 10 runs it against production.
 
-- [ ] **Step 1: Replace the blanket divisor with per-currency division, table by table**
+- [x] **Step 1: Replace the blanket divisor with per-currency division, table by table**
 
 Pattern per Medusa's Stripe plugin (`getSmallestUnit.ts`): amounts are in major units, providers convert to smallest via `power(10, decimal_digits)`:
 
@@ -109,7 +109,7 @@ Rules:
 
 Also verify `medusa-paypal/src/utils/currency-digits.ts`'s `FALLBACK_DIGITS = 2` is documented as known behavior.
 
-- [ ] **Step 2: Keep the type ALTER first, and make it idempotent**
+- [x] **Step 2: Keep the type ALTER first, and make it idempotent**
 
 Confirm the script still runs the `paypal_subscription.locked_amount` type change **before** any division, and make it conditional so a second run does not error:
 
@@ -123,7 +123,7 @@ BEGIN
 END $$;
 ```
 
-- [ ] **Step 3: Add the mixed-basis guard and the store-default guard**
+- [x] **Step 3: Add the mixed-basis guard and the store-default guard**
 
 ```sql
 -- Mixed-basis guard: major-unit code has been live since this timestamp.
@@ -155,18 +155,18 @@ END $$;
 
 Extend the first guard's table list to every table with `created_at` in Appendix A — the four shown are the minimum.
 
-- [ ] **Step 4: Convert the currency-less jsonb money under the store default**
+- [x] **Step 4: Convert the currency-less jsonb money under the store default**
 
 For variant `metadata.paypal_subscription.setup_fee` / `trial_periods[].price`, `plan_offer.discount_per_frequency` (fixed only), `subscription.pricing_snapshot` (fixed values + label rebuild), `retention_offer_event.offer_payload` (fixed only): divide by 100 **only after Step 3's guard has proven every live currency is dd=2**, and say so in a comment. Percentage discounts are untouched.
 
-- [ ] **Step 5: Replace the assertions with per-currency ones**
+- [x] **Step 5: Replace the assertions with per-currency ones**
 
 - Sum identity per currency (post = pre / 10^dd, exact), not a global `/100`.
 - The "still looks like cents" threshold becomes per currency: abort only when a value is implausibly large **for its currency** — a legitimate ¥15,000 JPY price must not trip a dd=2-shaped threshold.
 - Fractional presence (`amount <> trunc(amount)`) asserts only for dd>0 rows; for dd=0 rows assert values are whole.
 - Remove the `post_sum > 0 AND …` skip: a table with `pre_sum = 0` must be asserted genuinely empty (0 rows) rather than skipping the check.
 
-- [ ] **Step 6: Prove no blanket divisor remains**
+- [x] **Step 6: Prove no blanket divisor remains**
 
 ```bash
 cd /d/Projects/medusa-saas && grep -nE "/ *100\b|\* *100\b" scripts/money-minor-to-major.sql
@@ -174,7 +174,7 @@ cd /d/Projects/medusa-saas && grep -nE "/ *100\b|\* *100\b" scripts/money-minor-
 
 Every surviving hit must be a comment or a guard/assertion naming the old convention; list each with a one-line justification in the report.
 
-- [ ] **Step 7: Report the diff; hand the commit to the owner**
+- [x] **Step 7: Report the diff; hand the commit to the owner**
 
 ```bash
 cd /d/Projects/medusa-saas && git diff --stat scripts/money-minor-to-major.sql
@@ -194,7 +194,7 @@ Do **not** commit. Report the diff summary and the grep result.
 - Consumes: the spec's atomic-set requirements for the provider.
 - Produces: money-field validation accepting `9.99` and rejecting `"9.99"`-as-string / `9.9999` / negatives; counts still integers; migration declaring `NUMERIC(20,6)`; a permanent regression test.
 
-- [ ] **Step 1: Read the four in-tree diffs and judge each against the spec**
+- [x] **Step 1: Read the four in-tree diffs and judge each against the spec**
 
 Per measured state (2026-09-26), `medusa-paypal` has uncommitted agent edits:
 - `src/subscription/metadata.ts:17` already has `moneyAmountSchema = z.number().finite().min(0).multipleOf(0.001)` ✅
@@ -204,7 +204,7 @@ Per measured state (2026-09-26), `medusa-paypal` has uncommitted agent edits:
 
 Verify these match spec requirements; report actual commit status rather than assuming "already edited".
 
-- [ ] **Step 2: Write the regression test**
+- [x] **Step 2: Write the regression test**
 
 Create `src/subscription/__tests__/metadata-money.test.ts`:
 
@@ -263,7 +263,7 @@ describe("paypal subscription metadata money fields", () => {
 
 Note: `moneyAmountSchema.multipleOf(0.001)` enforces ISO 4217's maximum 3 decimal digits (KWD/BHD tier). Test verifies this constraint is respected.
 
-- [ ] **Step 3: Run the test**
+- [x] **Step 3: Run the test**
 
 ```bash
 cd /d/Projects/medusa-paypal && npx jest src/subscription/__tests__/metadata-money.test.ts
@@ -271,7 +271,7 @@ cd /d/Projects/medusa-paypal && npx jest src/subscription/__tests__/metadata-mon
 
 Expected: PASS if the in-tree edit is correct. A FAIL here is the finding — fix the schema, not the test.
 
-- [ ] **Step 4: Typecheck the touched sources**
+- [x] **Step 4: Typecheck the touched sources**
 
 ```bash
 cd /d/Projects/medusa-paypal && npx tsc --noEmit 2>&1 | head -20
@@ -279,7 +279,7 @@ cd /d/Projects/medusa-paypal && npx tsc --noEmit 2>&1 | head -20
 
 Zero errors in the four touched files (pre-existing errors elsewhere are recorded, not fixed).
 
-- [ ] **Step 5: Report; hand the commit to the owner**
+- [x] **Step 5: Report; hand the commit to the owner**
 
 ```bash
 cd /d/Projects/medusa-paypal && git diff --stat
@@ -300,11 +300,11 @@ Do **not** commit — the tree also holds the owner's own `0.5.0` bump and CHANG
 - Consumes: nothing from earlier tasks (independent).
 - Produces: seeds that write major amounts, so a fresh environment matches a converted production; the JSON-object metadata fix that Task 8's fail-closed assertion depends on.
 
-- [ ] **Step 1: Convert each seeded money literal**
+- [x] **Step 1: Convert each seeded money literal**
 
 Divide every money literal by 100 (all seeded currencies are dd=2) and keep the same semantic value: `999 → 9.99`, `9990 → 99.9`, `6900 → 69`, `69900 → 699`, `9900 → 99`, `990 → 9.9`. Every site: `seed-saas.ts:36-37`, `seed.ts:27,36`, `upsert-prod-variants.ts:53-69`, and any other literal the files contain — grep each file for `\b\d{3,}\b` and classify every hit as money or not before editing.
 
-- [ ] **Step 2: Fix the JSON-string metadata write**
+- [x] **Step 2: Fix the JSON-string metadata write**
 
 From spec revision 3 working-tree measurement, the seed writing `paypal_subscription` variant metadata must write a JSON object, not a string (the conversion script's fail-closed assertion refuses JSON strings).
 
@@ -319,7 +319,7 @@ Then modify to output an object:
 + metadata: { paypal_subscription: { ... } }
 ```
 
-- [ ] **Step 3: Delete the dead constant**
+- [x] **Step 3: Delete the dead constant**
 
 ```bash
 cd /d/Projects/medusa-saas && grep -rn "noDivisionCurrencies" apps/ | head
@@ -327,7 +327,7 @@ cd /d/Projects/medusa-saas && grep -rn "noDivisionCurrencies" apps/ | head
 
 Delete the declaration and any remaining reference; confirm the grep is empty afterwards.
 
-- [ ] **Step 4: Prove the edits**
+- [x] **Step 4: Prove the edits**
 
 ```bash
 cd /d/Projects/medusa-saas && git diff --stat && grep -rn "JSON.stringify" apps/backend/src/scripts/ | grep -i paypal
@@ -347,11 +347,11 @@ The second command must return nothing. Report both outputs.
 - Consumes: nothing from earlier tasks.
 - Produces: fixtures in major units and scale-fixing literals, so the gates stop passing at either scale.
 
-- [ ] **Step 1: Convert fixture literals**
+- [x] **Step 1: Convert fixture literals**
 
 `1800 → 18`, `129 → 1.29`, `250 → 2.5` — divide by 100, same semantic value. Grep each file for `\b\d{3,}\b` first and classify every hit (money vs count vs id) before editing; ids and counts stay.
 
-- [ ] **Step 2: Fix the scale-blind assertions**
+- [x] **Step 2: Fix the scale-blind assertions**
 
 Per Medusa's major-unit system (see `medusa/packages/modules/providers/payment-stripe/src/utils/get-smallest-unit.ts`), amounts are stored in major units and payment providers convert to smallest units via per-currency multipliers (`power(10, decimal_digits)`).
 
@@ -374,11 +374,11 @@ For `saas-bridge.spec.ts:162,:176,:1118` where `unit_price: 1800`, `amount: 1800
 
 The spec's claim "assert the converted value against `18` rather than against a value computed from the same input" applies to these files, **not** to `analytics-workflows.spec.ts` (which is `129 → 1.29`). Do not mix up different test files' semantics.
 
-- [ ] **Step 3: Confirm the epsilon tests' new meaning**
+- [x] **Step 3: Confirm the epsilon tests' new meaning**
 
 The `0.01`-epsilon tests assert that a total lands exactly on the currency epsilon. In major units `0.01` is the smallest USD cent — the tests keep working but now test a different magnitude. Read each and state in the commit body whether the intent still holds.
 
-- [ ] **Step 4: Gates**
+- [x] **Step 4: Gates**
 
 ```bash
 cd /d/Projects/reorder && corepack yarn build && TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules corepack yarn jest --forceExit
@@ -386,7 +386,7 @@ cd /d/Projects/reorder && corepack yarn build && TEST_TYPE=integration:modules N
 
 Then the http gate with the union-of-runs protocol (one file per invocation where a single file is being iterated; the full gate loses ~2 suites per run to `SIGTERM` — re-run the killed names isolated). Baselines before this task: modules 32/312, http 36/255 — every delta named.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add integration-tests src/modules/analytics e2e
@@ -405,15 +405,15 @@ git commit -m "test(money): move fixtures to major units"
 - Consumes: Tasks 3-5 (the trees being vendored must already carry their changes).
 - Produces: a built image whose vendored versions are provably `reorder 1.6.1` + `medusa-paypal 0.5.0`, tagged for Task 10.
 
-- [ ] **Step 1: Swap the vendored trees**
+- [x] **Step 1: Swap the vendored trees**
 
 Copy the `reorder` 1.6.1 sources (the published tarball's contents or a fresh `medusa plugin:build` output) over `vendor/@mengyyy369/reorder`, preserving the empty `saas-bridge/migrations/` directory shape the host needs (Task 25's rehearsal proved umzug mkdirs it — a writable tree is fine, but do not delete the directory if present). Copy the `medusa-paypal` working tree over its vendor path.
 
-- [ ] **Step 2: Build the image**
+- [x] **Step 2: Build the image**
 
 Follow the runbook's off-box build (recent tags were built from this local checkout, not on the host). Record the exact command and the resulting image tag.
 
-- [ ] **Step 3: Prove the versions INSIDE the image**
+- [x] **Step 3: Prove the versions INSIDE the image**
 
 ```bash
 docker run --rm --entrypoint sh <image>:<tag> -c "cat /app/apps/backend/vendor/@mengyyy369/reorder/package.json | head -3; cat /app/apps/backend/vendor/@mengyyy369/medusa-paypal/package.json | head -3; grep -c '100' /app/apps/backend/src/lib/transactional-emails.ts"
@@ -421,7 +421,7 @@ docker run --rm --entrypoint sh <image>:<tag> -c "cat /app/apps/backend/vendor/@
 
 Expected: `1.6.1`, `0.5.0`, and the email formatter shows no `/100`. Paste the output.
 
-- [ ] **Step 4: Record the tag and stop**
+- [x] **Step 4: Record the tag and stop**
 
 Report the image tag and the proof. Do not deploy — Task 10 owns deployment.
 
@@ -437,14 +437,14 @@ Report the image tag and the proof. Do not deploy — Task 10 owns deployment.
 - Consumes: the pre-upgrade dump retained by the 1.6.1 rehearsal (on the host, `chmod 600`).
 - Produces: a restored, completeness-asserted scratch copy seeded with dd=0 and dd=3 rows — the fixture Tasks 8-9 run against.
 
-- [ ] **Step 1: Create the scratch DB and restore**
+- [x] **Step 1: Create the scratch DB and restore**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 createdb -U medusa medusa_money_rehearsal"
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 pg_restore -U medusa -d medusa_money_rehearsal /tmp/prod-pre-1.6.0.dump"
 ```
 
-- [ ] **Step 2: Assert restore completeness before anything else**
+- [x] **Step 2: Assert restore completeness before anything else**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_money_rehearsal -Atc \"select (select count(*) from subscription), (select count(*) from renewal_cycle), (select count(*) from renewal_cycle where status='scheduled' and deleted_at is null), (select count(*) from mikro_orm_migrations)\""
@@ -452,7 +452,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec medusa-prod-db-1 psql -U medusa 
 
 Expected: `16|18|13|208`. Any other numbers = the restore is partial; **stop**, because every later assertion would be vacuously green.
 
-- [ ] **Step 3: Seed the currency coverage the production data does not have**
+- [x] **Step 3: Seed the currency coverage the production data does not have**
 
 Prod holds only usd/cny (both dd=2). The per-currency branches must be exercised here. Insert, directly in the scratch DB:
 
@@ -465,7 +465,7 @@ VALUES ('price_jpy_probe', 'JPY probe', 'active', 15000, 'jpy', now(), now()),
 
 Plus one order line item and one variant-metadata `setup_fee` in each currency, so every conversion branch (direct column, parent join, currency-less jsonb) runs at least once. Record the exact statements in the runbook.
 
-- [ ] **Step 4: Start the runbook and record part 1**
+- [x] **Step 4: Start the runbook and record part 1**
 
 Create `docs/releases/2026-09-money-basis-switch.md` with: the scratch name, the restore command, the completeness assertion with its actual output, the seeding statements, and a "not yet run" marker for the conversion. Commit:
 
@@ -486,7 +486,7 @@ git commit -m "docs(release): start the money basis switch runbook with the rehe
 - Consumes: Task 2's script, Task 7's restored+seeded scratch DB.
 - Produces: the rehearsal evidence the user sees before authorizing the production window.
 
-- [ ] **Step 1: Dry run (default rollback) and read the output**
+- [x] **Step 1: Dry run (default rollback) and read the output**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec -i medusa-prod-db-1 psql -U medusa -d medusa_money_rehearsal -v ON_ERROR_STOP=1 < /path/to/money-minor-to-major.sql"
@@ -494,7 +494,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec -i medusa-prod-db-1 psql -U medu
 
 Copy the script to the host first (a scratch path, never into the app). Expected: every assertion runs, the run ends with ROLLBACK, and nothing changed. Capture the full output.
 
-- [ ] **Step 2: Assert the guards actually fire — negative tests**
+- [x] **Step 2: Assert the guards actually fire — negative tests**
 
 Three deliberate violations, each in its own transaction, each expected to ABORT:
 (a) temporarily insert a JPY price row with `created_at = now()` and re-run → the mixed-basis guard must fire (the seeded probe rows from Task 7 use `now()`, so they will — if the guard does NOT fire, that is a finding: the guard's table list is incomplete);
@@ -502,7 +502,7 @@ Three deliberate violations, each in its own transaction, each expected to ABORT
 (c) temporarily set `price.amount = 15000` on a USD row and re-run → the per-currency "looks like cents" assertion must fire.
 Roll back each violation after the check. Record the exact error text of each.
 
-- [ ] **Step 3: Commit run**
+- [x] **Step 3: Commit run**
 
 ```bash
 ssh ubuntu@170.106.132.210 "sudo -n docker exec -i medusa-prod-db-1 psql -U medusa -d medusa_money_rehearsal -v ON_ERROR_STOP=1 -v DO_COMMIT=1 < /path/to/money-minor-to-major.sql"
@@ -510,7 +510,7 @@ ssh ubuntu@170.106.132.210 "sudo -n docker exec -i medusa-prod-db-1 psql -U medu
 
 Expected: COMMIT, no exception.
 
-- [ ] **Step 4: Verify the result independently of the script's own assertions**
+- [x] **Step 4: Verify the result independently of the script's own assertions**
 
 ```sql
 -- Spot checks, run by hand:
@@ -526,7 +526,7 @@ select * from money_unit_migration;                                             
 
 Then re-run the script once more: expected to refuse with the idempotency error, proving the guard table works.
 
-- [ ] **Step 5: Record and commit**
+- [x] **Step 5: Record and commit**
 
 Append to the runbook: the dry-run output, the three negative tests with their error texts, the commit output, the five spot checks with actual values. Commit:
 
@@ -547,11 +547,11 @@ git commit -m "docs(release): record the money conversion rehearsal on the resto
 - Consumes: Task 8's converted scratch DB, Task 6's image.
 - Produces: proof that the two plugin migrations (`Migration20260922120000`, `Migration20260924120000`) still apply cleanly on a converted database, and the two invariants hold.
 
-- [ ] **Step 1: Migrate, migrate-only**
+- [x] **Step 1: Migrate, migrate-only**
 
 Run the image's `medusa db:migrate` against the scratch DB with the app never started (the fence: restored payment references + live credentials must never reach a running scheduler). Capture the output; expected delta is exactly the two plugin migrations.
 
-- [ ] **Step 2: The two invariants**
+- [x] **Step 2: The two invariants**
 
 ```sql
 select indexname from pg_indexes where indexname = 'renewal_cycle_one_scheduled_per_subscription';
@@ -560,7 +560,7 @@ select subscription_id, count(*) from renewal_cycle where status='scheduled' and
 
 Expected: one row; zero rows.
 
-- [ ] **Step 3: Record and commit**
+- [x] **Step 3: Record and commit**
 
 Append to the runbook; commit:
 
