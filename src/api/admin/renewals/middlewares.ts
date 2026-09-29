@@ -9,6 +9,7 @@ import {
   PostAdminApproveRenewalChangesSchema,
   PostAdminForceRenewalSchema,
   PostAdminRejectRenewalChangesSchema,
+  PostAdminResolveStuckRenewalSchema,
 } from "./validators"
 
 export const adminRenewalsMiddlewares: MiddlewareRoute[] = [
@@ -64,5 +65,10 @@ export const adminRenewalsMiddlewares: MiddlewareRoute[] = [
     matcher: "/admin/renewals/:id/reject-changes",
     method: "POST",
     middlewares: [validateAndTransformBody(PostAdminRejectRenewalChangesSchema)],
+  },
+  {
+    matcher: "/admin/renewals/:id/resolve-stuck",
+    method: "POST",
+    middlewares: [validateAndTransformBody(PostAdminResolveStuckRenewalSchema)],
   },
 ]

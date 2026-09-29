@@ -43,6 +43,10 @@ export {
   default as processRenewalCycleWorkflowDefault,
 } from "./process-renewal-cycle"
 export {
+  reconcileStuckRenewalCycleWorkflow,
+  default as reconcileStuckRenewalCycleWorkflowDefault,
+} from "./reconcile-stuck-renewal-cycle"
+export {
   ensureNextRenewalCycleWorkflow,
   default as ensureNextRenewalCycleWorkflowDefault,
 } from "./ensure-next-renewal-cycle"

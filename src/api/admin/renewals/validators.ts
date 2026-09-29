@@ -8,6 +8,8 @@ const renewalCycleStatusSchema = z.enum([
   "processing",
   "succeeded",
   "failed",
+  "abandoned",
+  "awaiting_manual_resolution",
 ])
 
 const renewalApprovalStatusSchema = z.enum([
@@ -87,4 +89,13 @@ export const PostAdminRejectRenewalChangesSchema = z.object({
 
 export type PostAdminRejectRenewalChangesSchemaType = z.infer<
   typeof PostAdminRejectRenewalChangesSchema
+>
+
+export const PostAdminResolveStuckRenewalSchema = z.object({
+  outcome: z.enum(["succeeded", "failed", "abandoned"]),
+  reason: z.string().trim().min(1).max(500),
+})
+
+export type PostAdminResolveStuckRenewalSchemaType = z.infer<
+  typeof PostAdminResolveStuckRenewalSchema
 >
