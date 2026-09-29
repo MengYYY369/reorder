@@ -106,11 +106,12 @@ export async function upsertNativeMirrorSubscription(
   const recordedPlanId = current.metadata?.plan_id
 
   if (fields.plan_id && recordedPlanId !== fields.plan_id) {
-    // The provider revised the subscription onto a different plan. Until
-    // medusa-paypal 0.5.0 emits `paypal.subscription.revised`, this reconciliation
-    // pass is the only thing that notices; the plan id itself is not a billing
-    // input here (PayPal charges its own plan), so it is recorded for support
-    // rather than acted on.
+    // The provider revised the subscription onto a different plan.
+    // medusa-paypal does not deliver `paypal.subscription.revised` (as of 0.6.1
+    // the in-place revise flow is planned in that plugin's changelog, not
+    // shipped), so this reconciliation pass is the only thing that notices; the
+    // plan id itself is not a billing input here (PayPal charges its own plan),
+    // so it is recorded for support rather than acted on.
     update.metadata = {
       ...(current.metadata ?? {}),
       plan_id: fields.plan_id,

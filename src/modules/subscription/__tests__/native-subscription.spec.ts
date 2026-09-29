@@ -1,7 +1,7 @@
 import {
   NATIVE_SUBSCRIPTION_REFERENCE_PATTERN,
   NATIVE_SUBSCRIPTION_REFERENCE_PREFIX,
-  TRACK_OCCUPYING_NATIVE_STATUSES,
+  TRACK_OCCUPYING_SUBSCRIPTION_STATUSES,
   buildNativeSubscriptionReference,
   findBlockingNativeRow,
   isNativeSubscriptionReference,
@@ -65,7 +65,7 @@ const reorderRow = (status: string, productId = "prod_1") => ({
 
 describe("findBlockingNativeRow", () => {
   it("blocks while a provider recurrence is running or paused", () => {
-    for (const status of TRACK_OCCUPYING_NATIVE_STATUSES) {
+    for (const status of TRACK_OCCUPYING_SUBSCRIPTION_STATUSES) {
       const row = nativeRow(status)
 
       expect(findBlockingNativeRow([row], ["prod_1"])).toEqual(row)

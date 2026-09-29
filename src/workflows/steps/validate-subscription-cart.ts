@@ -284,6 +284,27 @@ export const validateSubscriptionCartStep = createStep(
           )
         : null
 
+    const trialDays =
+      effectiveConfig.rules?.trial_enabled && effectiveConfig.rules.trial_days
+        ? effectiveConfig.rules.trial_days
+        : 0
+
+    // The offer's `trial_requires_payment_method` rule is enforced on the
+    // payment MODE, not on a stored method: at checkout the reusable token does
+    // not exist yet — it is written when the payment is captured — so an
+    // auto-mode checkout (which buildPaymentContext resolves to a reusable
+    // method reference) is the only commitment this step can verify. Letting a
+    // manual-mode trial through would mint a row the rule exists to forbid.
+    if (
+      trialDays > 0 &&
+      effectiveConfig.rules?.trial_requires_payment_method &&
+      paymentMode !== "auto"
+    ) {
+      throw subscriptionErrors.invalidData(
+        "This trial requires a payment method on file. Complete the checkout with automatic renewal payments instead of manual payment to start the trial."
+      )
+    }
+
     return new StepResponse<ValidatedSubscriptionCart>({
       cart_id: cart.id,
       customer_id: cart.customer_id,
@@ -308,10 +329,7 @@ export const validateSubscriptionCartStep = createStep(
       }),
       payment_context: paymentContext,
       consent_flip: consentFlip,
-      trial_days:
-        effectiveConfig.rules?.trial_enabled && effectiveConfig.rules.trial_days
-          ? effectiveConfig.rules.trial_days
-          : 0,
+      trial_days: trialDays,
       stacking,
     })
   }

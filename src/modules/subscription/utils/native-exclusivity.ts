@@ -3,7 +3,7 @@ import type { MedusaContainer, RemoteQueryFunction } from "@medusajs/framework/t
 import { SUBSCRIPTION_MODULE } from ".."
 import type SubscriptionModuleService from "../service"
 import {
-  TRACK_OCCUPYING_NATIVE_STATUSES,
+  TRACK_OCCUPYING_SUBSCRIPTION_STATUSES,
   findBlockingNativeRow,
   nativeSubscriptionReferenceFilter,
   type NativeRowCandidate,
@@ -34,7 +34,7 @@ export async function findLiveNativeRecurrences(
 
   return (await subscriptionModule.listSubscriptions({
     customer_id: input.customer_id,
-    status: [...TRACK_OCCUPYING_NATIVE_STATUSES],
+    status: [...TRACK_OCCUPYING_SUBSCRIPTION_STATUSES],
     ...nativeSubscriptionReferenceFilter(),
   })) as NativeRowCandidate[]
 }

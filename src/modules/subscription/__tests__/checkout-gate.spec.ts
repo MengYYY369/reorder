@@ -18,9 +18,14 @@ import {
 } from "../utils/native-exclusivity"
 import {
   NATIVE_SUBSCRIPTION_REFERENCE_PATTERN,
-  TRACK_OCCUPYING_NATIVE_STATUSES,
+  TRACK_OCCUPYING_SUBSCRIPTION_STATUSES,
   type NativeRowCandidate,
 } from "../utils/native-subscription"
+import {
+  findBlockingReorderRailRow,
+  findLiveReorderRailSubscriptions,
+  type ReorderRailRowCandidate,
+} from "../utils/reorder-rail-exclusivity"
 
 /**
  * Ticket 12 acceptance coverage for the checkout-completion gate.
@@ -70,6 +75,39 @@ const REJECTION_BODY = {
     subscription_id: "sub_native_1",
   },
 }
+
+/**
+ * The reorder-rail rejection, verbatim: same body shape, its own wording. The
+ * native wording above is pinned by the HTTP spec; the two directions must
+ * stay distinguishable. The sentence names the product and the subscription
+ * and promises no self-service action (the vault rail has none yet).
+ */
+const reorderRejectionBody = (
+  productTitle: string,
+  productId: string,
+  subscriptionId: string
+) => ({
+  message:
+    `You already have an active subscription for '${productTitle}' on this ` +
+    `account (subscription ${subscriptionId}). A product can be covered by ` +
+    `only one active subscription at a time, so this checkout cannot be ` +
+    `completed.`,
+  type: "not_allowed",
+  data: {
+    product_id: productId,
+    subscription_id: subscriptionId,
+  },
+})
+
+const reorderRow = (
+  overrides: Partial<ReorderRailRowCandidate> = {}
+): ReorderRailRowCandidate => ({
+  id: "sub_reorder_1",
+  reference: "SUB-REORDER-1",
+  status: SubscriptionStatus.ACTIVE,
+  product_id: "prod_1",
+  ...overrides,
+})
 
 function makeScope(input: { listSubscriptions?: jest.Mock; graph?: jest.Mock }) {
   return {
@@ -191,10 +229,12 @@ describe("rejectConflictingPurchase (the gate middleware)", () => {
     expect(scope.resolve).not.toHaveBeenCalled()
   })
 
-  it("looks up the recurrences of the customer on the request, and no one else's", async () => {
+  it("looks up both rails' rows for the customer on the request, and no one else's", async () => {
     // The fail-open gate is only as good as its identity wiring: a lost or
     // swapped `auth_context` actor id would evaluate one customer's live
-    // recurrences against another customer's cart and refuse the wrong checkout.
+    // rows against another customer's cart and refuse the wrong checkout.
+    // Both rail readers answer from the same module, so one mock sees both
+    // calls — one with the `NATIVE-%` pushdown, one with its negation.
     const listSubscriptions = jest.fn(async () => [])
     const graph = jest.fn()
     const scope = makeScope({ listSubscriptions, graph })
@@ -202,7 +242,7 @@ describe("rejectConflictingPurchase (the gate middleware)", () => {
 
     await rejectConflictingPurchase(makeReq(scope, AUTH_CUSTOMER_ID), res, next)
 
-    expect(listSubscriptions).toHaveBeenCalledTimes(1)
+    expect(listSubscriptions).toHaveBeenCalledTimes(2)
     expect(listSubscriptions).toHaveBeenCalledWith(
       expect.objectContaining({ customer_id: AUTH_CUSTOMER_ID })
     )
@@ -301,6 +341,52 @@ describe("rejectConflictingPurchase (the gate middleware)", () => {
       })
     )
   })
+
+  it("blocks a colliding live reorder-rail row with its own message", async () => {
+    // The second direction (T8): the customer's live vault row occupies the
+    // product just as a provider recurrence does. The mock answers each
+    // reader the way the module does: the native read is the one carrying the
+    // `NATIVE-%` reference pushdown; the reorder read arrives without one and
+    // filters the prefix in the reader.
+    const listSubscriptions = jest.fn(
+      async (filters: { reference?: unknown }) =>
+        filters.reference ? [] : [reorderRow()]
+    )
+    const graph = makeGraph({ cartProductIds: ["prod_1"] })
+    const scope = makeScope({ listSubscriptions, graph })
+    const res = makeRes()
+
+    await rejectConflictingPurchase(makeReq(scope, AUTH_CUSTOMER_ID), res, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledTimes(1)
+    expect(res.json).toHaveBeenCalledWith(
+      reorderRejectionBody("Coffee Club", "prod_1", "sub_reorder_1")
+    )
+    // The two directions stay distinguishable: the reorder wording never
+    // carries the native guard's text.
+    expect(
+      (res.json as jest.Mock).mock.calls[0][0].message
+    ).not.toContain("managed by your payment provider")
+  })
+
+  it("lets a cancelled reorder-rail row reach the core handler", async () => {
+    const listSubscriptions = jest.fn(
+      async (filters: { reference?: unknown }) =>
+        filters.reference
+          ? []
+          : [reorderRow({ status: SubscriptionStatus.CANCELLED })]
+    )
+    const scope = makeScope({ listSubscriptions })
+    const res = makeRes()
+
+    await rejectConflictingPurchase(makeReq(scope, AUTH_CUSTOMER_ID), res, next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status).not.toHaveBeenCalled()
+    expect(res.json).not.toHaveBeenCalled()
+  })
 })
 
 describe("resolveCheckoutGate (the decision unit)", () => {
@@ -313,6 +399,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => {
           throw new Error("db down")
         },
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids,
         read_product_title,
       })
@@ -328,6 +415,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: () => notAList<NativeRowCandidate>(),
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids,
         read_product_title: async () => "unused",
       })
@@ -342,6 +430,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids,
         read_product_title: async (productId) => productId,
       })
@@ -356,6 +445,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [nativeRow()],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => {
           throw new Error("graph down")
         },
@@ -370,6 +460,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [nativeRow()],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: () => notAList<string>(),
         read_product_title: async (productId) => productId,
       })
@@ -380,6 +471,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [nativeRow()],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => [],
         read_product_title: async (productId) => productId,
       })
@@ -394,6 +486,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [
           nativeRow({ product_id: "prod_z" }),
         ],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
         read_product_title,
       })
@@ -405,12 +498,13 @@ describe("resolveCheckoutGate (the decision unit)", () => {
   it("allows on rows that are not native mirrors, even when the product matches", async () => {
     // Defense in depth: the pushdown already excludes these rows, and
     // `findBlockingNativeRow` re-checks, so nothing that is not a
-    // `NATIVE-%` mirror may ever block checkout.
+    // `NATIVE-%` mirror may ever block through the native rule.
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [
           nativeRow({ reference: "SUB-1001" }),
         ],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
         read_product_title: async (productId) => productId,
       })
@@ -425,6 +519,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [nativeRow()],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
         read_product_title,
       })
@@ -459,6 +554,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [nativeRow()],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
         read_product_title,
       })
@@ -492,6 +588,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [nativeRow()],
+        find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
         read_product_title,
       })
@@ -516,17 +613,16 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     // - `sequence` pins the order the gate walks its reads: the title read is
     //   entered only after the last rule read has *settled*. This is the half
     //   the call counts cannot pin — hoisting or parallelising the title read
-    //   (a `Promise.all` over the three reads) leaves every count at 1 and is
+    //   (a `Promise.all` over the four reads) leaves every count at 1 and is
     //   exactly what the recorded sequence goes red on. The rule reads settle
     //   before the verdict is computed, so nothing cosmetic can be in flight
     //   while the decision is taken.
-    // - the three `toHaveBeenCalledTimes(1)` pins catch a re-read: a verdict
+    // - the `toHaveBeenCalledTimes(1)` pins catch a re-read: a verdict
     //   recomputed from a second cart read, or a title asked for twice.
     // - `action === "block"` against a title reader that throws is the one that
     //   catches a guard widened to cover the title read — the original
-    //   silent-allow, and the shape the two cases above exist for. A reorder
-    //   inside the guarded region does not disturb this case's sequence, so
-    //   that property is pinned by the verdict line, never by the counts.
+    //   silent-allow, and the shape the two cases above exist for. That
+    //   property is pinned by the verdict line, never by the counts.
     const sequence: string[] = []
 
     const find_live_recurrences = jest.fn(async () => {
@@ -535,6 +631,13 @@ describe("resolveCheckoutGate (the decision unit)", () => {
       sequence.push("recurrences:settled")
 
       return [nativeRow()]
+    })
+    const find_live_reorder_rows = jest.fn(async () => {
+      sequence.push("reorder-rail")
+      await null
+      sequence.push("reorder-rail:settled")
+
+      return []
     })
     const read_cart_product_ids = jest.fn(async () => {
       sequence.push("cart")
@@ -553,6 +656,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
 
     const decision = await resolveCheckoutGate({
       find_live_recurrences,
+      find_live_reorder_rows,
       read_cart_product_ids,
       read_product_title,
     })
@@ -560,18 +664,21 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(sequence).toEqual([
       "recurrences",
       "recurrences:settled",
+      "reorder-rail",
+      "reorder-rail:settled",
       "cart",
       "cart:settled",
       "title:prod_1",
     ])
     expect(decision.action).toBe("block")
     expect(find_live_recurrences).toHaveBeenCalledTimes(1)
+    expect(find_live_reorder_rows).toHaveBeenCalledTimes(1)
     expect(read_cart_product_ids).toHaveBeenCalledTimes(1)
     expect(read_product_title).toHaveBeenCalledTimes(1)
   })
 
   it("blocks a colliding live native recurrence for either occupying status", async () => {
-    for (const status of TRACK_OCCUPYING_NATIVE_STATUSES) {
+    for (const status of TRACK_OCCUPYING_SUBSCRIPTION_STATUSES) {
       const blocking = nativeRow({
         id: "sub_live",
         status,
@@ -581,6 +688,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
       expect(
         await resolveCheckoutGate({
           find_live_recurrences: async () => [blocking],
+          find_live_reorder_rows: async () => [],
           read_cart_product_ids: async () => ["prod_a", "prod_b"],
           read_product_title: async () => "Coffee Club",
         })
@@ -596,6 +704,42 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         },
       })
     }
+  })
+
+  it("blocks through the reorder-rail rule with its own wording", async () => {
+    // The second direction (T8): this plugin's own live row occupies the
+    // product just as a provider recurrence does, and the rejection must stay
+    // distinguishable from the native one.
+    expect(
+      await resolveCheckoutGate({
+        find_live_recurrences: async () => [],
+        find_live_reorder_rows: async () => [reorderRow()],
+        read_cart_product_ids: async () => ["prod_a", "prod_1"],
+        read_product_title: async () => "Coffee Club",
+      })
+    ).toEqual({
+      action: "block",
+      response_body: reorderRejectionBody(
+        "Coffee Club",
+        "prod_1",
+        "sub_reorder_1"
+      )
+    })
+  })
+
+  it("fails open when the reorder-rail read throws, like the native one", async () => {
+    // The fail-open rule is per decision and covers both rails: a read
+    // failure on either side must not decide the customer's checkout.
+    expect(
+      await resolveCheckoutGate({
+        find_live_recurrences: async () => [],
+        find_live_reorder_rows: async () => {
+          throw new Error("db down")
+        },
+        read_cart_product_ids: async () => ["prod_1"],
+        read_product_title: async (productId) => productId,
+      })
+    ).toEqual({ action: "allow" })
   })
 })
 
@@ -626,7 +770,7 @@ describe("findLiveNativeRecurrences (the shared query)", () => {
 
     expect(listSubscriptions).toHaveBeenCalledWith({
       customer_id: "cus_1",
-      status: [...TRACK_OCCUPYING_NATIVE_STATUSES],
+      status: [...TRACK_OCCUPYING_SUBSCRIPTION_STATUSES],
       reference: { $like: NATIVE_SUBSCRIPTION_REFERENCE_PATTERN },
     })
     expect(result).toEqual(rows)
@@ -642,6 +786,81 @@ describe("findLiveNativeRecurrences (the shared query)", () => {
         customer_id: "cus_1",
       })
     ).rejects.toThrow("db down")
+  })
+})
+
+describe("findLiveReorderRailSubscriptions (the mirrored query, T8)", () => {
+  it("pushes the customer and the occupying statuses down, and excludes NATIVE- rows from whatever comes back", async () => {
+    // The rail split is the NATIVE- reference prefix, negated in this reader
+    // rather than pushed down: on the pinned Medusa 2.20 + MikroORM 6.6.14
+    // stack the SQL negation (`$not`/`$like`) reaches knex unexpanded and
+    // throws `The operator "not" is not permitted`, which would fail the
+    // whole gate open. The blocking rule re-checks the reference regardless.
+    const rows = [
+      reorderRow(),
+      reorderRow({ id: "sub_native_leak", reference: "NATIVE-I-GATE1" }),
+    ]
+    const listSubscriptions = jest.fn(async () => rows)
+
+    const result = await findLiveReorderRailSubscriptions(
+      makeContainer(listSubscriptions),
+      { customer_id: "cus_1" }
+    )
+
+    expect(listSubscriptions).toHaveBeenCalledWith({
+      customer_id: "cus_1",
+      status: [...TRACK_OCCUPYING_SUBSCRIPTION_STATUSES],
+    })
+    expect(result).toEqual([reorderRow()])
+  })
+
+  it("propagates a read failure, exactly like the native reader", async () => {
+    const listSubscriptions = jest.fn(async () => {
+      throw new Error("db down")
+    })
+
+    await expect(
+      findLiveReorderRailSubscriptions(makeContainer(listSubscriptions), {
+        customer_id: "cus_1",
+      })
+    ).rejects.toThrow("db down")
+  })
+})
+
+describe("findBlockingReorderRailRow (the mirrored rule, T8)", () => {
+  it("blocks a live non-native row whose product is in the cart", async () => {
+    for (const status of TRACK_OCCUPYING_SUBSCRIPTION_STATUSES) {
+      const blocking = reorderRow({ id: "sub_live", status })
+
+      expect(
+        findBlockingReorderRailRow([blocking], ["prod_a", "prod_1"])
+      ).toEqual(blocking)
+    }
+  })
+
+  it("never blocks on a NATIVE- row even if a defective read handed one over", async () => {
+    // The two rules must stay disjoint: mirror rows are the native rule's
+    // job. The pushdown already excludes them; this re-check is the second
+    // half of that defense.
+    expect(
+      findBlockingReorderRailRow(
+        [reorderRow({ reference: "NATIVE-I-GATE1" })],
+        ["prod_1"]
+      )
+    ).toBeNull()
+  })
+
+  it("returns null when no row's product is in the cart", async () => {
+    expect(
+      findBlockingReorderRailRow(
+        [reorderRow({ product_id: "prod_z" })],
+        ["prod_1"]
+      )
+    ).toBeNull()
+  })
+
+  it("returns null for an empty cart", async () => {
+    expect(findBlockingReorderRailRow([reorderRow()], [])).toBeNull()
   })
 })
 
@@ -662,7 +881,7 @@ describe("findBlockingNativeSubscription (ticket 09 path, semantics pinned)", ()
 
     expect(listSubscriptions).toHaveBeenCalledWith({
       customer_id: "cus_1",
-      status: [...TRACK_OCCUPYING_NATIVE_STATUSES],
+      status: [...TRACK_OCCUPYING_SUBSCRIPTION_STATUSES],
       reference: { $like: NATIVE_SUBSCRIPTION_REFERENCE_PATTERN },
     })
   })

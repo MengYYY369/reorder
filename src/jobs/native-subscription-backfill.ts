@@ -15,8 +15,9 @@ type Logger = {
  *   never re-emit their `activated` event, so without this the mirror set only
  *   covers what arrives from here on, and the checkout exclusivity gate would
  *   not see the rows that matter most.
- * - drift: medusa-paypal emits `paypal.subscription.revised` only from 0.5.0,
- *   so until then this pass is what notices a plan swap.
+ * - drift: medusa-paypal does not deliver `paypal.subscription.revised` (as of
+ *   0.6.1 the in-place revise flow is planned in that plugin's changelog, not
+ *   shipped), so this pass is what notices a plan swap.
  *
  * No-op when medusa-paypal is not installed.
  */

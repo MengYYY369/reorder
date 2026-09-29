@@ -152,11 +152,14 @@ export function buildNativeMirrorFields(
   }
 
   if (eventName === "paypal.subscription.revised") {
-    // Plan/frequency changes arrive as `revised` in medusa-paypal 0.5.0; until
-    // that release ships, the reconciliation job is the only backstop here.
-    // TODO(#06, blocked externally): drop this guard once
+    // `paypal.subscription.revised` is not delivered by medusa-paypal: as of
+    // 0.6.1 the in-place revise flow (and this event with it) exists only as a
+    // planned item in that plugin's changelog, so a plan or frequency change on
+    // a native subscription is noticed only by the hourly reconciliation job,
+    // never by an event. TODO(#06, blocked externally): drop this guard once
     // `paypal.subscription.revised` is emitted with plan_id + frequency fields,
     // and let it update the plan and frequency of the existing row in place.
+    // The reason string below is a pinned test identifier, not a version claim.
     return { ok: false, reason: "revised_not_supported_until_paypal_0_5_0" }
   }
 

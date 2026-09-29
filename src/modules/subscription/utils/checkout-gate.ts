@@ -16,6 +16,11 @@ import {
   findBlockingNativeRow,
   type NativeRowCandidate,
 } from "./native-subscription"
+import {
+  findBlockingReorderRailRow,
+  findLiveReorderRailSubscriptions,
+  type ReorderRailRowCandidate,
+} from "./reorder-rail-exclusivity"
 
 /**
  * The checkout-completion guard for the strict mutual-exclusion rule (R3 + Q1),
@@ -43,11 +48,14 @@ import {
  * while the ticket's ruling is to let the request reach the core handler and let
  * core report problems its own way. `resolveCheckoutGate` is therefore total: a
  * rejected read *or* an unexpected result shape both mean "cannot decide", and
- * the answer to that is always to let the request through. The exclusion rule
- * itself (which rows block) stays `findBlockingNativeRow`'s, unchanged.
+ * the answer to that is always to let the request through. The exclusion rules
+ * (which rows block) are `findBlockingNativeRow`'s for provider-owned mirror
+ * rows and `findBlockingReorderRailRow`'s for this plugin's own live rows —
+ * the same occupying status set, so the two directions cannot disagree about
+ * what "already subscribed" means.
  *
  * Fail-open is bounded to the decision, though, and that bound is a second
- * rule: the guard covers only the reads the rule needs, so the verdict is final
+ * rule: the guard covers only the reads the rules need, so the verdict is final
  * before the product title — a purely cosmetic input to the rejection message —
  * is read at all. A title that cannot be read degrades the wording (to the
  * product id, the same fallback the production reader uses) and can never turn a
@@ -85,6 +93,13 @@ export type CheckoutGateDecision =
 export type CheckoutGateReads = {
   /** Live provider recurrences for the acting customer. */
   find_live_recurrences: () => Promise<NativeRowCandidate[]>
+  /**
+   * Live subscription rows on the reorder rail (the exact negation of the
+   * native reference filter) for the acting customer. Same occupying status
+   * set, so the two directions cannot disagree about what "already
+   * subscribed" means.
+   */
+  find_live_reorder_rows: () => Promise<ReorderRailRowCandidate[]>
   /** Products in the cart being completed. */
   read_cart_product_ids: () => Promise<string[]>
   /**
@@ -101,19 +116,50 @@ export type CheckoutGateReads = {
 
 const ALLOW: CheckoutGateDecision = { action: "allow" }
 
-/** A collision found by the rule: everything the rejection is built from, minus
- * the product title. */
+/** A collision found by one of the two rules: everything the rejection is
+ * built from, minus the product title. */
 type BlockingRow = {
   product_id: string
   subscription_id: string
+  /** Which rail the live row runs on — the message is rail-specific. */
+  rail: "native" | "reorder"
 }
 
 /**
- * The only guarded region of the gate: the two reads the rule needs and the
+ * The rejection wording for a live subscription on the reorder rail (this
+ * plugin's own rows). Deliberately different from the native wording — that
+ * one is pinned verbatim by `integration-tests/http/native-checkout-gate.spec.ts`,
+ * and the two directions must stay distinguishable in the logs. The sentence
+ * names the product and the subscription and stays factual: the vault rail
+ * has no self-service change-or-cancel flow yet, so it must not promise one.
+ */
+function reorderRailRejectionMessage(
+  productTitle: string,
+  subscriptionId: string
+): string {
+  return (
+    `You already have an active subscription for '${productTitle}' on this ` +
+    `account (subscription ${subscriptionId}). A product can be covered by ` +
+    `only one active subscription at a time, so this checkout cannot be ` +
+    `completed.`
+  )
+}
+
+/**
+ * The only guarded region of the gate: the reads the rules need and the
  * matching itself.
  *
+ * Two rail readers run beside each other — live `NATIVE-` mirror rows and
+ * live reorder-rail rows, the exact negation of each other's reference
+ * filter — because a second subscription for a product must be refused
+ * whichever rail the first one runs on. Both sit under the one `try`: the
+ * fail-open rule is per decision, not per read, so a failure on either rail
+ * answers "cannot decide" and lets the request through. The common case —
+ * no live row on either rail — costs two indexed reads and never loads the
+ * cart.
+ *
  * Returns the blocking row, or `null` for "nothing blocks" — which covers "a
- * customer with no live recurrence", "a cart with nothing in it", "no row
+ * customer with no live subscription", "a cart with nothing in it", "no row
  * collides" and, via the catch, "cannot decide" too. All four allow, so the
  * collapsed answer is enough; what matters is that it is final. Nothing read
  * after this function returns can change the verdict, which is why the catch may
@@ -124,10 +170,11 @@ async function decideBlockingRow(
 ): Promise<BlockingRow | null> {
   try {
     const candidateRows = await reads.find_live_recurrences()
+    const reorderRailRows = await reads.find_live_reorder_rows()
 
-    // The overwhelmingly common case: no provider recurrence at all. One indexed
-    // read, and the cart is never loaded.
-    if (!candidateRows.length) {
+    // The overwhelmingly common case: no live row on either rail. Two indexed
+    // reads, and the cart is never loaded.
+    if (!candidateRows.length && !reorderRailRows.length) {
       return null
     }
 
@@ -137,15 +184,32 @@ async function decideBlockingRow(
       return null
     }
 
-    const blocking = findBlockingNativeRow(candidateRows, cartProductIds)
+    const nativeBlocking = findBlockingNativeRow(
+      candidateRows,
+      cartProductIds
+    )
 
-    if (!blocking) {
+    if (nativeBlocking) {
+      return {
+        product_id: nativeBlocking.product_id,
+        subscription_id: nativeBlocking.id,
+        rail: "native",
+      }
+    }
+
+    const reorderBlocking = findBlockingReorderRailRow(
+      reorderRailRows,
+      cartProductIds
+    )
+
+    if (!reorderBlocking) {
       return null
     }
 
     return {
-      product_id: blocking.product_id,
-      subscription_id: blocking.id,
+      product_id: reorderBlocking.product_id,
+      subscription_id: reorderBlocking.id,
+      rail: "reorder",
     }
   } catch {
     // Fail-open: unreadable state — a rejection or a result this unit cannot
@@ -193,9 +257,11 @@ export async function resolveCheckoutGate(
     action: "block",
     response_body: {
       message:
-        `You already have an active subscription for '${productTitle}' managed by ` +
-        `your payment provider. Change or cancel that subscription first, or remove ` +
-        `this item to continue ordering.`,
+        blocking.rail === "reorder"
+          ? reorderRailRejectionMessage(productTitle, blocking.subscription_id)
+          : `You already have an active subscription for '${productTitle}' managed by ` +
+            `your payment provider. Change or cancel that subscription first, or remove ` +
+            `this item to continue ordering.`,
       type: "not_allowed",
       data: {
         product_id: blocking.product_id,
@@ -289,6 +355,8 @@ export async function rejectConflictingPurchase(
   const decision = await resolveCheckoutGate({
     find_live_recurrences: () =>
       findLiveNativeRecurrences(req.scope, { customer_id: customerId }),
+    find_live_reorder_rows: () =>
+      findLiveReorderRailSubscriptions(req.scope, { customer_id: customerId }),
     read_cart_product_ids: () => readCartProductIds(req.scope, req.params?.id),
     read_product_title: (productId) => readProductTitle(req.scope, productId),
   })

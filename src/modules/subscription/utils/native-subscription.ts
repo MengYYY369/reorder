@@ -59,15 +59,16 @@ export function nativeSubscriptionReferenceFilter() {
 }
 
 /**
- * A provider recurrence only occupies the billing track while it is running or
- * deliberately paused.
+ * A subscription row only occupies the billing track while it is running or
+ * deliberately paused — on either rail, which is why the constant carries a
+ * rail-neutral name and is shared by both checkout directions.
  *
  * `cancelled` and `past_due` are let through on purpose: a customer whose PayPal
  * charge just failed must keep the door open to buy the period themselves and
  * not lose their entitlement, and a subscription that ended months ago should
  * not lock the customer out for the rest of its nominal term.
  */
-export const TRACK_OCCUPYING_NATIVE_STATUSES = [
+export const TRACK_OCCUPYING_SUBSCRIPTION_STATUSES = [
   SubscriptionStatus.ACTIVE,
   SubscriptionStatus.PAUSED,
 ] as const
@@ -95,7 +96,7 @@ export function findBlockingNativeRow<T extends NativeRowCandidate>(
   for (const row of rows) {
     if (
       isNativeSubscriptionReference(row.reference) &&
-      (TRACK_OCCUPYING_NATIVE_STATUSES as readonly string[]).includes(row.status) &&
+      (TRACK_OCCUPYING_SUBSCRIPTION_STATUSES as readonly string[]).includes(row.status) &&
       wanted.has(row.product_id)
     ) {
       return row
