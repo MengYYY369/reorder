@@ -30,6 +30,8 @@ entry).
         "subscription.created", "subscription.paused", "subscription.resumed",
         "subscription.canceled", "subscription.plan_change_scheduled",
         "renewal.succeeded", "renewal.failed",
+        "renewal.abandoned", "renewal.awaiting_manual_resolution",
+        "renewal.upcoming", "subscription.trial_ending",
       ],
       // multi-tenant form (independent secrets and customer pools):
       // tenants: [
@@ -362,6 +364,25 @@ enriched with `order_id`, `cart_id`, `customer_id`, `email`, plus
 `display_id`, `payment_status`, `currency_code`, `total`, and `metadata`.
 Forwarding failures are logged and never thrown into the event pipeline.
 Amounts are informational; the reconcile endpoint is authoritative.
+
+Note for subscribers waiting on the plugin's lifecycle events: `renewal.failed`
+was a dead whitelist entry for a long time — the plugin persisted the
+activity-log record but never emitted the event on the bus, so no subscriber
+ever received it. The plugin now persists **and** emits its lifecycle events
+(`renewal.failed`, `subscription.expired`, and the `dunning.*` set) from the
+same funnel, so whitelisting them forwards real deliveries; one occurrence
+produces exactly one bus event. The two operational outcomes
+(`renewal.abandoned`, `renewal.awaiting_manual_resolution`) come from the same
+funnel: `renewal.abandoned` fires when a period is written off (structural
+retries exhausted or dunning exhausted) and carries the reason — the
+subscription is deliberately left `past_due`, and **deciding whether to cancel
+is the host's job**; `renewal.awaiting_manual_resolution` fires when a stuck
+cycle is parked for an operator. The two upcoming-renewal lookahead events
+(`renewal.upcoming`, `subscription.trial_ending`) come from the same funnel:
+the hourly `emit-renewal-reminders` job persists each reminder as an
+activity-log record whose unique `dedupe_key` makes the emission exactly-once
+per renewal cycle / per trial, and re-emits it on the bus only when the record
+was actually created.
 
 ## Cross-repo coupling — check these on upstream syncs
 

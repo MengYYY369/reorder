@@ -205,10 +205,17 @@ The user can:
 ### Rules Section
 
 The rules area supports:
-- minimum cycles: optional positive integer defining the minimum subscription period before cancellation; empty input evaluates to `null` (no minimum period)
 - trial enabled / disabled
 - trial days
-- stacking policy: whether the offer's discount may combine with other discounts
+- trial bonus days for binding a card: extra trial days granted once the
+  customer binds a payment method to a claimed trial. Empty input evaluates to
+  `null` (no bonus) and hides the bind-and-extend option; a set value must be a
+  positive whole number of days.
+- require payment method: when on, a manual-mode trial checkout is rejected, a
+  trial-enabled redemption code is refused, and a card-free trial claim
+  (`binding: "none"`) is refused — only the bound claim (`binding: "vault"`)
+  can take such a trial. Ships defaulting to **off**, so no existing offer
+  changes behaviour on upgrade.
 - auto-renew consent: `Never flip automatically` (default) or `From the session
   customer id`. With the default, saving a payment method never starts charging
   on its own; with the consent option, a checkout whose payment session carries
@@ -221,6 +228,24 @@ The rules area supports:
 - maximum stacked cycles: optional non-negative integer refusing a purchase that
   would push the accumulated cycle count past that ceiling; empty input evaluates
   to `null` (no limit).
+
+When the product has a variant carrying `paypal_subscription` metadata, the form
+also shows a read-only **native PayPal trial** panel listing each such variant's
+`trial_periods` and `setup_fee` beside the offer's own trial inputs. Those
+values live in the variant metadata and are charged by PayPal itself; the
+offer's trial values do not change them. A product-scoped offer covers every
+native variant of the product, so all of them are listed. The panel exists to
+prevent a misconfiguration — the native plan's trial length is part of the
+PayPal plan's identity and must not be sourced from the offer.
+
+The legacy `minimum_cycles` and `stacking_policy` rules are **not editable in
+the UI and not enforced** by any workflow; they are decorative for backward
+compatibility only. The form always submits their neutral defaults
+(`minimum_cycles: null`, `stacking_policy: "allowed"`), and editing an offer
+resubmits the values already stored on it, so existing records keep their
+stored values. Note the name collision: the enforced stacking pair is
+`row_stacking_policy` / `max_stacking_cycles` (repeat purchase and maximum
+stacked cycles above) and is unrelated to the legacy `stacking_policy`.
 
 Every default above is the behavior from before these fields existed, so an offer
 that is not reconfigured is unaffected. Client-side validation enforces rule

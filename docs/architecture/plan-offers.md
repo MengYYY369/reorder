@@ -13,7 +13,7 @@ The current implementation supports:
 - configuring variant-level subscription offers
 - defining allowed billing frequencies
 - defining discount rules per frequency
-- defining additional offer rules such as trial policy and discount-stacking policy (`stacking_policy`) plus the new subscription-relationship fields `consent_from_session`, `row_stacking_policy` (subscription-row stacking), `max_stacking_cycles`
+- defining additional offer rules such as trial policy, plus the subscription-relationship fields `consent_from_session`, `row_stacking_policy` (subscription-row stacking), `max_stacking_cycles` (the legacy `minimum_cycles` / `stacking_policy` rules are persisted but not enforced)
 - listing, inspecting, creating, editing, and toggling plan offers in Admin
 - resolving effective subscription configuration with `variant > product` priority
 - enforcing active offer configuration during subscription plan-change flows
@@ -77,6 +77,14 @@ The offer `rules` object holds the offer-policy rules validated by the plan-offe
 rules schema; the subscription *relationship* rules (R1-R5) and the three new rule
 fields (`consent_from_session`, `row_stacking_policy`,
 `max_stacking_cycles`) are defined in [Subscription Relationship Model](./subscription-relationship-model.md).
+
+Two legacy `rules` fields — `minimum_cycles` and `stacking_policy` — are
+persisted and still accepted by the API, but they are **not enforced**: no
+workflow reads them for behavior, and the Admin UI no longer offers inputs for
+them. They are kept for backward compatibility only. Note the name collision:
+`row_stacking_policy` / `max_stacking_cycles` are a different, *enforced* pair
+(subscription-row stacking, see the Subscription Relationship Model) and have
+no relation to the legacy `stacking_policy`.
 
 ### Scope Model
 

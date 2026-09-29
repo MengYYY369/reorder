@@ -16,6 +16,8 @@ The current implementation supports:
 - Admin queue and detail views for renewal operations
 - integration with `Subscriptions` and `Plans & Offers`
 - integration with `Dunning` for payment-qualified renewal failures
+- retry ownership split by failure kind: payment-qualified failures hand off to an open dunning case, structural failures retry a bounded number of times and then abandon the cycle
+- reconciliation of stuck `processing` cycles, with an Admin override for parked cycles
 - operational hardening through workflow locking, correlation IDs, structured logs, and scheduler summary metrics
 
 ## Architectural Overview
@@ -79,6 +81,8 @@ Core `renewal_cycle` fields include:
 - `applied_pending_update_data`
 - `last_error`
 - `attempt_count`
+- `last_failure_kind`
+- `structural_attempt_count`
 - `metadata`
 
 The `renewal_attempt` model stores:
@@ -93,6 +97,32 @@ The `renewal_attempt` model stores:
 - `payment_reference`
 - `order_id`
 - `metadata`
+
+### Cycle status and failure bookkeeping
+
+`renewal_cycle.status` carries six values:
+
+| status | meaning |
+| --- | --- |
+| `scheduled` | live upcoming cycle; the only status a new cycle is created in |
+| `processing` | a run holds it (workflow lock); transient |
+| `succeeded` | the period was paid and finalized (possibly with no order — the trial-end branch) |
+| `failed` | the last attempt failed; a bounded scheduler retry still applies |
+| `abandoned` | **terminal.** The period was written off: consecutive structural failures reached `renewal_max_attempts`, or dunning exhausted. Never retried, never selected by the due query. The subscription is left `past_due` and `renewal.abandoned` is emitted; the host decides what happens next — this plugin never cancels a subscription as a side effect |
+| `awaiting_manual_resolution` | **parked, non-terminal.** A stuck `processing` cycle whose payment state could not be decided. The period is neither paid nor written off; a human resolves it through the Admin resolve-stuck route |
+
+Two fields back the failure bookkeeping:
+
+- `last_failure_kind` records `classifyRenewalFailure`'s verdict for the last
+  failed attempt (`order_creation_failed`, `unexpected_error`, payment kinds,
+  …), so retry ownership is decided from the recorded verdict instead of being
+  re-derived.
+- `structural_attempt_count` counts **consecutive structural** (non-payment)
+  failures and is compared against the `renewal_max_attempts` setting. It is
+  deliberately a separate counter from `attempt_count`: `attempt_count` also
+  counts payment attempts owned by dunning, so capping on it would abandon
+  cycles whose payment retries are still legitimately in flight. It resets to
+  `0` on success.
 
 ### Indexing Strategy
 
@@ -263,6 +293,72 @@ In runtime terms:
 - future cycles must respect `next_renewal_at`
 - `pause` and `cancel` affect eligibility, not ownership of `renewal_cycle` records
 
+### Retry ownership — one predicate, two consumers
+
+Who may move a renewal cycle next is decided by one disposition predicate,
+`resolveCycleDisposition` (`src/modules/renewal/utils/cycle-disposition.ts`),
+consumed both by the scheduler's due query and by the `process-renewal-cycle`
+step, so ownership cannot drift between the two. Evaluated top to bottom:
+
+| disposition | when | consequence |
+| --- | --- | --- |
+| `settled` | cycle status is `succeeded`, `abandoned`, or `awaiting_manual_resolution` | terminal or parked — neither the scheduler nor the step may reopen it (`processing` is deliberately not adjudicated here; it is in-flight state owned by the workflow lock) |
+| `not_chargeable` | subscription status is not `active`/`past_due` (paused, cancelled), or `cancel_effective_at` is at or before the cycle's `scheduled_for`, or the row is a native mirror (PayPal charges it), or it is manual-mode outside the trial carve-out | dropped from the due set; the scheduler never charges or fails it |
+| `dunning_owns` | an **open** dunning case exists for the cycle (`open`, `retry_scheduled`, `retrying`, `awaiting_manual_resolution`) | the case owns the retry timing; the scheduler must not touch the cycle |
+| `trial_end` | a manual-mode trial whose cycle is at or after `trial_ends_at` | the one manual cycle the scheduler picks up, so the deterministic trial-end branch can run on time; that branch never charges |
+| `charge` | everything else | the normal off-session charge path |
+
+The due query (`listDueRenewalCyclesForProcessing`) still selects only
+`[scheduled, failed]` rows with `scheduled_for <= now`, then drops everything
+the predicate excludes. What the exclusions fix, concretely: a paused or
+cancelled subscription's leftover cycle used to be selected, rejected by the
+step, re-marked `failed`, and selected again five minutes later — an infinite
+loop that also minted a fresh `renewal.failed` each pass. Cycles excluded by
+the predicate keep their status and are simply not selected.
+
+Step-level rules in `process-renewal-cycle`:
+
+- `abandoned` and `awaiting_manual_resolution` are rejected defensively even
+  though the due query excludes them, because manual force runs bypass the
+  query.
+- On failure the verdict is written to `last_failure_kind`. **Blocked
+  outcomes** (`already_processing`, `duplicate_execution`) are not failures:
+  they increment neither counter.
+- A **payment-qualified** failure hands its retries to dunning — the new open
+  case then holds the `dunning_owns` disposition. If `startDunningWorkflow`
+  itself throws, the failure is treated as **structural** (alertable event,
+  counted toward the cap): a payment failure whose recovery machinery could
+  not start must never be silently retried forever.
+- A **structural** failure increments `structural_attempt_count`. At or above
+  `renewal_max_attempts` the cycle becomes `abandoned` and `renewal.abandoned`
+  is persisted and emitted; below the cap it stays `failed` for a bounded
+  retry. Structural failures reproduce deterministically (missing cart,
+  missing payment context), which is why they cap out instead of looping. The
+  payment-context guard sits **ahead of order creation**: a subscription that
+  cannot be charged fails without minting an order (the check used to sit
+  after the order workflow, and every retry minted one orphan order per
+  attempt up to the cap).
+- On success `structural_attempt_count` resets to `0`.
+
+### The catch-up charge after a late recovery (do not "fix" this)
+
+Period finalization — the shared step consumed by the automatic success path,
+dunning recovery, and stuck-cycle reconciliation — advances the subscription
+cadence **anchored on the cycle's own `scheduled_for`, never on `now`**. This
+is deliberate: it keeps the billing anchor from drifting by the recovery
+delay.
+
+The documented consequence: **a period recovered days late leaves the next
+period immediately due.** A cycle scheduled on the 1st that is recovered on
+the 8th produces the next `scheduled_for` on the following period's 1st — in
+the past — so the scheduler bills it on the next pass: a catch-up charge for
+the following period, exactly as if the late period had been paid on time.
+`complete-manual-renewal` uses `max(now, scheduled_for)` for a different
+reason (a manual payment can arrive arbitrarily late); mixing the two rules
+would make the anchor depend on which rail paid. A future reader who sees the
+past-dated next cycle and "fixes" the anchor to `now` reintroduces date
+drift — the original anchor is the contract.
+
 ## 4. Read Path
 
 The read path is optimized for the Admin renewal queue and cycle detail.
@@ -321,15 +417,28 @@ It selects due cycles by:
 - `scheduled_for <= now`
 - approval-eligible state when approval is required
 
+and then drops every cycle the disposition predicate excludes (see *Retry
+ownership*): subscriptions not `active`/`past_due`, cancellations already
+effective for the cycle date, native mirror rows, manual-mode rows outside the
+trial-end carve-out, and cycles whose recovery an open dunning case owns. The
+exclusion filter runs after pagination, so a page consisting solely of
+excluded cycles returns an empty batch until the next offset pass.
+
 This keeps scheduler discovery lightweight and separate from Admin display concerns.
 
-Because `Cancellation & Retention` can materialize `paused` and `cancelled` states back to `Subscription`, scheduler behavior must treat those lifecycle fields as the operational gate.
+Lifecycle fields are the operational gate, now enforced by the query itself
+rather than only by step-level checks:
+- `paused` subscriptions are not selected for renewal execution
+- `cancelled` subscriptions are not selected for renewal execution
+- due cycles after effective cancellation are not selected
+- cycle records may still exist historically even when they are no longer selected
 
-Current implications:
-- `paused` subscriptions are not normally eligible for renewal execution
-- `cancelled` subscriptions are not eligible for renewal execution
-- due cycles after effective cancellation should not execute
-- cycle records may still exist historically even when they are no longer eligible
+A second read serves the stuck-cycle reconciliation job
+(`listStuckProcessingRenewalCycles`): cycles still `processing` whose
+`updated_at` is older than 30 minutes — far beyond any legitimate provider
+call — are presumed crashed runs. `awaiting_manual_resolution` is deliberately
+not returned here: a parked cycle waits for a human, and re-processing it
+would undo the park.
 
 ## 5. Write Path
 
@@ -356,6 +465,7 @@ The current renewal mutation layer is built around:
 - `force-renewal-cycle`
 - `approve-renewal-changes`
 - `reject-renewal-changes`
+- `reconcile-stuck-renewal-cycle`
 
 ### Core Execution Workflow
 
@@ -379,6 +489,42 @@ Current implementation detail:
 - the workflow acquires a Medusa workflow lock with key `renewal:${renewal_cycle_id}`
 - the current lock settings are `timeout = 10` seconds and `ttl = 120` seconds
 - this shared lock protects both scheduler execution and manual force execution
+
+Period finalization is extracted into one shared step,
+`finalize-renewal-period` (`src/workflows/steps/finalize-renewal-period.ts`):
+mark the cycle `succeeded`, advance the cadence anchored on `scheduled_for`,
+set `last_renewal_at`, clear applied pending changes, reset
+`structural_attempt_count`, ensure the next cycle, and persist + emit
+`renewal.succeeded`. The automatic path, dunning recovery, and stuck-cycle
+reconciliation all settle a paid period through the same semantics (see *The
+catch-up charge after a late recovery* above for the anchor rule).
+
+### Stuck-`processing` reconciliation
+
+A hard process death between the capture and the `SUCCEEDED` write can strand
+a cycle in `processing` with money taken. The hourly
+`recover-stuck-renewal-cycles` job finds cycles that are still `processing`
+after 30 minutes, discovers the order the crashed attempt created through the
+`renewal_cycle` ↔ `order` link (not `generated_order_id`, which is only
+written by the successful end of a run), and applies a three-row decision
+table:
+
+| Observed state | Action |
+| --- | --- |
+| Linked order's payment confirmed captured | Finalize the period `succeeded` via the shared finalization step |
+| No linked order, or payment confirmed not captured | Return the cycle to `failed` with an explanatory `last_error`; normal retry ownership applies |
+| Anything else (authorized not captured, unreadable, ambiguous provider state) | **Park** the cycle as `awaiting_manual_resolution`; the subscription is left untouched |
+
+The third row is deliberate: "we do not know" must not be recorded as "there
+is no hope", so an ambiguous outcome is parked — never collapsed into
+`abandoned` — and `renewal.awaiting_manual_resolution` is emitted.
+
+### Resolve-stuck route
+
+`POST /admin/renewals/:id/resolve-stuck` with `{ outcome: "succeeded" | "failed" | "abandoned", reason }`
+is the operator entry point. It accepts a cycle in `processing` or in
+`awaiting_manual_resolution` (so a parked cycle has a way out), applies the
+operator's override, and records the actor and reason in the activity log.
 
 ### Approval Workflows
 
@@ -466,6 +612,7 @@ Implemented mutation routes:
 - `POST /admin/renewals/:id/force`
 - `POST /admin/renewals/:id/approve-changes`
 - `POST /admin/renewals/:id/reject-changes`
+- `POST /admin/renewals/:id/resolve-stuck`
 
 The API layer uses:
 - Zod validators
@@ -552,6 +699,12 @@ Implemented test files:
 - `src/modules/renewal/__tests__/retire-stale-cycles.spec.ts` — the write half: `retireStaleUpcomingCycles` with its re-read qualification and `withheld` report, the `defer` / unchanged / reconciled wrappers and what each reports, and the rollback dispatcher with the retired-row restore
 - `src/modules/renewal/__tests__/reconcile-restore.spec.ts` — `restoreReconciledCycle`, pinned to every column a reconciliation patch may write
 - `integration-tests/http/subscription-from-order.spec.ts` — the stacking purchase end to end: one future `scheduled` row, the `defer` branch through the real workflow, the index refusing a second live `scheduled` row, the retire behind a terminal entitlement-date row with the index up, the retire beside an adopted or deferred row inside an index window, and the applied adopt rolled back when the retirement fails
+- `integration-tests/http/renewal-retry-ownership.spec.ts` — the disposition exclusions end to end: paused and cancelled subscriptions drop out of the due set, an open dunning case takes ownership, a closed case releases it, and a manual trial's trial-end cycle stays processable while a manual non-trial cycle does not
+- `integration-tests/http/renewal-failure-cap.spec.ts` — the structural cap: structural failures abandon at `renewal_max_attempts`, payment failures do not increment the structural counter, a payment failure whose dunning start fails still terminates at the cap, and blocked outcomes increment nothing
+- `integration-tests/http/reconcile-stuck-renewal-cycle.spec.ts` — the three-row decision table (captured → finalized, not captured → retryable, ambiguous → parked), job idempotency, and the parked cycle staying out of the stuck scan
+- `integration-tests/http/resolve-stuck-route.spec.ts` — the operator override from `processing` and from `awaiting_manual_resolution`, with the reason recorded
+- `integration-tests/http/renewal-reminders.spec.ts` — the lookahead job emitting `renewal.upcoming` / `subscription.trial_ending` exactly once, including manual subscriptions, excluding paused/cancelled
+- `integration-tests/http/trial-conversion.spec.ts` — the trial-end three-way decision (convert on auto with a usable method, deterministic end on manual, end with an alertable reason without one) and the native row never charged
 - `integration-tests/http/migrations.spec.ts` — the migration harness, including which duplicate shapes a migrated database can actually hold
 - `integration-tests/http/renewals-workflows.spec.ts`
 - `integration-tests/http/renewals-routes.spec.ts`

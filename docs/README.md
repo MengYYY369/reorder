@@ -93,6 +93,7 @@ Runtime source-of-truth documents currently exist for:
 - `Subscriptions`
   - `architecture/subscriptions.md`
   - `api/admin-subscriptions.md`
+  - `api/store-customer-self-service-tutorial.md` — tutorial for frontend developers building the customer portal on the `/store/customers/me/*` routes
   - `admin/subscriptions.md`
   - `testing/subscriptions.md`
 - `Payments`

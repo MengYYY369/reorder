@@ -50,6 +50,8 @@ Supported renewal cycle statuses:
 - `processing`
 - `succeeded`
 - `failed`
+- `abandoned` (terminal — structural retries exhausted or dunning exhausted; never re-selected)
+- `awaiting_manual_resolution` (parked pending an operator decision, via the stuck-cycle reconciliation or `POST /admin/renewals/:id/resolve-stuck`)
 
 ### Approval Status Values
 
@@ -429,7 +431,52 @@ Returns the refreshed renewal detail payload with updated approval summary.
 - `409 conflict`
   Approval was already decided for this cycle.
 
-## 6. API Notes
+## 6. Resolve a Stuck Cycle
+
+### Endpoint
+
+- Method: `POST`
+- Path: `/admin/renewals/:id/resolve-stuck`
+
+### Purpose
+
+Operator entry point for a cycle stuck in `processing` or parked in
+`awaiting_manual_resolution`: applies the operator's outcome to the cycle by
+delegating to the stuck-cycle reconciliation workflow. The route carries no
+business rules — the workflow owns the settlement, the attempt bookkeeping, and
+the activity-log record.
+
+### Request Body
+
+```json
+{
+  "outcome": "succeeded",
+  "reason": "provider confirmed the capture off-system"
+}
+```
+
+Fields:
+- `outcome: "succeeded" | "failed" | "abandoned"`
+- `reason: string` (required; recorded in the activity log)
+
+### Success Response
+
+Status:
+- `200 OK`
+
+Returns the refreshed renewal detail payload.
+
+### Common Errors
+
+- `400 invalid_data`
+  Missing or invalid `outcome` or `reason`.
+- `404 not_found`
+  The renewal cycle does not exist.
+- `409 conflict`
+  The cycle is not in `processing` or `awaiting_manual_resolution`, or its
+  current state does not accept the requested outcome.
+
+## 7. API Notes
 
 ### Read Model Notes
 

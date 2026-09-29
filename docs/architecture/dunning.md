@@ -113,9 +113,38 @@ The current implementation follows these rules:
 - only payment-qualified renewal failures start dunning
 - qualifying renewal failures are currently surfaced from payment-session, authorization, and capture failures after the renewal order exists
 - `start-dunning` marks the subscription as `past_due` when entering recovery
+- an open case (`open`, `retry_scheduled`, `retrying`, `awaiting_manual_resolution`) **exclusively owns** the retry timing: the renewal scheduler drops any cycle whose recovery an open case owns
 - `run-dunning-retry` retries payment on the existing renewal order rather than re-running the whole renewal workflow
-- successful recovery closes the case as `recovered` and restores the subscription to `active`
-- unrecovered closure leaves the originating renewal cycle as `failed` and keeps the subscription in `past_due`
+- a successful recovery settles the period exactly once: the originating renewal cycle becomes `succeeded` through the shared finalization step (cadence advanced from its original `scheduled_for`, next cycle ensured, `renewal.succeeded` persisted and emitted), and the case closes as `recovered` with the subscription restored to `active`
+- unrecovered closure — automatic exhaustion or the Admin route — sets the originating renewal cycle to the terminal `abandoned` status and keeps the subscription in `past_due`. **The plugin never cancels the subscription as a side effect**: the host receives `renewal.abandoned` and decides what happens to the customer relationship. Cancelling a customer relationship is not a side effect a background job performs
+- a late recovery keeps the original billing anchor (`scheduled_for`), so the following period can come due immediately — the catch-up charge documented in `renewals.md`
+
+### The settled-cycle guard
+
+Before anything can charge, `run-dunning-retry` loads the originating cycle
+and refuses to run when the period is already settled (`succeeded`) or
+written off (`abandoned`): it closes the case instead — as `recovered` when
+the cycle is `succeeded`, as `unrecovered` with recovery reason
+`cycle_abandoned` when it is `abandoned` — and stops. No attempt row, no
+payment.
+
+This is what makes the recovery write order stop being load-bearing. Recovery
+finalizes the period **before** it closes the case, so a crash between the two
+writes leaves a settled cycle behind an open case — which this guard then
+closes without charging. Writing in the opposite order would strand a `failed`
+cycle behind a closed case that the renewal scheduler is free to select and
+charge again. Both crash windows are safe regardless of order.
+
+### Parking instead of throwing
+
+A due case the retry cannot even start (the subscription is no longer
+chargeable, the retry budget is already spent, the case lost its order or
+schedule) does **not** throw and stay due with a stale past `next_retry_at`.
+It is **parked** as `awaiting_manual_resolution` with the reason recorded in
+`recovery_reason` and `next_retry_at` cleared — out of the due set, still
+resolvable (`retry-now`, both mark-* workflows, and the retry-schedule update
+all accept the parked status). Pre-payment exhaustion still closes as
+`unrecovered` and abandons the originating cycle like any other exhaustion.
 
 Current retry classification:
 - retryable failures include `insufficient_funds`, `generic_decline`, `do_not_honor`, and temporary provider/network errors
@@ -241,12 +270,15 @@ It is responsible for:
 
 It is responsible for:
 - validating that the case is retryable
+- refusing (and closing the case instead) when the originating cycle is already settled — see *The settled-cycle guard* above
+- parking the case when it cannot even start, instead of throwing — see *Parking instead of throwing* above
 - creating a new `DunningAttempt`
 - reusing the renewal order payment context
 - creating a new payment session
 - authorizing and capturing payment
 - transitioning the case to `recovered`, `retry_scheduled`, or `unrecovered`
-- restoring the subscription to `active` on recovery
+- on recovery: finalizing the renewal period (cycle `succeeded`, cadence advanced from the original anchor) before closing the case, and restoring the subscription to `active`
+- on exhaustion: settling the originating cycle `abandoned` and leaving the subscription `past_due` — the abandonment event, not a cancellation, is the output
 
 Current implementation detail:
 - the workflow acquires a Medusa workflow lock with key `dunning:${dunning_case_id}`
@@ -279,6 +311,15 @@ The job:
 - logs per-case outcomes
 - emits a structured run summary with counters and operational metrics
 
+The discovery loop re-queries the due set with `skip: 0` every pass — the
+fixed page is what makes concurrent resolution safe — and every selected case
+leaves the due set in the same run that selected it (it recovers, reschedules,
+exhausts, or parks). An iteration cap (100 passes of 20 cases) is the safety
+net: a wedge a future regression could reintroduce, or a backlog larger than
+one run may drain, makes the run terminal with an alertable log line and
+releases the job lock; remaining cases defer to the next five-minute tick
+instead of wedging the lock.
+
 The scheduler does not implement a separate business flow. It reuses the same core retry logic as manual `retry-now`.
 
 ## 8. Concurrency and Operational Hardening
@@ -289,7 +330,10 @@ Protection currently includes:
 - coarse scheduler lock through the Locking Module
 - per-case workflow lock through `acquireLockStep`
 - duplicate-active-case protection on dunning start
+- the settled-cycle guard: a case whose originating cycle is `succeeded` or `abandoned` is closed instead of charged
+- parking for cases a retry cannot start, so a stale `next_retry_at` can never re-select them
 - retry guards for terminal cases, in-flight retries, not-due retries, and max-attempt exhaustion
+- the discovery loop's iteration cap, so no wedge can hold the job lock indefinitely
 - structured logs with correlation IDs
 - scheduler summary metrics including recovery rate, fail rate, average attempts, and average time to recover
 - alertable failure classification for unexpected retry and startup failures
@@ -310,7 +354,7 @@ This keeps `Dunning` visually aligned with the existing `Subscriptions`, `Plans 
 
 In the current runtime:
 - `Renewals` create the failed debt event
-- `Dunning` recovers or closes that debt event
+- `Dunning` recovers or closes that debt event; a recovery settles the period exactly once, an exhaustion writes the period off (`renewal_cycle` → `abandoned`) without ever cancelling the subscription
 - `Subscriptions` reflect customer lifecycle state such as `active` and `past_due`
 - `Cancellation & Retention` may coexist with dunning for the same subscription without taking over recovery ownership
 

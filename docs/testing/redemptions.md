@@ -59,6 +59,12 @@ Store HTTP layer:
 - PAST_DUE extension: dunning case recovered with `redemption_free_cycles_applied`, subscription reactivated
 - expiry job: cancels expired redemption subscriptions, logs `subscription.expired`
 - customer authentication requirement
+- trial semantics inherited from the batch variant's offer rules: a trial-enabled
+  code writes a `trial_claim` ledger row (`source: redemption`) while a
+  non-trial grant writes none
+  (`trial-claim-ledger.spec.ts`), and `trial_requires_payment_method` ON
+  refuses the redemption outright while OFF redeems it
+  (`trial-requires-payment-method.spec.ts`)
 
 ## 5. Fixtures
 

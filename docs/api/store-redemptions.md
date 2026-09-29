@@ -117,6 +117,30 @@ Response: `{ redemptions: [{ id, batch_id, code_id, outcome, free_cycles_applied
 
 `outcome` is `subscription_created` or `subscription_extended`.
 
+## Trials
+
+A batch's grant inherits trial semantics from the target variant's effective
+plan-offer rules (the batch itself carries no trial config). When the offer
+enables a trial, the create branch mints a trial subscription
+(`is_trial: true`, `trial_ends_at = started_at + trial_days`, payment-free like
+every redemption-created row) and the redemption writes a **`trial_claim`
+ledger row** for the customer/product pair, with `source: "redemption"`. A
+non-trial grant writes no ledger row. The ledger is the same one the
+self-service claim endpoint writes, so a customer who took a trial through a
+code cannot later claim the same product's trial
+(`store-customer-self-service-tutorial.md`, *Trials*).
+
+Two refusals protect the trial semantics:
+
+- **`trial_requires_payment_method` is ON** — the redemption is refused
+  outright (`Redemption code <code> grants a trial that requires a payment
+  method, which redemption codes cannot collect`). The redemption door has no
+  cart and no way to collect a payment method, and degrading the grant to a
+  non-trial subscription was rejected: it would make the offer's rule a lie.
+- **Trial codes are new-user-only** — an existing subscription for the target
+  variant, or any prior order containing the variant, refuses with
+  `Trial codes are for new users only`.
+
 ## Activity Log
 
 - `redemption.redeemed` — written on every successful redemption (outcome, code, batch in `new_state`)

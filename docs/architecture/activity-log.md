@@ -248,6 +248,13 @@ The `Activity Log` should use a stable, explicit taxonomy grouped by domain pref
 - `subscription.next_delivery_skipped`
 - `subscription.payment_method_updated`
 - `subscription.expired`
+- `subscription.trial_ending`
+  - written by the hourly `emit-renewal-reminders` lookahead job when a trial
+    subscription's `trial_ends_at` falls inside the configured reminder window;
+    deduped through the activity log's unique `dedupe_key`, so each trial is
+    announced exactly once. The reminder job deliberately includes manual-mode
+    subscriptions — for a manual subscription the reminder is the moment the
+    customer must act — and excludes paused, cancelled, and native mirror rows
 - `subscription.creation_failed`
   - written by the `order.placed` subscriber when `create-subscription-from-order`
     fails, so an order without a subscription row is visible to support instead of
@@ -264,6 +271,26 @@ The `Activity Log` should use a stable, explicit taxonomy grouped by domain pref
 - `renewal.force_requested`
 - `renewal.succeeded`
 - `renewal.failed`
+- `renewal.abandoned`
+  - written when a renewal period is written off into the terminal `abandoned`
+    status (structural-failure cap, dunning exhaustion, operator write-off), so
+    the host can decide what happens to the past-due subscription — the plugin
+    never cancels it as a side effect (decision R3)
+  - dedupes on the renewal cycle with no qualifier: the status is terminal, so
+    a replayed workflow cannot emit a second occurrence
+- `renewal.awaiting_manual_resolution`
+  - written when reconciliation parks a stuck cycle whose payment state is
+    undecidable: the period is neither paid nor written off and the subscription
+    is deliberately left untouched (decision R5)
+  - same unqualified per-cycle dedupe: re-parking a parked cycle changes no
+    state and emits nothing new
+- `renewal.upcoming`
+  - written by the hourly `emit-renewal-reminders` lookahead job when a
+    cycle's `scheduled_for` falls inside the `renewal_reminder_lead_days`
+    window (a setting; `0` disables the job). Like the trial reminder it
+    includes manual-mode subscriptions and excludes paused, cancelled, and
+    native mirror rows; the unique `dedupe_key` makes the emission
+    exactly-once per cycle
 
 ### Dunning Events
 
@@ -308,6 +335,13 @@ The implemented write path is:
 1. domain workflow mutates source-of-truth state
 2. workflow builds a normalized business audit payload
 3. `create-subscription-log-event` persists one append-only `subscription_log` record
+
+Every event that flows through that funnel is also emitted on the event bus at
+the persist site (same `event_type`, payload = the normalized log event with
+`subscription_id`, `customer_id`, state snapshots and `metadata`). Emission is
+best-effort and never blocks the business flow, and a persist that deduped on
+`dedupe_key` does not emit again, so one occurrence produces exactly one bus
+event.
 
 Normalization rules are centralized in the shared activity-log helper and cover:
 - compact `previous_state` and `new_state`
@@ -895,11 +929,20 @@ Implemented renewal events:
 - `renewal.force_requested`
 - `renewal.succeeded`
 - `renewal.failed`
+- `renewal.abandoned`
+- `renewal.awaiting_manual_resolution`
+- `renewal.upcoming`
 
 Emission boundaries:
 - approval decisions are emitted from the approval workflows
 - manual force-run is emitted only after the force request passes domain validation
 - renewal execution emits only the final `succeeded` or `failed` outcome
+- the two operational outcomes are persisted and emitted through the shared
+  `persistRenewalResolutionEvent` funnel exactly where the cycle write lands:
+  the structural-failure cap and the dunning-start failure in
+  `process-renewal-cycle`, dunning exhaustion in `run-dunning-retry`, the
+  operator write-off in `mark-dunning-unrecovered`, and the reconciliation park
+  and operator-override write-off in `reconcile-stuck-renewal-cycle`
 
 The following remain outside `Activity Log` and stay in renewal observability only:
 - workflow lock acquisition and release
@@ -909,6 +952,30 @@ The following remain outside `Activity Log` and stay in renewal observability on
 - blocked execution cases such as `already_processing` and `duplicate_execution`
 
 This keeps the renewal activity stream operator-readable while preserving detailed operational tracing in `src/modules/renewal/utils/observability.ts`.
+
+## Current Dunning Emission Scope
+
+The `Dunning` integration persists and emits one lifecycle event per
+operator-facing occurrence, through the shared
+`persistDunningLifecycleEvent` helper (`src/workflows/utils/dunning-log-event.ts`):
+
+- `dunning.started` — `start-dunning`, when a case is actually created (a
+  refreshed existing case is not a start)
+- `dunning.retry_executed` — `run-dunning-retry`, once per payment attempt
+  that actually ran; guard closures without an attempt (settled-cycle guard,
+  park, pre-payment exhaustion) do not emit it
+- `dunning.recovered` — the recovery close in `run-dunning-retry`, the
+  settled-cycle guard closing a case behind an already-paid period, and
+  `mark-dunning-recovered`
+- `dunning.unrecovered` — every exhaustion close in `run-dunning-retry`
+  (pre-payment exhaustion, permanent failure, spent budget, exhausted
+  schedule), the settled-cycle guard closing a case behind an already
+  written-off period, and `mark-dunning-unrecovered`
+- `dunning.retry_schedule_updated` — `update-dunning-retry-schedule`
+
+Case closures happen in exactly one place per run and the terminal-status
+guards refuse re-closing, so each recovery or write-off emits exactly one
+event.
 
 ## Summary
 

@@ -146,6 +146,15 @@ Covered through integration tests:
 - discount range validation
 - upsert behavior for an existing target
 
+Trial rules are covered through their enforcement points rather than through the
+offer form: `trial_requires_payment_method` at checkout, redemption and the
+trial claim (`trial-requires-payment-method.spec.ts`,
+`trial-claim.spec.ts`), and `trial_bonus_days` through the bind-and-extend flow
+(`trial-payment-method-binding.spec.ts`). The Admin form's own rendering —
+including the read-only native PayPal trial panel — has no automated coverage:
+`src/admin` is excluded from the backend build's typecheck and matches no jest
+`testMatch`.
+
 ### Admin API Coverage
 
 Covered through HTTP integration tests:

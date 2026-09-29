@@ -337,6 +337,8 @@ The persisted record stores:
 - `default_trial_days`
 - `dunning_retry_intervals`
 - `max_dunning_attempts`
+- `renewal_max_attempts`
+- `renewal_reminder_lead_days`
 - `default_renewal_behavior`
 - `default_cancellation_behavior`
 - `version`
@@ -368,6 +370,25 @@ Validation and normalization are currently applied in the settings module before
 - `dunning_retry_intervals` must be positive integers
 - retry intervals must be strictly increasing
 - `max_dunning_attempts` must match the number of retry intervals
+- `renewal_max_attempts` is an integer `> 0`
+- `renewal_reminder_lead_days` is an integer `>= 0` (`0` disables the reminder job)
+
+### The two renewal fields
+
+- `renewal_max_attempts` (default `3`) caps how many **consecutive structural**
+  (non-payment) failures one renewal period may accumulate before its cycle is
+  abandoned. It is read when a failure is being recorded, not when the cycle is
+  created, and a settings read failure there falls back to the shipped default
+  rather than stranding the cycle. It is deliberately not consulted by dunning:
+  `attempt_count` on a case also counts payment attempts dunning owns, so
+  capping on it would abandon cycles whose payment retries are legitimately in
+  flight.
+- `renewal_reminder_lead_days` (default `3`) is the lookahead window of the
+  hourly `emit-renewal-reminders` job, which emits `renewal.upcoming` and
+  `subscription.trial_ending`. `0` disables the job.
+
+Both flow through the module shape, the zod validator, the Admin settings page,
+and the i18n catalogs like any other setting.
 
 ## Workflow and Optimistic Locking
 
@@ -434,6 +455,12 @@ The chosen behavior is snapshotted into cycle metadata.
 Existing cycles are not retroactively rewritten just because global settings changed.
 
 If an existing cycle later needs approval-state recomputation because the subscription changed, it is recomputed using the cycle’s persisted settings policy, not the latest global settings by default.
+
+One renewal setting is read at **failure time** rather than create time:
+`renewal_max_attempts` is read from effective settings whenever a structural
+renewal failure is recorded, so a settings change adjusts the abandonment cap
+for periods that are still being retried. The reminder job reads
+`renewal_reminder_lead_days` on every hourly pass.
 
 ## Admin Surface and Data Loading
 

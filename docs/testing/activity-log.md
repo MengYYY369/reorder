@@ -87,6 +87,9 @@ Current files:
 - [cancellations-workflows.spec.ts](../../integration-tests/http/cancellations-workflows.spec.ts)
 - [subscription-logs-routes.spec.ts](../../integration-tests/http/subscription-logs-routes.spec.ts)
 - [subscriptions-admin-flow.spec.ts](../../integration-tests/http/subscriptions-admin-flow.spec.ts)
+- [lifecycle-bus-events.spec.ts](../../integration-tests/http/lifecycle-bus-events.spec.ts) — the persist-**and**-emit funnel end to end: `renewal.failed`, the trial-path `subscription.expired`, and the `dunning.*` lifecycle set each fire exactly once per occurrence on the bus, guard closures without an attempt emit no `dunning.retry_executed`, and `renewal.abandoned` fires when dunning exhausts
+- [renewal-reminders.spec.ts](../../integration-tests/http/renewal-reminders.spec.ts) — `renewal.upcoming` and `subscription.trial_ending` emitted exactly once per cycle/trial through the dedupe key
+- [activity-log-event-presets.spec.ts](../../integration-tests/http/activity-log-event-presets.spec.ts) — the Admin filter's per-domain preset event lists stay in sync with the event-type enum
 
 This layer is the main protection for:
 - workflow-backed event emission

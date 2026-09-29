@@ -56,6 +56,19 @@ Current files:
 
 This layer is the main protection for the implemented dunning behavior.
 
+Note on the recovery semantics: the suite used to pin the old behaviour where a
+recovery left the originating renewal cycle `failed` (the double-charge window).
+The pinned assertions now pin the shipped behaviour instead — a recovery
+finalizes the period through the shared finalization step (cycle `succeeded`,
+cadence advanced from the original `scheduled_for`, next cycle ensured), the
+settled-cycle guard closes a retry against an already-`succeeded` or
+already-`abandoned` cycle without charging, and exhaustion settles the cycle
+`abandoned` while the subscription stays `past_due` with no cancellation
+workflow running. The parking dispositions (`awaiting_manual_resolution` for a
+case the retry cannot start) and the dunning lifecycle event emissions are
+covered in the same suite and in
+[lifecycle-bus-events.spec.ts](../../integration-tests/http/lifecycle-bus-events.spec.ts).
+
 ## 4. Fixture Strategy
 
 Test data helpers are defined in:
@@ -85,11 +98,13 @@ Covered through integration tests:
 - `start-dunning` success path
 - idempotent update of an existing case for the same renewal cycle
 - duplicate active case blocked
-- `run-dunning-retry` recovery path
+- `run-dunning-retry` recovery path, including the shared period finalization (exactly one order and one charge per period, cadence anchored on the original `scheduled_for`)
+- the settled-cycle guard: a retry against a `succeeded` or `abandoned` cycle charges nothing and closes the case
 - `run-dunning-retry` temporary failure and reschedule path
-- max-attempt exhaustion and unrecovered closure
+- pre-transition failures parking the case as `awaiting_manual_resolution`
+- max-attempt exhaustion and unrecovered closure, abandoning the originating cycle without cancelling the subscription
 - manual `mark-recovered`
-- manual `mark-unrecovered`
+- manual `mark-unrecovered` (which also settles the cycle `abandoned`)
 - retry-schedule override
 - dunning read-model query helpers
 

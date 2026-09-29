@@ -113,7 +113,7 @@ Match the task to all relevant rows before researching or coding.
 | Activity log changes | `docs/architecture/activity-log.md`, `docs/api/admin-activity-log.md`, `docs/testing/activity-log.md` |
 | Analytics changes | `docs/architecture/analytics.md`, `docs/api/admin-analytics.md`, `docs/testing/analytics.md` |
 | Subscription settings changes | `docs/architecture/settings.md`, `docs/api/admin-subscription-settings.md`, `docs/testing/subscription-settings.md` |
-| Storefront and customer account subscription APIs | `docs/api/store-subscription-checkout.md`, `docs/api/store-subscription-offers.md`, `docs/api/store-customer-cancellations.md`, `docs/architecture/subscriptions.md` |
+| Storefront and customer account subscription APIs | `docs/api/store-customer-self-service-tutorial.md` (start here — the portal developer tutorial), `docs/api/store-subscription-checkout.md`, `docs/api/store-subscription-offers.md`, `docs/api/store-customer-cancellations.md`, `docs/architecture/subscriptions.md` |
 | Admin UI routes and widgets | matching files in `docs/admin/`, then `src/admin/README.md` |
 | Admin UI E2E browser tests | `playwright.config.ts`, `e2e/`, matching `docs/testing/*.md` |
 | Admin or store API route implementation | `src/api/README.md`, then matching `docs/api/*.md` |

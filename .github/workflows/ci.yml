@@ -1,0 +1,82 @@
+# Minimal CI for the reorder plugin — honest about what it covers.
+#
+# Gated here:
+#   - yarn build                  -> `medusa plugin:build`; the plugin compiles.
+#   - yarn test:integration:http  -> HTTP integration suites (jest). Needs Postgres;
+#                                    @medusajs/test-utils creates one database per
+#                                    suite from DB_HOST/DB_PORT/DB_USERNAME/DB_PASSWORD,
+#                                    so the role must be allowed to CREATE DATABASE.
+#   - yarn test:i18n              -> admin translation-key checks (a single unit-level
+#                                    spec, `setupFiles: []` in jest.config.js); needs no
+#                                    database, run here for convenience.
+#
+# NOT gated here, deliberately:
+#   - yarn test:e2e — the Playwright suite in e2e/ needs a live Medusa backend and a
+#     DATABASE_URL, is configured as workers:1 / retries:0, and writes plugin tables
+#     directly; it is not hermetic and cannot run in a throwaway CI container. Its
+#     absence from this gate is a decision, not an oversight.
+#   - yarn test:integration:modules — not gated either; run locally when touching
+#     module internals.
+#
+# Local equivalent of the Postgres service below (see .agents/AGENTS.md): the
+# loopback-published container `reorder-acceptance-pg` (postgres:16-alpine), started
+# or created by the documented docker block, which extracts the password from .env's
+# DATABASE_URL into a shell variable and unsets it afterwards — never a literal
+# credential on the command line. Export the same four DB_* variables locally.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Corepack's "about to download package manager" prompt would abort non-TTY runs.
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  # DB_HOST must be `localhost`, never `127.0.0.1`: measured on this project, the
+  # loopback *address* wedges Medusa's PgConnection (pool timeouts at 60/120/180 s
+  # with zero server-side backends), so the suite stalls instead of erroring and
+  # reads as a code hang. The server's bind address and the client's DB_HOST are
+  # separate settings. See .agents/AGENTS.md for the measured detail.
+  DB_HOST: localhost
+  DB_PORT: "5432"
+  DB_USERNAME: postgres
+  DB_PASSWORD: postgres
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node: package.json engines allows ^20.19.0 || >=22.12.0 and there is no
+      # .nvmrc; pinned to 22, the active LTS line the repo is developed on
+      # (Node 20 left LTS maintenance in April 2026).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # packageManager is yarn@4.4.1 (Yarn Berry, lockfile __metadata version 8,
+      # nodeLinker: node-modules), so the frozen-lockfile flag is Yarn Berry's
+      # --immutable; Yarn 1's --frozen-lockfile is not a valid option on Yarn 4.
+      - run: corepack enable
+      - run: corepack yarn install --immutable
+      - run: corepack yarn build
+      - run: corepack yarn test:integration:http
+      - run: corepack yarn test:i18n

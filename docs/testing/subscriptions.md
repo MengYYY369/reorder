@@ -100,8 +100,15 @@ Current files:
 - [subscription-from-order.spec.ts](../../integration-tests/http/subscription-from-order.spec.ts) — order-driven creation, stacking/extend purchases, idempotency and the creation-failure log
 - [consent-to-auto-flip.spec.ts](../../integration-tests/http/consent-to-auto-flip.spec.ts) — the `payment.captured` consent path end to end
 - [native-checkout-exclusivity.spec.ts](../../integration-tests/http/native-checkout-exclusivity.spec.ts) — the subscription track's refusal of a provider recurrence
-- [native-checkout-gate.spec.ts](../../integration-tests/http/native-checkout-gate.spec.ts) — the completion-gate middleware on the core `POST /store/carts/:id/complete`, including that a refusal happens before the core handler runs
+- [native-checkout-gate.spec.ts](../../integration-tests/http/native-checkout-gate.spec.ts) — the completion-gate middleware on the core `POST /store/carts/:id/complete`, including that a refusal happens before the core handler runs, the gate's second direction (a live reorder-rail row — a trial row included — blocks with the reorder-rail message, while a `cancelled` row passes through), and that a read failure on either rail still fails open
 - [native-subscription-mirror.spec.ts](../../integration-tests/http/native-subscription-mirror.spec.ts) — mirror rows: event upsert, scheduler exclusion, and both write-side refusals through the real routes
+- [store-subscription-list.spec.ts](../../integration-tests/http/store-subscription-list.spec.ts) — the customer list route's serialization (cadence, payment mode, `has_payment_method`, `active_cancellation_case`) and its customer scoping
+- [trial-requires-payment-method.spec.ts](../../integration-tests/http/trial-requires-payment-method.spec.ts) — the per-offer rule enforced at both trial doors: a manual-mode trial checkout is rejected when the rule is ON and allowed when OFF (auto mode always passes — the check is on the mode, not a stored token), and a trial-enabled redemption is refused outright when the rule is ON and redeemed when OFF, consuming nothing on a refusal
+- [trial-claim.spec.ts](../../integration-tests/http/trial-claim.spec.ts) — the self-service claim endpoint (`POST /store/customers/me/trials`): a card-free claim creates the trial (`payment_mode: manual`, one cycle at `trial_ends_at`, one ledger row, a completed template cart), a second claim is refused and creates nothing, the payment-method rule refuses a card-free claim and permits `binding: "vault"`, a variant without a sellable price in the region is refused, the store offer DTO reports per-customer eligibility (with `binding.supported` following the provider capability), and the route requires authentication
+- [trial-claim-ledger.spec.ts](../../integration-tests/http/trial-claim-ledger.spec.ts) — the `trial_claim` ledger and the eligibility rule: the first claim is recorded and listed through `GET /admin/trial-claims`, a second claim is refused by the rule and by the unique index, a concurrent pair leaves exactly one row, a paid subscription makes the customer ineligible, a `NATIVE-` mirror row makes the customer ineligible, and the redemption door writes the ledger for a trial grant (nothing for a non-trial grant)
+- [trial-payment-method-binding.spec.ts](../../integration-tests/http/trial-payment-method-binding.spec.ts) — the two-phase vault binding (`POST /store/customers/me/trials/:id/bind`): an approved setup token binds (auto mode, declaration-derived provider id, extension anchored on `started_at`, one re-pointed cycle, ledger `vault`), the bound trial charges exactly once at the extended date, binding on day 5 lands on the same date as binding on day 1, an unbound trial ends at its original date with no charge, ownership and authentication refusals, and a provider without the capability leaves the trial untouched and card-free
+- [trial-cancellation-finalize.spec.ts](../../integration-tests/http/trial-cancellation-finalize.spec.ts) — the customer's exit (`POST /store/customers/me/subscriptions/:id/cancellation/finalize`): finalizing during a trial leaves no `SCHEDULED` cycle, no charge at `trial_ends_at` and no `renewal.failed`; the ledger row survives so the trial cannot be claimed again; authentication and ownership cases; `404` for a subscription with no open case; and the auto-renew toggle alone prevents the charge for a manual trial (the trial-end branch never charges a manual subscription)
+
 This layer is the main protection for the implemented Admin behavior.
 
 The middleware-level cases above are the only place the route wiring is exercised: a
@@ -183,11 +190,23 @@ Covered through integration tests:
 Covered through HTTP integration tests:
 - `GET /admin/subscriptions`
 - `GET /admin/subscriptions/:id`
+- `GET /admin/trial-claims` (read-only ledger list)
 - `POST /admin/subscriptions/:id/pause`
 - `POST /admin/subscriptions/:id/resume`
 - `POST /admin/subscriptions/:id/cancel`
 - `POST /admin/subscriptions/:id/schedule-plan-change`
 - `POST /admin/subscriptions/:id/update-shipping-address`
+
+Trial coverage (see the spec list above for the exact cases): the claim
+endpoint and its eligibility rule, the ledger's race-safe unique index and both
+of its doors (claim endpoint and redemption), the two-phase vault binding and
+its `started_at`-anchored extension, the customer-finalized cancellation exit,
+the auto-renew toggle as an exit on its own, and the per-offer
+`trial_requires_payment_method` rule at all three enforcement points. The
+trial-end conversion decision itself is pinned in
+[trial-conversion.spec.ts](../../integration-tests/http/trial-conversion.spec.ts)
+and listed in `docs/testing/renewals.md`, because the branch lives in the
+renewal engine.
 
 Store checkout follow-up:
 - `POST /store/carts/:id/subscribe` now exists as the dedicated subscription purchase route

@@ -257,19 +257,48 @@ Why this form and not the alternatives:
   order, which is registered ahead of the route for the same path, so this runs
   first and can answer before anything is written.
 
-Behavior: an unauthenticated request, a failed read of the customer's live
-`NATIVE-` rows, an unreadable cart (no cart id, no cart row, or a failing read), or
-a cart whose products match none of those rows is passed through untouched. Each
-read failure is a deliberate **fail-open**, and the decision sits in the pure unit
+Behavior: the gate runs **two rail readers** beside each other and blocks on
+either — the mutual-exclusion rule must hold whichever rail the existing
+subscription runs on:
+
+- live `NATIVE-` mirror rows (a provider-managed recurrence for the product
+  blocks the purchase), and
+- live reorder-rail rows (this plugin's own subscriptions for the product —
+  the exact negation of the native reference filter). This second direction is
+  what stops a customer holding a live vault subscription — or a trial — from
+  buying the provider-managed plan of the same product and being charged
+  twice for one product.
+
+Both readers apply the **same occupying status set**, so the two directions
+cannot disagree about what "already subscribed" means. An unauthenticated
+request, a failed read of the customer's rows on either rail, an unreadable
+cart (no cart id, no cart row, or a failing read), or a cart whose products
+match none of those rows is passed through untouched. Each read failure is a
+deliberate **fail-open**, and the decision sits in the pure unit
 `resolveCheckoutGate` (`src/modules/subscription/utils/checkout-gate.ts`;
 `src/api/store/carts/completion-gate.ts` is the thin re-export the middleware
 registration imports): a rejected subscription read returns `allow` — before the
 cart is loaded at all — instead of throwing, so a plugin-side failure can never hang
 or 500 checkout, and the core handler runs and reports cart problems its own way. A
-collision answers `400` with `{ message, type, data: { product_id, subscription_id } }`
-for the **whole cart** — the plugin never edits the cart to drop the offending line,
+collision answers `400` with `{ message, type, data: { product_id, subscription_id } }` for the
+**whole cart** — the plugin never edits the cart to drop the offending line,
 because that would move totals, shipping and promo thresholds behind the customer's
 back.
+
+The two directions answer with **different messages**, so a log line or a
+test names the rail:
+
+- native rail: `You already have an active subscription for '<product>' managed
+  by your payment provider. Change or cancel that subscription first, or remove
+  this item to continue ordering.`
+- reorder rail: `You already have an active subscription for '<product>' on this
+  account (subscription <id>). A product can be covered by only one active
+  subscription at a time, so this checkout cannot be completed.`
+
+The reorder-rail wording stays factual on purpose: it must not promise a
+self-service action the vault rail does not have yet. The structured
+`data.product_id` / `data.subscription_id` payload is identical in both
+directions and is what a storefront acts on.
 
 That fail-open is bounded to the reads the rule itself needs, and the bound is part
 of the rule: the product title naming the colliding item is a cosmetic input, read
@@ -394,6 +423,207 @@ chargeable payment method**. On a fresh row the method has not come back from a
 redirect provider yet, and a mode the scheduler can act on with nothing to charge
 is worse than staying manual; that case is flipped later, at `payment.captured`.
 
+### Trial shapes, and who owns recurrence
+
+A "trial" reaches a customer through three different arrangements, and the
+difference that matters operationally is **who owns the recurrence**:
+
+| shape | created by | payment state at creation | recurrence owner |
+| --- | --- | --- | --- |
+| **card-free** (claimed) | `POST /store/customers/me/trials` with `binding: "none"`, or a trial-enabled redemption code | `payment_mode: manual`, no provider id, no method reference | this plugin |
+| **bound** (claimed, then bound) | the same claim with `binding: "vault"`, completed through the two-phase bind endpoint | `payment_mode: auto`, a real provider id and a vault id | this plugin |
+| **native PayPal** | the storefront's native path (a variant carrying `paypal_subscription` metadata) | PayPal's own subscription, mirrored locally as a `NATIVE-` row | PayPal |
+
+The claim endpoint is the self-service door (`POST /store/customers/me/trials`,
+`{ variant_id, region_id, binding? }`). It copies the redemption path's payment
+shape — no order and no payment — and adds the template cart (Q18a): a cart in
+the requested region holding one line for the variant, with `completed_at` set
+after creation. The cart is never completed and never paid; it exists only
+because every charge path in the plugin refuses a subscription without a cart,
+and the conversion branch is one of them. The claim creates the subscription
+`payment_mode: manual` with `trial_ends_at = now + trial_days`,
+`next_renewal_at = trial_ends_at`, and the initial renewal cycle at that date.
+
+**Binding is `vault`, and only `vault`.** A claimed trial becomes bound through
+`POST /store/customers/me/trials/:id/bind`, deliberately two-phase because the
+customer leaves for PayPal and comes back:
+
+- `{ action: "start", return_url, cancel_url }` asks the provider for a setup
+  token and answers `{ phase: "approval_pending", approve_url, … }`. The token
+  id is parked as `metadata.trial_binding`; nothing chargeable changes, and a
+  later start replaces an abandoned pending approval.
+- `{ action: "complete", setup_token_id }` exchanges the approved setup token
+  for a vault id and lands the binding in one pass: the real registered
+  provider id **and** the vault id as `payment_context.payment_method_reference`
+  (both are required by the charge gate), `payment_mode: auto`, `trial_ends_at`
+  extended by the offer's `trial_bonus_days` **anchored on `started_at`**
+  (binding on day 5 lands on the same date binding on day 1 would have), and
+  the open scheduled cycle re-pointed through `ensureNextRenewalCycleStep`.
+
+There is no `provider_subscription` binding value: a provider-managed
+subscription never passes through the claim endpoint, so no door could produce
+one. The native rail is **not** a third binding method — it is a different
+product/variant reached through the storefront's existing native path, and its
+trial length stays in the variant metadata (`paypal_subscription.trial_periods`)
+rather than in the offer rules: a PayPal plan is immutable and cached by a hash
+that includes `trial_periods`, so the offer must never become its source.
+
+#### The native rail's operational signature is the opposite, on purpose
+
+The two shapes this plugin manages and the native rail produce different
+operational signatures for the same word, "trial". The difference is ownership
+of recurrence, and each line below is deliberate — a reader who meets only the
+native rail will otherwise read the missing events as broken wiring:
+
+| operational signal | card-free (claimed) | bound (claimed) | native PayPal |
+| --- | --- | --- | --- |
+| `renewal.upcoming` / `subscription.trial_ending` reminders | yes | yes | **never** |
+| `renewal.succeeded` / `renewal.failed` | no `renewal.succeeded` — the cycle finishes with no order and the trial ends with `subscription.expired` | yes, once the trial converts | **never** — PayPal bills its own cycle |
+| dunning (`dunning.*` events) | n/a (nothing to charge) | yes — a payment-qualified conversion failure starts dunning | **never** — PayPal owns recovery |
+| exit | auto-renew toggle, or customer-finalized cancellation | customer-finalized cancellation, or toggle | provider cancellation only |
+
+The reminder job excludes `NATIVE-` rows explicitly
+(`src/jobs/emit-renewal-reminders.ts`) rather than relying on the mirror writer
+leaving `is_trial: false`; a future mirror change must not start mailing
+provider-trial customers a reminder this plugin has no business sending. The
+same rail split is why the offer form displays a native variant's trial values
+read-only beside the offer's own (`docs/admin/plan-offers.md`).
+
+### Trial eligibility: one claim per customer and product
+
+The rule is: **no prior subscription for this product, on any rail, at any
+status, and no prior claim.** `TrialClaimModuleService.assertEligible` checks
+both halves before anything is created:
+
+- a `trial_claim` ledger row for the (`customer_id`, `product_id`) pair, or
+- any `subscription` row for that customer and product — any rail (`NATIVE-`
+  provider mirrors included), any status (a `cancelled` row still counts).
+
+The ledger is the race-safe anchor. `trial_claim` carries a unique index on
+(`customer_id`, `product_id`), partial on `deleted_at IS NULL` (the repo's
+soft-delete convention), so two concurrent claims for the same pair cannot both
+win no matter which door each came through, and because the constraint lives on
+a table this feature owns, no webhook-driven mirror write can collide with it.
+A losing insert surfaces as the same typed refusal the pre-check produces. The
+subscription half reads the `subscription` table's own `customer_id` /
+`product_id` columns — deliberately not the `subscription_product` link table,
+whose links are created only by the redemption path and would silently pass
+every customer who bought the plan through checkout.
+
+Every door that can create a trial writes one ledger row:
+`POST /store/customers/me/trials` (`source: self_service`), a trial-enabled
+redemption code (`source: redemption`), and — if an admin create door is ever
+built — `source: admin`. The row survives the trial's cancellation: a customer
+who cancels a trial and comes back cannot claim it again.
+
+The store offer DTO exposes the verdict per customer:
+`subscription_offer.trial.eligible` with a `reason` (`trial_not_offered`,
+`authentication_required`, `already_claimed_or_subscribed`,
+`eligibility_unavailable`), so the storefront never renders a trial button the
+claim endpoint would refuse. The endpoint's refusal is the backstop against a
+client that calls it anyway; an ineligible claim creates nothing — no
+subscription, no cart, no ledger row (there is no degradation branch).
+
+Admin visibility is a read-only ledger list: `GET /admin/trial-claims` filtered
+by `customer_id`, `product_id` and `source`.
+
+### Trials and trial end
+
+A subscription carries `is_trial` and `trial_ends_at` (trials are configured
+through offer rules — `trial_days` and friends — and are created by checkout,
+by a redemption code, or by the self-service claim above). The trial end is
+deterministic on both payment rails:
+
+- the scheduler's due query excludes manual-mode subscriptions **except** a
+  trial whose cycle is at or after `trial_ends_at` — the one manual cycle it
+  picks up, so the trial-end branch runs on time instead of the subscription
+  lingering until the 90-day manual-hygiene cancellation. The branch itself
+  never charges a manual subscription.
+- at that cycle the engine applies a three-way decision:
+
+| condition | behaviour |
+| --- | --- |
+| `payment_mode` is `auto` **and** a usable payment method is on file | **Convert.** The cycle falls through to the normal order/charge path for the period starting at `trial_ends_at`. A payment-qualified failure starts dunning exactly like any renewal, so the customer can repair their card. The subscription's cart is a hard prerequisite of that path. |
+| anything not `auto` (manual mode, or rows predating the field) | **End.** Cancel with `cancel_effective_at = trial_ends_at`, cycle `succeeded` with no order, and `subscription.expired` persisted **and** emitted with a reason naming the manual rail. |
+| `auto` but no usable method | **End** the same way, with an alertable reason — expected when the offer's `trial_requires_payment_method` rule is on, a configuration gap when it is off. |
+
+Two guards make the convert row safe, and both refuse **before any order is
+created**, so a structurally unchargeable subscription fails without minting
+anything:
+
+1. the subscription's `cart_id` must exist (the renewal-order builder reads the
+   cart's region, channel, currency and items);
+2. the payment context must carry a provider **and** a stored method reference
+   whenever the cart still prices a line. This check sits **ahead of order
+   creation** — historically it sat after the order workflow, and each retry
+   then minted one orphan order per attempt. A subscription with no payment
+   context is loudly refused, with zero orders created, instead of producing a
+   free order and "succeeding".
+
+A cycle that fails structurally is retried a bounded number of times and then
+abandoned (`renewals.md`). **An abandoned cycle leaves the subscription
+`past_due`.** No job cancels the subscription: the plugin emits
+`renewal.abandoned` and the host application decides what happens to the
+customer relationship. `past_due` is therefore a state a subscription can sit
+in indefinitely, by design.
+
+### `trial_requires_payment_method`
+
+The per-offer rule (default **OFF**) is enforced at every door that can create a
+trial:
+
+- **Checkout:** when the rule is ON, a trial checkout that is not in `auto`
+  payment mode is rejected — only an auto-mode checkout will vault a usable
+  method. The check is on the *mode*, not on a stored token: at checkout the
+  reusable token does not exist yet (it is written when the payment is
+  captured).
+- **Redemption:** a redemption code whose offer turns the rule on is **refused
+  outright** (`Redemption code <code> grants a trial that requires a payment
+  method, which redemption codes cannot collect`). The redemption door has no
+  cart and no way to collect a payment method, so silently degrading the grant
+  to a non-trial subscription was rejected — it would make the offer's rule a
+  lie.
+- **Claim:** a card-free claim (`binding: "none"`) is refused; the request must
+  name `binding: "vault"` to take such a trial
+  (`This trial requires binding a payment method. Send binding: "vault" to
+  claim it.`).
+
+Because the rule ships OFF by default, no existing offer changes behaviour on
+upgrade.
+
+### Leaving a trial
+
+Every shape has a working exit, and the two managed shapes differ in which exit
+is the short one:
+
+- **card-free trial** — the **auto-renew toggle is sufficient on its own**. A
+  manual-mode subscription is outside the scheduler's chargeable set, and the
+  trial-end branch never charges a manual subscription (it ends the trial
+  deterministically with `subscription.expired`). This is not "the cycle is
+  excluded from the scheduler": the manual trial's trial-end cycle *is*
+  processable by design, so the guarantee is the branch's decision, not the due
+  query's filter. The second exit is the customer-finalized cancellation.
+- **bound trial** — the **customer-finalized cancellation** is the direct
+  exit: `POST /store/customers/me/subscriptions/:id/cancellation/finalize`
+  finalizes the customer's own open cancellation case. `finalizeCancellationStep`
+  writes `next_renewal_at: null` and the workflow runs
+  `ensureNextRenewalCycleStep`, which deletes every `SCHEDULED` cycle once the
+  subscription is cancelled — so cancelling during a trial leaves no scheduled
+  cycle, no charge at `trial_ends_at`, and no `renewal.failed`. The auto-renew
+  toggle also works: disabling it puts the row back on the manual rail, where
+  the trial-end branch ends the trial.
+- **native PayPal trial** — only the provider can cancel it; the plugin's
+  mirror row follows the provider's events (see *Native mirror rows*).
+
+The finalize route is keyed by subscription id while the workflow takes a
+`cancellation_case_id`; the route resolves the customer's own open case for
+that subscription first, using the same ownership helper as every other
+`/store/customers/me/*` route. `POST .../cancellation` (which opens the
+retention case) is untouched: finalizing is an explicit second step the
+customer may take after opening a case, so the retention flow stays an option
+rather than a gate. A subscription with no open case answers `404`, and a case
+that can no longer be finalized answers `409`.
+
 Pricing synchronization is handled by a dedicated workflow:
 - load subscription line items from the cart
 - resolve effective `Plans & Offers` config for the selected cadence
@@ -419,6 +649,9 @@ The current store account flow uses:
 - `POST /store/customers/me/subscriptions/:id/swap-product`
 - `POST /store/customers/me/subscriptions/:id/retry-payment`
 - `POST /store/customers/me/subscriptions/:id/cancellation`
+- `POST /store/customers/me/subscriptions/:id/cancellation/finalize`
+- `POST /store/customers/me/trials`
+- `POST /store/customers/me/trials/:id/bind`
 
 These routes:
 - require customer auth
@@ -455,6 +688,7 @@ The Admin API exposes custom routes dedicated to the `Subscriptions` pages.
 Implemented read routes:
 - `GET /admin/subscriptions`
 - `GET /admin/subscriptions/:id`
+- `GET /admin/trial-claims` (read-only list of the `trial_claim` ledger, filtered by `customer_id`, `product_id`, `source`)
 
 Implemented mutation routes:
 - `POST /admin/subscriptions/:id/pause`
@@ -493,6 +727,9 @@ Implemented mutation routes:
 - `POST /store/customers/me/subscriptions/:id/swap-product`
 - `POST /store/customers/me/subscriptions/:id/retry-payment`
 - `POST /store/customers/me/subscriptions/:id/cancellation`
+- `POST /store/customers/me/subscriptions/:id/cancellation/finalize`
+- `POST /store/customers/me/trials`
+- `POST /store/customers/me/trials/:id/bind`
 
 The Store API layer uses:
 - customer authentication middleware
