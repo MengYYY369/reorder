@@ -44,7 +44,13 @@ type RenewalCycleRecord = {
   subscription_id: string
   scheduled_for: string
   processed_at: string | null
-  status: "scheduled" | "processing" | "succeeded" | "failed"
+  status:
+    | "scheduled"
+    | "processing"
+    | "succeeded"
+    | "failed"
+    | "abandoned"
+    | "awaiting_manual_resolution"
   approval_required: boolean
   approval_status: "pending" | "approved" | "rejected" | null
   approval_decided_at: string | null
@@ -220,6 +226,10 @@ function mapCycleStatus(status: RenewalCycleRecord["status"]) {
       return RenewalCycleAdminStatus.SUCCEEDED
     case RenewalCycleStatus.FAILED:
       return RenewalCycleAdminStatus.FAILED
+    case RenewalCycleStatus.ABANDONED:
+      return RenewalCycleAdminStatus.ABANDONED
+    case RenewalCycleStatus.AWAITING_MANUAL_RESOLUTION:
+      return RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION
   }
 
   throw renewalErrors.invalidData(`Unsupported renewal cycle status '${status}'`)

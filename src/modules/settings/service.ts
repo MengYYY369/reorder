@@ -3,6 +3,7 @@ import { GLOBAL_SUBSCRIPTION_SETTINGS_KEY } from "./types"
 import SubscriptionSettings from "./models/subscription-settings"
 import {
   buildDefaultSubscriptionSettings,
+  DEFAULT_SUBSCRIPTION_SETTINGS,
   normalizeSubscriptionSettingsPayload,
   type SubscriptionSettingsShape,
   type UpdateSubscriptionSettingsInput,
@@ -29,6 +30,12 @@ class SettingsModuleService extends MedusaService({
       max_dunning_attempts: record.max_dunning_attempts,
       default_renewal_behavior: record.default_renewal_behavior,
       default_cancellation_behavior: record.default_cancellation_behavior,
+      renewal_max_attempts:
+        record.renewal_max_attempts ??
+        DEFAULT_SUBSCRIPTION_SETTINGS.renewal_max_attempts,
+      renewal_reminder_lead_days:
+        record.renewal_reminder_lead_days ??
+        DEFAULT_SUBSCRIPTION_SETTINGS.renewal_reminder_lead_days,
       version: record.version,
       updated_by: record.updated_by ?? null,
       updated_at: record.updated_at ? new Date(record.updated_at) : null,
@@ -66,6 +73,11 @@ class SettingsModuleService extends MedusaService({
       default_cancellation_behavior:
         normalized.default_cancellation_behavior ??
         current.default_cancellation_behavior,
+      renewal_max_attempts:
+        normalized.renewal_max_attempts ?? current.renewal_max_attempts,
+      renewal_reminder_lead_days:
+        normalized.renewal_reminder_lead_days ??
+        current.renewal_reminder_lead_days,
       version: current.version + 1,
       updated_by: normalized.updated_by ?? null,
       metadata: normalized.metadata ?? current.metadata ?? null,

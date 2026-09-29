@@ -11,6 +11,8 @@ export type SubscriptionSettingsShape = {
   max_dunning_attempts: number
   default_renewal_behavior: SubscriptionRenewalBehavior
   default_cancellation_behavior: SubscriptionCancellationBehavior
+  renewal_max_attempts: number
+  renewal_reminder_lead_days: number
   version: number
   updated_by: string | null
   updated_at: Date | null
@@ -24,6 +26,8 @@ export type UpdateSubscriptionSettingsInput = {
   max_dunning_attempts?: number
   default_renewal_behavior?: SubscriptionRenewalBehavior
   default_cancellation_behavior?: SubscriptionCancellationBehavior
+  renewal_max_attempts?: number
+  renewal_reminder_lead_days?: number
   updated_by?: string | null
   metadata?: Record<string, unknown> | null
 }
@@ -36,6 +40,8 @@ export const DEFAULT_SUBSCRIPTION_SETTINGS = {
     SubscriptionRenewalBehavior.PROCESS_IMMEDIATELY,
   default_cancellation_behavior:
     SubscriptionCancellationBehavior.RECOMMEND_RETENTION_FIRST,
+  renewal_max_attempts: 3,
+  renewal_reminder_lead_days: 3,
 } as const
 
 function assertInteger(value: number, field: string) {
@@ -92,6 +98,9 @@ export function buildDefaultSubscriptionSettings() {
       DEFAULT_SUBSCRIPTION_SETTINGS.default_renewal_behavior,
     default_cancellation_behavior:
       DEFAULT_SUBSCRIPTION_SETTINGS.default_cancellation_behavior,
+    renewal_max_attempts: DEFAULT_SUBSCRIPTION_SETTINGS.renewal_max_attempts,
+    renewal_reminder_lead_days:
+      DEFAULT_SUBSCRIPTION_SETTINGS.renewal_reminder_lead_days,
     version: 0,
     updated_by: null,
     updated_at: null,
@@ -130,6 +139,31 @@ export function normalizeSubscriptionSettingsPayload(
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         "'max_dunning_attempts' must be greater than 0"
+      )
+    }
+  }
+
+  const renewalMaxAttempts = input.renewal_max_attempts
+  const renewalReminderLeadDays = input.renewal_reminder_lead_days
+
+  if (renewalMaxAttempts !== undefined) {
+    assertInteger(renewalMaxAttempts, "renewal_max_attempts")
+
+    if (renewalMaxAttempts <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "'renewal_max_attempts' must be greater than 0"
+      )
+    }
+  }
+
+  if (renewalReminderLeadDays !== undefined) {
+    assertInteger(renewalReminderLeadDays, "renewal_reminder_lead_days")
+
+    if (renewalReminderLeadDays < 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "'renewal_reminder_lead_days' must be greater than or equal to 0"
       )
     }
   }

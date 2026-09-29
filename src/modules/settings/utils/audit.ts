@@ -38,6 +38,8 @@ function buildSettingsChangeSummary(
     "max_dunning_attempts",
     "default_renewal_behavior",
     "default_cancellation_behavior",
+    "renewal_max_attempts",
+    "renewal_reminder_lead_days",
   ]
 
   return fields

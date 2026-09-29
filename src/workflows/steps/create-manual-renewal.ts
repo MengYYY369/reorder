@@ -269,9 +269,10 @@ export const createManualRenewalStep = createStep(
               undefined,
             requires_shipping: false,
             is_discountable: sourceItem?.is_discountable ?? true,
-            metadata: {
-              renewal_source_cart_id: cart.id,
-            },
+            // No `renewal_source_cart_id`: the host storefront requests
+            // `*items.metadata`, so the cart id would reach the customer.
+            // Nothing reads the field.
+            metadata: {},
           },
         ] as any[],
         shipping_methods: [] as any[],

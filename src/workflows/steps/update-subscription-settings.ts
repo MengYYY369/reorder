@@ -39,6 +39,8 @@ function buildRestorationPayload(previous: SubscriptionSettingsShape) {
     max_dunning_attempts: previous.max_dunning_attempts,
     default_renewal_behavior: previous.default_renewal_behavior,
     default_cancellation_behavior: previous.default_cancellation_behavior,
+    renewal_max_attempts: previous.renewal_max_attempts,
+    renewal_reminder_lead_days: previous.renewal_reminder_lead_days,
     version: previous.version,
     updated_by: previous.updated_by,
     metadata: previous.metadata,

@@ -87,6 +87,8 @@ export const PostAdminSubscriptionSettingsSchema = z
     default_cancellation_behavior: z
       .nativeEnum(SubscriptionCancellationBehavior)
       .optional(),
+    renewal_max_attempts: z.number().int().gt(0).optional(),
+    renewal_reminder_lead_days: z.number().int().min(0).optional(),
     expected_version: z.number().int().min(0).default(0),
     reason: z.string().trim().min(1).max(255).optional(),
   })

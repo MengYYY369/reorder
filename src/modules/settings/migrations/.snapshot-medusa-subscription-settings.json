@@ -82,6 +82,26 @@
           ],
           "mappedType": "enum"
         },
+        "renewal_max_attempts": {
+          "name": "renewal_max_attempts",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "3",
+          "mappedType": "integer"
+        },
+        "renewal_reminder_lead_days": {
+          "name": "renewal_reminder_lead_days",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "3",
+          "mappedType": "integer"
+        },
         "version": {
           "name": "version",
           "type": "integer",

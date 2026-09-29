@@ -5,6 +5,8 @@ export enum RenewalCycleStatus {
   PROCESSING = "processing",
   SUCCEEDED = "succeeded",
   FAILED = "failed",
+  ABANDONED = "abandoned",
+  AWAITING_MANUAL_RESOLUTION = "awaiting_manual_resolution",
 }
 
 export enum RenewalAttemptStatus {
@@ -44,7 +46,9 @@ export type RenewalCycleData = RenewalApprovalSummary & {
   generated_order_id: string | null
   applied_pending_update_data: RenewalAppliedPendingUpdateData | null
   last_error: string | null
+  last_failure_kind: string | null
   attempt_count: number
+  structural_attempt_count: number
   metadata: Record<string, unknown> | null
   created_at: string
   updated_at: string

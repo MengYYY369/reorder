@@ -37,6 +37,7 @@ import {
 } from "../../src/modules/activity-log/types"
 import { DUNNING_MODULE } from "../../src/modules/dunning"
 import type DunningModuleService from "../../src/modules/dunning/service"
+import { DunningCaseStatus } from "../../src/modules/dunning/types"
 import { RENEWAL_MODULE } from "../../src/modules/renewal"
 import type RenewalModuleService from "../../src/modules/renewal/service"
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
@@ -47,6 +48,7 @@ import {
   createProductWithVariant,
   createSubscriptionSeed,
 } from "../helpers/renewal-fixtures"
+import { createDunningCaseSeed } from "../helpers/dunning-fixtures"
 import { createCustomer } from "../helpers/plan-offer-fixtures"
 import { SubscriptionFrequencyInterval, SubscriptionStatus } from "../../src/modules/subscription/types"
 import { PlanOfferFrequencyInterval, PlanOfferScope } from "../../src/modules/plan-offer/types"
@@ -254,6 +256,52 @@ medusaIntegrationTestRunner({
         expect(collections[0].amount).toEqual(0.01)
         expect(collections[0].payments).toHaveLength(1)
         expect(collections[0].payments[0].captured_at).toBeTruthy()
+      })
+
+      it("closes an open dunning case as recovered when the automatic renewal succeeds (Q4)", async () => {
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+
+        const subscription = await seedEpsilonAutoSubscription(
+          container,
+          "SUB-REN-Q4-001"
+        )
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+        const openCase = await createDunningCaseSeed(container, {
+          subscription_id: subscription.id,
+          renewal_cycle_id: cycle.id,
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          next_retry_at: new Date(Date.now() + 60_000),
+        })
+
+        const { result } = await processRenewalCycleWorkflow(container).run({
+          input: {
+            renewal_cycle_id: cycle.id,
+            trigger_type: "scheduler",
+          },
+        })
+
+        expect(result.renewal_cycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+
+        // The race-guard closure names its own path: the period was paid by
+        // the renewal order THIS run created — a later order than the failed
+        // one the case was opened for — not by a dunning-side retry.
+        const updatedCase = await dunningModule.retrieveDunningCase(openCase.id)
+        expect(updatedCase).toMatchObject({
+          status: DunningCaseStatus.RECOVERED,
+          recovery_reason: "renewal_order_paid",
+        })
+        expect(updatedCase.closed_at).toBeTruthy()
+        expect(updatedCase.recovered_at).toBeTruthy()
+
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
       })
 
       it("opens a dunning case with source payment_session when collection resolution fails", async () => {
@@ -541,6 +589,77 @@ medusaIntegrationTestRunner({
           event_type: ActivityLogEventType.RENEWAL_SUCCEEDED,
           actor_type: ActivityLogActorType.SCHEDULER,
         })
+      })
+
+      it("anchors the next period on scheduled_for when a period is recovered seven days late", async () => {
+        const container = getContainer()
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+
+        const subscription = await seedEpsilonAutoSubscription(
+          container,
+          "SUB-REN-ANCHOR-001"
+        )
+
+        // Weekly cadence so a seven-day-late recovery puts the next period in
+        // the past — the case decision R6 exists for.
+        await subscriptionModule.updateSubscriptions({
+          id: subscription.id,
+          frequency_interval: SubscriptionFrequencyInterval.WEEK,
+        } as any)
+
+        // Decision R6: a period recovered days late advances the cadence from
+        // the period's own scheduled_for, never from the recovery time. The
+        // one-hour buffer keeps the "in the past" assertion from tying with
+        // `now` at millisecond precision.
+        const recoveredAnchor = new Date(
+          Date.now() - 7 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000
+        )
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          scheduled_for: recoveredAnchor,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+
+        const { result } = await processRenewalCycleWorkflow(container).run({
+          input: {
+            renewal_cycle_id: cycle.id,
+            trigger_type: "scheduler",
+          },
+        })
+
+        expect(result.renewal_cycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+
+        const expectedNext = new Date(recoveredAnchor)
+        expectedNext.setUTCDate(expectedNext.getUTCDate() + 7)
+
+        const updatedSubscription = await subscriptionModule.retrieveSubscription(
+          subscription.id
+        )
+        expect(updatedSubscription.last_renewal_at).toBeTruthy()
+        // The anchor arithmetic, not the recovery date: original anchor plus
+        // exactly one cadence.
+        expect(
+          updatedSubscription.next_renewal_at!.toISOString()
+        ).toEqual(expectedNext.toISOString())
+        // The documented catch-up-charge consequence: the next period is
+        // already overdue, so the next scheduler pass bills it instead of the
+        // subscription having drifted forward by the recovery delay.
+        expect(expectedNext.getTime()).toBeLessThan(Date.now())
+
+        const upcomingCycles = await renewalModule.listRenewalCycles({
+          subscription_id: subscription.id,
+        } as any)
+
+        const nextCycle = upcomingCycles.find((record) => record.id !== cycle.id)
+
+        expect(nextCycle).toBeDefined()
+        expect(nextCycle?.status).toEqual(RenewalCycleStatus.SCHEDULED)
+        expect(new Date(nextCycle!.scheduled_for).toISOString()).toEqual(
+          expectedNext.toISOString()
+        )
       })
 
       it("ensures a single upcoming renewal cycle idempotently", async () => {

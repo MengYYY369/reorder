@@ -22,7 +22,9 @@ const RenewalCycle = model
     generated_order_id: model.text().nullable(),
     applied_pending_update_data: model.json().nullable(),
     last_error: model.text().nullable(),
+    last_failure_kind: model.text().nullable(),
     attempt_count: model.number().default(0),
+    structural_attempt_count: model.number().default(0),
     attempts: model.hasMany(() => RenewalAttempt, {
       mappedBy: "renewal_cycle",
     }),

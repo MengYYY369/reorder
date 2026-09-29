@@ -32,19 +32,29 @@ import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import SubscriptionModuleService from "../../modules/subscription/service"
 import {
   SubscriptionFrequencyInterval,
+  SubscriptionPaymentMode,
   SubscriptionPendingUpdateData,
   SubscriptionStatus,
 } from "../../modules/subscription/types"
-import { addSubscriptionCadence } from "../../modules/subscription/utils/effective-next-renewal"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { finalizeRenewalPeriod } from "./finalize-renewal-period"
 import { startDunningWorkflow } from "../start-dunning"
+import { DUNNING_MODULE } from "../../modules/dunning"
+import type DunningModuleService from "../../modules/dunning/service"
+import { DunningCaseStatus } from "../../modules/dunning/types"
+import {
+  OPEN_DUNNING_CASE_STATUSES,
+  resolveCycleDisposition,
+} from "../../modules/renewal/utils/cycle-disposition"
+import {
+  getEffectiveSubscriptionSettings,
+} from "../utils/subscription-settings"
+import { buildDefaultSubscriptionSettings } from "../../modules/settings/utils/normalize-settings"
 import {
   resolveOrderPaymentCollection,
 } from "../utils/resolve-order-payment-collection"
-import {
-  emitSubscriptionBusEvent,
-} from "./create-subscription-log-event"
-import { persistSubscriptionLogEvent } from "../../modules/activity-log/utils/persist-log-event"
+import { persistAndEmitSubscriptionLogEvent } from "./create-subscription-log-event"
+import { persistRenewalResolutionEvent } from "../utils/renewal-log-event"
 import { toISOStringOrNull } from "../utils/date-output"
 
 type CartRecord = {
@@ -110,6 +120,11 @@ type SubscriptionRecord = {
   pending_update_data: SubscriptionPendingUpdateData | null
   payment_context: {
     payment_provider_id: string | null
+    // Optional because `payment_context` is a nullable jsonb column: rows
+    // persisted before the discriminator existed carry no such key (no writer
+    // ever stores a null). A missing value resolves to "manual" — see
+    // `resolveTrialConversionDecision`.
+    payment_mode?: SubscriptionPaymentMode
     source_payment_collection_id: string | null
     source_payment_session_id: string | null
     payment_method_reference: string | null
@@ -140,7 +155,9 @@ type RenewalCycleRecord = {
   generated_order_id: string | null
   applied_pending_update_data: RenewalAppliedPendingUpdateData | null
   last_error: string | null
+  last_failure_kind: string | null
   attempt_count: number
+  structural_attempt_count: number
   metadata: Record<string, unknown> | null
 }
 
@@ -205,6 +222,68 @@ async function loadSubscription(
   } catch {
     throw subscriptionErrors.notFound("Subscription", id)
   }
+}
+
+async function loadOpenDunningCaseForCycle(
+  container: MedusaContainer,
+  renewalCycleId: string
+): Promise<{ id: string; status: DunningCaseStatus } | null> {
+  const query = container.resolve(ContainerRegistrationKeys.QUERY)
+  const { data } = await query.graph({
+    entity: "dunning_case",
+    fields: ["id", "status"],
+    filters: {
+      renewal_cycle_id: [renewalCycleId],
+      status: [...OPEN_DUNNING_CASE_STATUSES],
+    },
+  })
+
+  return (data as { id: string; status: DunningCaseStatus }[])[0] ?? null
+}
+
+/**
+ * Q4 race guard: close an open dunning case when the automatic success path
+ * settles the period anyway. With the disposition predicate (Task 3), the due
+ * query never selects a cycle an open dunning case owns, so this is NOT the
+ * main recovery path — it only covers the race where an open case coexists
+ * with a settling run: the case is opened after the scheduler's due snapshot
+ * (e.g. by a failing concurrent force-run of the same cycle) or the run is a
+ * manual force that bypasses the due query entirely. No open case may survive
+ * a settled period.
+ *
+ * The `recovery_reason` distinguishes this path from a dunning-side recovery:
+ * the period was paid by the renewal order THIS run created — a later order
+ * than the failed one the case was opened for.
+ *
+ * Callers run this best-effort AFTER `finalizeRenewalPeriod`: the period is
+ * already settled, so a closure failure must not fall into the failure
+ * handler and re-mark a paid period as failed. If the closure fails, the
+ * settled-cycle guard (R2) in `run-dunning-retry` closes the case on the next
+ * retry without charging.
+ */
+async function closeOpenDunningCaseOnRenewalSuccess(
+  container: MedusaContainer,
+  renewalCycleId: string
+): Promise<void> {
+  const dunningModule = container.resolve<DunningModuleService>(DUNNING_MODULE)
+  const openCase = await loadOpenDunningCaseForCycle(container, renewalCycleId)
+
+  if (!openCase) {
+    return
+  }
+
+  // Re-read at settlement time rather than reusing the case loaded at the top
+  // of the step: a case closed in between must keep its own outcome.
+  const closedAt = new Date()
+
+  await dunningModule.updateDunningCases({
+    id: openCase.id,
+    status: DunningCaseStatus.RECOVERED,
+    next_retry_at: null,
+    recovered_at: closedAt,
+    closed_at: closedAt,
+    recovery_reason: "renewal_order_paid",
+  } as any)
 }
 
 async function loadCart(
@@ -406,9 +485,12 @@ function buildOrderItems(
         undefined,
       requires_shipping: sourceItem.requires_shipping ?? true,
       is_discountable: sourceItem.is_discountable ?? true,
-      metadata: {
-        renewal_source_cart_id: cart.id,
-      },
+      // No `renewal_source_cart_id` here: the host storefront requests
+      // `*items.metadata`, so writing the cart id into the order's line-item
+      // metadata hands a live credential to the customer. Nothing reads the
+      // field; the order's own metadata carries subscription_id /
+      // renewal_cycle_id for tracing.
+      metadata: {},
     },
   ] as any[]
 }
@@ -423,6 +505,36 @@ function buildShippingMethods(cart: CartRecord) {
       data: method.data,
     })) ?? []
   ) as any[]
+}
+
+/**
+ * Whether the renewal order about to be created would carry a charged line.
+ *
+ * `buildOrderItems` returns no price at all — core prices the variant when the
+ * order is created — so the cart's own lines are the only pre-order signal.
+ * The order item is priced by the effective variant (the pending variant swap,
+ * else the subscription's variant), so the lines that matter are the cart's
+ * lines for that variant, read off `cart.items[].unit_price`. When the cart has
+ * no line for the effective variant there is no zero-price proof either — core
+ * would resolve the variant's price from the region price list — so the answer
+ * stays conservative (`true`) and the caller refuses.
+ */
+function cartCarriesPricedLineAfterSwap(
+  cart: CartRecord,
+  subscription: SubscriptionRecord,
+  appliedPendingChanges: RenewalAppliedPendingUpdateData | null
+): boolean {
+  const effectiveVariantId =
+    appliedPendingChanges?.variant_id ?? subscription.variant_id
+  const effectiveLines = (cart.items ?? []).filter(
+    (item) => item.variant_id === effectiveVariantId
+  )
+
+  if (!effectiveLines.length) {
+    return true
+  }
+
+  return effectiveLines.some((item) => Number(item.unit_price ?? 0) > 0)
 }
 
 async function createRenewalOrder(
@@ -441,6 +553,34 @@ async function createRenewalOrder(
   if (!cart.sales_channel_id) {
     throw renewalErrors.invalidData(
       `Source cart '${cart.id}' is missing 'sales_channel_id'`
+    )
+  }
+
+  // T7 pre-order guard. The payment-context check used to sit after
+  // `createOrderWorkflow`, inside a step with no compensating function, so a
+  // subscription that structurally cannot be charged did not produce one
+  // failed cycle — it produced one orphan order per attempt: the order links
+  // and the `generated_order_id` write both sit after the post-order guard,
+  // so the minted order is never linked and the failure records
+  // `generated_order_id: null`. Refuse before anything is created instead.
+  //
+  // The check is deliberately conservative, and it differs from the
+  // authoritative post-order check below in exactly one case, in the safe
+  // direction: it reads the cart's own lines rather than the order's real
+  // total (which a pre-order decision cannot know — promotions, tax,
+  // rounding), so a cart whose order would price to zero through promotions
+  // still refuses. A subscription with no payment context is structurally
+  // unchargeable and a loud refusal is the intended outcome.
+  const paymentContext = subscription.payment_context
+
+  if (
+    (!paymentContext?.payment_provider_id ||
+      !paymentContext.payment_method_reference) &&
+    cartCarriesPricedLineAfterSwap(cart, subscription, appliedPendingChanges)
+  ) {
+    throw renewalErrors.renewalOrderCreationFailed(
+      cycle.id,
+      `Subscription '${subscription.id}' is missing renewal payment context`
     )
   }
 
@@ -472,6 +612,10 @@ async function createRenewalOrder(
   if (total > 0) {
     const paymentContext = subscription.payment_context
 
+    // Authoritative payment-context check: this one reads the order's real
+    // total, which the hoisted pre-order guard cannot know. It stays the
+    // check of record; the pre-order guard only narrows when an order is
+    // minted at all.
     if (
       !paymentContext?.payment_provider_id ||
       !paymentContext.payment_method_reference
@@ -619,6 +763,113 @@ function getPaymentQualifiedFailureContext(
   }
 }
 
+/**
+ * The effective structural-failure cap: how many consecutive structural
+ * failures one period may accumulate before the cycle is abandoned. Dunning
+ * must never read this as its own retry budget — `attempt_count` also counts
+ * payment attempts dunning owns, so capping on it would abandon cycles whose
+ * payment retries are still legitimately in flight.
+ */
+async function resolveRenewalMaxAttempts(
+  container: MedusaContainer
+): Promise<number> {
+  // A settings read failure must not escalate a renewal failure into a cycle
+  // stuck in `processing` (this runs inside the failure handler): fall back
+  // to the shipped default cap.
+  try {
+    const settings = await getEffectiveSubscriptionSettings(container)
+
+    return settings.renewal_max_attempts
+  } catch {
+    return buildDefaultSubscriptionSettings().renewal_max_attempts
+  }
+}
+
+/**
+ * The next structural-failure state for a cycle: the consecutive structural
+ * count increments, and at or above `renewal_max_attempts` the cycle is
+ * abandoned instead of being re-armed for the five-minute scheduler loop.
+ * `attempt_count` is deliberately not consulted — see
+ * `resolveRenewalMaxAttempts` for why it cannot express this cap.
+ */
+function resolveStructuralFailureOutcome(
+  cycle: RenewalCycleRecord,
+  renewalMaxAttempts: number
+): {
+  status: RenewalCycleStatus.FAILED | RenewalCycleStatus.ABANDONED
+  structural_attempt_count: number
+} {
+  const structuralAttemptCount = (cycle.structural_attempt_count ?? 0) + 1
+
+  return {
+    status:
+      structuralAttemptCount >= renewalMaxAttempts
+        ? RenewalCycleStatus.ABANDONED
+        : RenewalCycleStatus.FAILED,
+    structural_attempt_count: structuralAttemptCount,
+  }
+}
+
+/**
+ * Why a trial's trial-end cycle converts or ends (Task 14 of the billing
+ * hardening plan), evaluated in the plan's order:
+ *
+ * 1. auto mode **and** a usable payment method reference — both a stored
+ *    `payment_provider_id` and a `payment_method_reference`, the same test the
+ *    hoisted pre-order guard applies — → "convert": the cycle falls through to
+ *    the normal order/charge path for the period anchored on the cycle's own
+ *    `scheduled_for`. The subscription's cart is a hard prerequisite of that
+ *    path (T6): when it is missing, the path's own guard refuses before any
+ *    order is minted or charged. A payment-qualified failure on this path
+ *    starts dunning, so the customer can repair their card.
+ * 2. anything not auto — manual mode, or rows persisted before
+ *    `payment_mode` existed, which the subscription domain's own mode reader
+ *    (`readPaymentMode` in `src/modules/subscription/utils/consent-flip.ts`)
+ *    also resolves to manual — → "end", with a reason naming the manual rail.
+ *    The scheduler's manual-trial carve-out (Task 3) is what delivers this row
+ *    on time; this branch adds no second mechanism for it.
+ * 3. auto mode without a usable method reference → "end" with an alertable
+ *    reason: expected when the offer's `trial_requires_payment_method` rule
+ *    is on, a configuration gap when it is off.
+ */
+type TrialConversionDecision =
+  | { action: "convert" }
+  | {
+      action: "end"
+      reason_code: "manual_mode_trial_ended" | "trial_without_payment_method"
+      reason: string
+    }
+
+function resolveTrialConversionDecision(
+  subscription: SubscriptionRecord
+): TrialConversionDecision {
+  const paymentContext = subscription.payment_context
+
+  if (paymentContext?.payment_mode !== "auto") {
+    return {
+      action: "end",
+      reason_code: "manual_mode_trial_ended",
+      reason:
+        "Trial ended on the manual payment rail: manual mode never converts automatically",
+    }
+  }
+
+  const hasUsablePaymentMethod = Boolean(
+    paymentContext.payment_provider_id && paymentContext.payment_method_reference
+  )
+
+  if (!hasUsablePaymentMethod) {
+    return {
+      action: "end",
+      reason_code: "trial_without_payment_method",
+      reason:
+        "Trial ended in auto mode without a usable payment method reference: expected when the offer's trial_requires_payment_method rule is on, a configuration gap when it is off",
+    }
+  }
+
+  return { action: "convert" }
+}
+
 export const processRenewalCycleStep = createStep(
   "process-renewal-cycle",
   async function (
@@ -645,6 +896,32 @@ export const processRenewalCycleStep = createStep(
     }
 
     const subscription = await loadSubscription(container, cycle.subscription_id)
+
+    // Defensive terminal-state guard: the due query already excludes abandoned
+    // and awaiting_manual_resolution cycles, but manual force runs bypass that
+    // query. resolveCycleDisposition is the one owner of what may still be
+    // executed; "settled" can only name a terminal status here (succeeded was
+    // already rejected above), so anything it returns must not re-execute. The
+    // other dispositions are deliberately not enforced on this path:
+    // "not_chargeable" is rejected later by the eligibility checks with the
+    // pinned errors, and "dunning_owns" must not block an operator force-run.
+    const openDunningCase = await loadOpenDunningCaseForCycle(
+      container,
+      cycle.id
+    )
+
+    if (
+      resolveCycleDisposition(
+        { status: cycle.status, scheduled_for: cycle.scheduled_for },
+        subscription,
+        openDunningCase
+      ) === "settled"
+    ) {
+      throw renewalErrors.invalidTransition(
+        cycle.id,
+        `Renewal '${cycle.id}' is '${cycle.status}' and can no longer be processed`
+      )
+    }
 
     logRenewalEvent(logger, "info", {
       event: "renewal.execution",
@@ -726,98 +1003,117 @@ export const processRenewalCycleStep = createStep(
     })
 
     try {
-      const scheduledAnchor = new Date(cycle.scheduled_for)
       let generatedOrderId: string | null = null
 
-      // v1 trial clean finish (trial wave 工单 05): an OFF-mode trial whose
-      // cycle is at/after trial_ends_at ends the subscription cleanly — no
-      // order, no charge, and NO renewal.succeeded bus event (the SaaS site
-      // must not mirror an extension; entitlements expire naturally). ON-mode
-      // conversion is deferred (trial spike 2026-09-19) and would branch
-      // here instead. The eligibility gate above already rejected cycles
-      // still inside the trial period.
+      // Trial end as a three-way decision (Task 14 of the billing hardening
+      // plan). The eligibility gate above already rejected cycles still
+      // inside the trial period, so a trial cycle reaching this branch sits
+      // at or after trial_ends_at. "convert" falls through to the normal
+      // order/charge path below — a payment-qualified failure there starts
+      // dunning so the customer can repair their card. "end" finishes the
+      // subscription cleanly: no order, no charge, and NO renewal.succeeded
+      // bus event (the SaaS site must not mirror an extension; entitlements
+      // expire naturally).
       if (subscription.is_trial) {
-        const endedAt = new Date()
-        const endedAtAnchor = subscription.trial_ends_at ?? endedAt
+        const trialDecision = resolveTrialConversionDecision(subscription)
 
-        await subscriptionModule.updateSubscriptions({
-          id: subscription.id,
-          status: SubscriptionStatus.CANCELLED,
-          cancelled_at: endedAt,
-          cancel_effective_at: endedAtAnchor,
-          next_renewal_at: endedAtAnchor,
-        })
+        if (trialDecision.action === "end") {
+          const endedAt = new Date()
+          const endedAtAnchor = subscription.trial_ends_at ?? endedAt
 
-        const finishedCycle = await renewalModule.updateRenewalCycles({
-          id: cycle.id,
-          status: RenewalCycleStatus.SUCCEEDED,
-          processed_at: endedAt,
-          generated_order_id: null,
-          last_error: null,
-        })
-
-        await renewalModule.updateRenewalAttempts({
-          id: attempt.id,
-          status: RenewalAttemptStatus.SUCCEEDED,
-          finished_at: endedAt,
-          order_id: null,
-          error_code: null,
-          error_message: null,
-        })
-
-        await persistSubscriptionLogEvent(
-          container,
-          normalizeActivityLogEvent({
-            subscription_id: subscription.id,
-            customer_id: subscription.customer_id,
-            event_type: ActivityLogEventType.SUBSCRIPTION_EXPIRED,
-            actor_type: getRenewalActivityLogActorType(input.trigger_type),
-            actor_id: input.triggered_by ?? null,
-            display: {
-              subscription_reference: subscription.reference,
-              customer_name: subscription.customer_snapshot?.full_name ?? null,
-              product_title:
-                subscription.product_snapshot.product_title ?? null,
-              variant_title:
-                subscription.product_snapshot.variant_title ?? null,
-            },
-            previous_state: {
-              status: cycle.status,
-              attempt_count: cycle.attempt_count,
-              processed_at: toISOStringOrNull(cycle.processed_at),
-              generated_order_id: cycle.generated_order_id,
-              last_error: cycle.last_error,
-            },
-            new_state: {
-              status: finishedCycle.status,
-              attempt_count: finishedCycle.attempt_count,
-              processed_at: toISOStringOrNull(finishedCycle.processed_at),
-              generated_order_id: finishedCycle.generated_order_id,
-              last_error: finishedCycle.last_error,
-            },
-            metadata: {
-              source: input.trigger_type === "manual" ? "admin" : "scheduler",
-              renewal_cycle_id: cycle.id,
-              order_id: null,
-              trigger_type: input.trigger_type,
-              scheduled_for: toISOStringOrNull(cycle.scheduled_for),
-              trial_ended_at: toISOStringOrNull(endedAtAnchor),
-            },
-            correlation_id: correlationId,
-            dedupe: {
-              scope: "renewal",
-              target_id: cycle.id,
-              qualifier: toISOStringOrNull(finishedCycle.processed_at),
-            },
+          await subscriptionModule.updateSubscriptions({
+            id: subscription.id,
+            status: SubscriptionStatus.CANCELLED,
+            cancelled_at: endedAt,
+            cancel_effective_at: endedAtAnchor,
+            next_renewal_at: endedAtAnchor,
           })
-        )
 
-        return new StepResponse({
-          renewal_cycle: finishedCycle,
-          subscription_id: subscription.id,
-          attempt_id: attempt.id,
-          generated_order_id: null,
-        })
+          const finishedCycle = await renewalModule.updateRenewalCycles({
+            id: cycle.id,
+            status: RenewalCycleStatus.SUCCEEDED,
+            processed_at: endedAt,
+            generated_order_id: null,
+            last_error: null,
+            last_failure_kind: null,
+            structural_attempt_count: 0,
+          })
+
+          await renewalModule.updateRenewalAttempts({
+            id: attempt.id,
+            status: RenewalAttemptStatus.SUCCEEDED,
+            finished_at: endedAt,
+            order_id: null,
+            error_code: null,
+            error_message: null,
+          })
+
+          // Persisted AND emitted through the shared funnel: the host's
+          // saas-email-expired subscriber waits on this bus event, which the
+          // trial-end branch previously only persisted (live defect fixed in
+          // Task 11 of the billing hardening plan). The dedupe key keeps the
+          // emission exactly-once per cycle; the reason names the rail and
+          // the gap that ended the trial.
+          await persistAndEmitSubscriptionLogEvent(
+            container,
+            normalizeActivityLogEvent({
+              subscription_id: subscription.id,
+              customer_id: subscription.customer_id,
+              event_type: ActivityLogEventType.SUBSCRIPTION_EXPIRED,
+              actor_type: getRenewalActivityLogActorType(input.trigger_type),
+              actor_id: input.triggered_by ?? null,
+              display: {
+                subscription_reference: subscription.reference,
+                customer_name: subscription.customer_snapshot?.full_name ?? null,
+                product_title:
+                  subscription.product_snapshot.product_title ?? null,
+                variant_title:
+                  subscription.product_snapshot.variant_title ?? null,
+              },
+              previous_state: {
+                status: cycle.status,
+                attempt_count: cycle.attempt_count,
+                processed_at: toISOStringOrNull(cycle.processed_at),
+                generated_order_id: cycle.generated_order_id,
+                last_error: cycle.last_error,
+              },
+              new_state: {
+                status: finishedCycle.status,
+                attempt_count: finishedCycle.attempt_count,
+                processed_at: toISOStringOrNull(finishedCycle.processed_at),
+                generated_order_id: finishedCycle.generated_order_id,
+                last_error: finishedCycle.last_error,
+              },
+              reason: trialDecision.reason,
+              metadata: {
+                source: input.trigger_type === "manual" ? "admin" : "scheduler",
+                renewal_cycle_id: cycle.id,
+                order_id: null,
+                trigger_type: input.trigger_type,
+                reason_code: trialDecision.reason_code,
+                scheduled_for: toISOStringOrNull(cycle.scheduled_for),
+                trial_ended_at: toISOStringOrNull(endedAtAnchor),
+              },
+              correlation_id: correlationId,
+              dedupe: {
+                scope: "renewal",
+                target_id: cycle.id,
+                qualifier: toISOStringOrNull(finishedCycle.processed_at),
+              },
+            })
+          )
+
+          return new StepResponse({
+            renewal_cycle: finishedCycle,
+            subscription_id: subscription.id,
+            attempt_id: attempt.id,
+            generated_order_id: null,
+          })
+        }
+        // trialDecision.action === "convert": fall through to the normal
+        // order/charge path. The subscription's cart is a hard prerequisite
+        // (T6) — when it is missing, that path's own guard refuses before
+        // anything is created or charged.
       }
 
       const isFreeCycle =
@@ -843,61 +1139,58 @@ export const processRenewalCycleStep = createStep(
         generatedOrderId = order.id
       }
 
-      const nextInterval =
-        appliedPendingChanges?.frequency_interval ??
-        subscription.frequency_interval
-      const nextValue =
-        appliedPendingChanges?.frequency_value ?? subscription.frequency_value
-      const nextRenewalAt = addSubscriptionCadence(
-        scheduledAnchor,
-        nextInterval,
-        nextValue
-      )
-      const finishedAt = new Date()
-
-      const nextProductSnapshot = appliedPendingChanges
-        ? {
-            ...subscription.product_snapshot,
-            variant_id: appliedPendingChanges.variant_id,
-            variant_title: appliedPendingChanges.variant_title,
-            sku: subscription.pending_update_data?.sku ?? subscription.product_snapshot.sku,
-          }
-        : subscription.product_snapshot
-
-      await subscriptionModule.updateSubscriptions({
-        id: subscription.id,
-        // A successful renewal recovers a past-due subscription.
-        status: SubscriptionStatus.ACTIVE,
-        variant_id:
-          appliedPendingChanges?.variant_id ?? subscription.variant_id,
-        frequency_interval: nextInterval,
-        frequency_value: nextValue,
-        product_snapshot: nextProductSnapshot,
-        next_renewal_at: nextRenewalAt,
-        last_renewal_at: finishedAt,
-        skip_next_cycle: false,
-        free_cycles_remaining: isFreeCycle && !subscription.skip_next_cycle
-          ? (subscription.free_cycles_remaining ?? 0) - 1
-          : subscription.free_cycles_remaining ?? 0,
-        pending_update_data: appliedPendingChanges ? null : subscription.pending_update_data,
-      })
-
-      const updatedCycle = await renewalModule.updateRenewalCycles({
-        id: cycle.id,
-        status: RenewalCycleStatus.SUCCEEDED,
-        processed_at: finishedAt,
+      // The shared period-finalization step (Task 5): marks the cycle
+      // succeeded, advances the cadence anchored on `scheduled_for` (R6),
+      // sets `last_renewal_at`, clears the applied pending changes, resets
+      // `structural_attempt_count`, and persists + emits `renewal.succeeded`.
+      const finalized = await finalizeRenewalPeriod(container, {
+        cycle,
+        subscription,
+        applied_pending_changes: appliedPendingChanges,
         generated_order_id: generatedOrderId,
-        last_error: null,
+        trigger: {
+          source: input.trigger_type === "manual" ? "admin" : "scheduler",
+          trigger_type: input.trigger_type,
+          actor_type: getRenewalActivityLogActorType(input.trigger_type),
+          actor_id: input.triggered_by ?? null,
+          correlation_id: correlationId,
+        },
+        attempt_id: attempt.id,
+        // The next cycle is ensured by the workflow wrapper AFTER this step
+        // (ensureNextRenewalCycleStep): an ensure failure inside the step
+        // would fall into the failure handler below and re-mark an already
+        // settled (paid) period as failed, while outside the step the same
+        // failure only fails the workflow and the settlement stands.
+        ensure_next_cycle: false,
       })
 
-      await renewalModule.updateRenewalAttempts({
-        id: attempt.id,
-        status: RenewalAttemptStatus.SUCCEEDED,
-        finished_at: finishedAt,
-        order_id: generatedOrderId,
-        error_code: null,
-        error_message: null,
-      })
+      // Q4 race guard (Task 7): no open case may survive a settled period.
+      // Best-effort by contract — the period is already paid, so a closure
+      // failure must not fall into the failure handler below and re-mark the
+      // paid period as failed; the settled-cycle guard (R2) in
+      // `run-dunning-retry` closes the case on the next retry without
+      // charging.
+      try {
+        await closeOpenDunningCaseOnRenewalSuccess(container, cycle.id)
+      } catch (caseCloseError) {
+        logRenewalEvent(logger, "warn", {
+          event: "renewal.execution",
+          outcome: "succeeded",
+          alertable: true,
+          correlation_id: correlationId,
+          renewal_cycle_id: cycle.id,
+          subscription_id: subscription.id,
+          trigger_type: input.trigger_type,
+          triggered_by: input.triggered_by ?? null,
+          attempt_no: attemptNo,
+          duration_ms: Date.now() - operationStartedAt,
+          success_count: 1,
+          failure_count: 0,
+          message: `Failed to close the open dunning case after renewal success: ${getRenewalErrorMessage(
+            caseCloseError
+          )}`,
+        })
+      }
 
       logRenewalEvent(logger, "info", {
         event: "renewal.execution",
@@ -917,60 +1210,8 @@ export const processRenewalCycleStep = createStep(
         },
       })
 
-      const renewalLogEvent = normalizeActivityLogEvent({
-        subscription_id: subscription.id,
-        customer_id: subscription.customer_id,
-        event_type: ActivityLogEventType.RENEWAL_SUCCEEDED,
-        actor_type: getRenewalActivityLogActorType(input.trigger_type),
-        actor_id: input.triggered_by ?? null,
-        display: {
-          subscription_reference: subscription.reference,
-          customer_name: subscription.customer_snapshot?.full_name ?? null,
-          product_title: subscription.product_snapshot.product_title ?? null,
-          variant_title:
-            appliedPendingChanges?.variant_title ??
-            subscription.product_snapshot.variant_title ??
-            null,
-        },
-        previous_state: {
-          status: cycle.status,
-          attempt_count: cycle.attempt_count,
-          processed_at: toISOStringOrNull(cycle.processed_at),
-          generated_order_id: cycle.generated_order_id,
-          last_error: cycle.last_error,
-        },
-        new_state: {
-          status: updatedCycle.status,
-          attempt_count: updatedCycle.attempt_count,
-          processed_at: toISOStringOrNull(updatedCycle.processed_at),
-          generated_order_id: updatedCycle.generated_order_id,
-          last_error: updatedCycle.last_error,
-          applied_pending_update_data: appliedPendingChanges,
-        },
-        metadata: {
-          source: input.trigger_type === "manual" ? "admin" : "scheduler",
-          renewal_cycle_id: cycle.id,
-          order_id: generatedOrderId,
-          trigger_type: input.trigger_type,
-          scheduled_for: toISOStringOrNull(cycle.scheduled_for),
-        },
-        correlation_id: correlationId,
-        dedupe: {
-          scope: "renewal",
-          target_id: cycle.id,
-          qualifier: toISOStringOrNull(updatedCycle.processed_at),
-        },
-      })
-
-      await persistSubscriptionLogEvent(container, renewalLogEvent)
-
-      // The scheduler path has no checkout-time order to settle auto-renewals
-      // (renewal orders carry no plan in metadata), so renewal.succeeded is
-      // the only signal the SaaS site mirrors into its D1 entitlement.
-      await emitSubscriptionBusEvent(container, renewalLogEvent)
-
       return new StepResponse({
-        renewal_cycle: updatedCycle,
+        renewal_cycle: finalized.renewal_cycle,
         subscription_id: subscription.id,
         attempt_id: attempt.id,
         generated_order_id: generatedOrderId,
@@ -990,15 +1231,89 @@ export const processRenewalCycleStep = createStep(
         order_id: paymentFailure?.renewal_order_id ?? null,
       })
 
+      // Failure bookkeeping. A "blocked" outcome (`already_processing` /
+      // `duplicate_execution` — the set `isAlertableRenewalFailure` already
+      // encodes) is not a failure of the attempt: nothing ran twice, so it
+      // must not increment either counter. A payment-qualified failure hands
+      // its retries to dunning (started below), so it is structural only when
+      // that handoff itself fails — handled after the dunning attempt. Every
+      // other failure reaching this handler is structural: it will reproduce
+      // deterministically on the next scheduler pass, so it counts toward
+      // `renewal_max_attempts`.
+      const blockedKind = !isAlertableRenewalFailure(failureKind)
+      const structuralOutcome =
+        !blockedKind && !paymentFailure
+          ? resolveStructuralFailureOutcome(
+              cycle,
+              await resolveRenewalMaxAttempts(container)
+            )
+          : null
+
       await renewalModule.updateRenewalCycles({
         id: cycle.id,
-        status: RenewalCycleStatus.FAILED,
+        status: structuralOutcome?.status ?? RenewalCycleStatus.FAILED,
         processed_at: finishedAt,
         generated_order_id: paymentFailure?.renewal_order_id ?? null,
         last_error: message,
+        last_failure_kind: failureKind,
+        structural_attempt_count:
+          structuralOutcome?.structural_attempt_count ??
+          (cycle.structural_attempt_count ?? 0),
       })
 
-      await persistSubscriptionLogEvent(container, normalizeActivityLogEvent({
+      // Emission point (Tasks 11/12): when the cap above turned the cycle
+      // `abandoned`, the abandonment is persisted AND emitted through the
+      // shared funnel exactly where the write landed. R3: the host receives
+      // `renewal.abandoned` and decides what happens to the past-due
+      // subscription; this plugin must not cancel it as a side effect.
+      if (structuralOutcome?.status === RenewalCycleStatus.ABANDONED) {
+        await persistRenewalResolutionEvent(container, {
+          event_type: ActivityLogEventType.RENEWAL_ABANDONED,
+          subscription_id: subscription.id,
+          renewal_cycle_id: cycle.id,
+          subscription_display: {
+            customer_id: subscription.customer_id,
+            reference: subscription.reference,
+            customer_name: subscription.customer_snapshot?.full_name ?? null,
+            product_title: subscription.product_snapshot.product_title ?? null,
+            variant_title:
+              appliedPendingChanges?.variant_title ??
+              subscription.product_snapshot.variant_title ??
+              null,
+          },
+          previous_state: {
+            status: cycle.status,
+            attempt_count: cycle.attempt_count,
+            processed_at: toISOStringOrNull(cycle.processed_at),
+            generated_order_id: cycle.generated_order_id,
+            last_error: cycle.last_error,
+          },
+          new_state: {
+            status: structuralOutcome.status,
+            attempt_count: attemptNo,
+            processed_at: toISOStringOrNull(finishedAt),
+            generated_order_id: paymentFailure?.renewal_order_id ?? null,
+            last_error: message,
+            last_failure_kind: failureKind,
+            structural_attempt_count: structuralOutcome.structural_attempt_count,
+          },
+          reason: message,
+          reason_code: failureKind,
+          actor_type: getRenewalActivityLogActorType(input.trigger_type),
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.trigger_type,
+          source: input.trigger_type === "manual" ? "admin" : "scheduler",
+          order_id: paymentFailure?.renewal_order_id ?? null,
+          attempt_no: attemptNo,
+          correlation_id: correlationId,
+        })
+      }
+
+      // Persisted AND emitted through the shared funnel: the host's
+      // saas-email-renewal-failed subscriber declares `renewal.failed` but the
+      // event was previously only persisted, so that customer email never sent
+      // (live defect fixed in Task 11 of the billing hardening plan).
+      await persistAndEmitSubscriptionLogEvent(container, normalizeActivityLogEvent({
         subscription_id: subscription.id,
         customer_id: subscription.customer_id,
         event_type: ActivityLogEventType.RENEWAL_FAILED,
@@ -1021,11 +1336,15 @@ export const processRenewalCycleStep = createStep(
           last_error: cycle.last_error,
         },
         new_state: {
-          status: RenewalCycleStatus.FAILED,
+          status: structuralOutcome?.status ?? RenewalCycleStatus.FAILED,
           attempt_count: attemptNo,
           processed_at: toISOStringOrNull(finishedAt),
           generated_order_id: paymentFailure?.renewal_order_id ?? null,
           last_error: message,
+          last_failure_kind: failureKind,
+          structural_attempt_count:
+            structuralOutcome?.structural_attempt_count ??
+            (cycle.structural_attempt_count ?? 0),
           applied_pending_update_data: appliedPendingChanges,
         },
         reason: input.reason ?? null,
@@ -1082,6 +1401,75 @@ export const processRenewalCycleStep = createStep(
               dunningError
             )}`,
           })
+
+          // R1: the payment failure's recovery machinery could not start, so
+          // dunning does NOT own the retries and the five-minute loop would
+          // otherwise resume silently with no case in existence. The failure
+          // is therefore structural: it counts toward `renewal_max_attempts`
+          // exactly like a non-payment failure.
+          const structuralOutcome = resolveStructuralFailureOutcome(
+            cycle,
+            await resolveRenewalMaxAttempts(container)
+          )
+
+          // Second emission point (Tasks 11/12), mirroring the one above the
+          // first `updateRenewalCycles` call in this handler: when the cap
+          // turns the cycle `abandoned` here, the abandonment is persisted
+          // AND emitted exactly where this write lands.
+          await renewalModule.updateRenewalCycles({
+            id: cycle.id,
+            status: structuralOutcome.status,
+            processed_at: finishedAt,
+            generated_order_id: paymentFailure.renewal_order_id ?? null,
+            last_error: message,
+            last_failure_kind: failureKind,
+            structural_attempt_count: structuralOutcome.structural_attempt_count,
+          })
+
+          if (structuralOutcome.status === RenewalCycleStatus.ABANDONED) {
+            await persistRenewalResolutionEvent(container, {
+              event_type: ActivityLogEventType.RENEWAL_ABANDONED,
+              subscription_id: subscription.id,
+              renewal_cycle_id: cycle.id,
+              subscription_display: {
+                customer_id: subscription.customer_id,
+                reference: subscription.reference,
+                customer_name: subscription.customer_snapshot?.full_name ?? null,
+                product_title:
+                  subscription.product_snapshot.product_title ?? null,
+                variant_title:
+                  appliedPendingChanges?.variant_title ??
+                  subscription.product_snapshot.variant_title ??
+                  null,
+              },
+              previous_state: {
+                status: cycle.status,
+                attempt_count: cycle.attempt_count,
+                processed_at: toISOStringOrNull(cycle.processed_at),
+                generated_order_id: cycle.generated_order_id,
+                last_error: cycle.last_error,
+              },
+              new_state: {
+                status: structuralOutcome.status,
+                attempt_count: attemptNo,
+                processed_at: toISOStringOrNull(finishedAt),
+                generated_order_id: paymentFailure.renewal_order_id ?? null,
+                last_error: message,
+                last_failure_kind: failureKind,
+                structural_attempt_count:
+                  structuralOutcome.structural_attempt_count,
+              },
+              reason: message,
+              reason_code: failureKind,
+              actor_type: getRenewalActivityLogActorType(input.trigger_type),
+              actor_id: input.triggered_by ?? null,
+              trigger_type: input.trigger_type,
+              source: input.trigger_type === "manual" ? "admin" : "scheduler",
+              order_id: paymentFailure.renewal_order_id ?? null,
+              attempt_no: attemptNo,
+              correlation_id: correlationId,
+            })
+          }
         }
       }
 

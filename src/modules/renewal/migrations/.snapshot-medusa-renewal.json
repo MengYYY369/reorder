@@ -56,7 +56,9 @@
             "scheduled",
             "processing",
             "succeeded",
-            "failed"
+            "failed",
+            "abandoned",
+            "awaiting_manual_resolution"
           ],
           "mappedType": "enum"
         },
@@ -139,8 +141,27 @@
           "nullable": true,
           "mappedType": "text"
         },
+        "last_failure_kind": {
+          "name": "last_failure_kind",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
         "attempt_count": {
           "name": "attempt_count",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "integer"
+        },
+        "structural_attempt_count": {
+          "name": "structural_attempt_count",
           "type": "integer",
           "unsigned": false,
           "autoincrement": false,

@@ -21,6 +21,8 @@ const SubscriptionSettings = model
     default_cancellation_behavior: model
       .enum(SubscriptionCancellationBehavior)
       .default(SubscriptionCancellationBehavior.RECOMMEND_RETENTION_FIRST),
+    renewal_max_attempts: model.number().default(3),
+    renewal_reminder_lead_days: model.number().default(3),
     version: model.number().default(0),
     updated_by: model.text().nullable(),
     metadata: model.json().nullable(),

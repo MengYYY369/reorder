@@ -14,6 +14,8 @@ export type PostAdminSubscriptionSettingsBody = {
   max_dunning_attempts?: number | null
   default_renewal_behavior?: SubscriptionRenewalBehavior | null
   default_cancellation_behavior?: SubscriptionCancellationBehavior | null
+  renewal_max_attempts?: number | null
+  renewal_reminder_lead_days?: number | null
   expected_version?: number | null
   reason?: string | null
 }
@@ -74,6 +76,8 @@ export function normalizeAdminSubscriptionSettingsUpdateBody(
     default_renewal_behavior: body.default_renewal_behavior ?? undefined,
     default_cancellation_behavior:
       body.default_cancellation_behavior ?? undefined,
+    renewal_max_attempts: body.renewal_max_attempts ?? undefined,
+    renewal_reminder_lead_days: body.renewal_reminder_lead_days ?? undefined,
     expected_version: body.expected_version ?? 0,
     reason: body.reason ?? null,
     updated_by: updatedBy ?? null,
