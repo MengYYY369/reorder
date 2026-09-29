@@ -1,3 +1,86 @@
+## [1.7.0] - 2026-09-29
+
+The billing-engine hardening release. A failed renewal stops retrying forever
+and recovery can no longer double-charge a settled cycle, a crashed worker no
+longer strands a cycle in PROCESSING with no way back, and the two customer
+emails the host has subscribed to since launch can finally fire. On top of the
+engine work: card-free trials with optional PayPal vault binding, a
+customer-side cancellation finalize, the second checkout-gate direction, and
+the admin surfaces to configure and observe all of it.
+
+**Five migrations ship with this release — run `medusa db:migrate` on upgrade**
+(two in activity-log, one each in renewal, settings, and the new trial-claim
+module).
+
+### Features
+
+- **renewal: two new cycle states, failure bookkeeping, and a retry cap.**
+  A renewal cycle can now end as `abandoned` or `awaiting_manual_resolution`
+  next to the existing terminal states; every attempt records
+  `last_failure_kind`, structural failures accumulate in
+  `structural_attempt_count`, and the new `renewal_max_attempts` setting
+  (default 3) retires a cycle that keeps failing for structural reasons instead
+  of retrying it every five minutes forever.
+- **dunning: structural classification and cycle ownership.** Structural
+  failures (an unchargeable subscription, a missing price) are classified as
+  such and counted against the cap rather than retried blindly; the
+  settled-cycle guard refuses to touch a cycle that has already reached a
+  terminal state, closing the double-charge window between dunning recovery
+  and cycle finalization; a retry never cancels a subscription as a side
+  effect; the parked-cycle ambiguity is resolved in favor of explicit states.
+- **reconciliation: stuck cycles are found, resolvable, and remindable.** An
+  hourly `recover-stuck-renewal-cycles` job reconciles cycles left PROCESSING
+  past a 30-minute staleness threshold (renewal order discovered by link
+  first, cart metadata fallback second); `POST /admin/renewals/:id/resolve-stuck`
+  lets an operator settle one deliberately; a second hourly
+  `emit-renewal-reminders` job emits the lookahead events
+  `renewal_reminder_lead_days` (default 3) ahead of each due date.
+- **activity-log: four event types.** `renewal.abandoned`,
+  `renewal.awaiting_manual_resolution`, `renewal.upcoming`, and
+  `subscription.trial_ending`, persisted and emitted exactly once through the
+  shared `persistAndEmitSubscriptionLogEvent` helper.
+- **trials: claim without a card, bind to extend.** A per-customer,
+  per-product `trial_claim` ledger (unique index, race-safe) backs
+  `POST /store/customers/me/trials` (card-free claim through a template cart
+  that never charges and never leaks its id) and the two-phase
+  `POST /store/customers/me/trials/:id/bind` (setup-token approval, exchange
+  for a vault payment token, `trial_bonus_days` anchored on the trial's
+  start). The offer DTO carries the whole contract as `trial: { is_enabled,
+  days, requires_payment_method, bonus_days, eligible, reason, binding:
+  { method, supported } }`, where `binding.supported` is a live duck-type
+  probe of the installed PayPal provider's vault capability. Binding is
+  optional unless the offer's `trial_requires_payment_method` rule says
+  otherwise, and every binding method has a working exit — including the new
+  customer-side `POST /store/customers/me/subscriptions/:id/cancellation/finalize`.
+- **admin: trial configuration and renewal observability.** Plan-offer forms
+  expose the trial rules; renewal cycles render the new states and the failure
+  bookkeeping; the plan-offer list ships translations through the pinned
+  `i18nModule` wiring.
+
+### Fixes
+
+- **dunning recovery can no longer double-charge.** The settled-cycle guard
+  makes a second payment on a finished cycle impossible (see above).
+- **the checkout gate now blocks both directions.** A live reorder-rail
+  subscription for a product also refuses a native (provider-managed)
+  purchase of the same product — closing the path where a vault trialist buys
+  the native plan and gets charged twice. Pinned MikroORM cannot express
+  `$not.$like`, so the `NATIVE-%` exclusion is evaluated in memory.
+- **admin pages no longer render raw i18n keys.** react-i18next is pinned to
+  13.5.0 in `peerDependencies` (the dashboard's single copy), and
+  `scripts/assert-package-surface.mjs` fails the build if the admin bundle
+  ever loses the `i18nModule` wiring again.
+- **display paths degrade consistently.** Missing display data renders
+  truncated ids instead of `undefined` text, with a diagnostic warning logged.
+
+### Documentation
+
+- The store customer self-service tutorial (trials, exits, the failed-payment
+  banner), the saas-bridge event contract, the subscriptions architecture and
+  admin plan-offer docs, the money-basis switch runbook and evidence records,
+  and the external follow-ups plan. A GitHub Actions workflow runs the module
+  and http gates on push.
+
 ## [1.6.1] - 2026-09-26
 
 Post-release round on top of the published 1.6.0: the package now ships only the
