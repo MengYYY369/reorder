@@ -3,6 +3,7 @@ import {
   normalizeConsentFromSession,
   normalizeMaxStackingCycles,
   normalizeRowStackingPolicy,
+  normalizeTrialBonusDays,
   resolvePlanOfferRules,
 } from "../utils/rules"
 import {
@@ -26,6 +27,7 @@ describe("resolvePlanOfferRules", () => {
       consent_from_session: null,
       row_stacking_policy: PlanOfferRowStackingPolicy.EXTEND,
       max_stacking_cycles: null,
+      trial_bonus_days: null,
     })
     expect(resolvePlanOfferRules(null)).toEqual(PLAN_OFFER_RULES_DEFAULTS)
     expect(resolvePlanOfferRules(undefined)).toEqual(PLAN_OFFER_RULES_DEFAULTS)
@@ -38,11 +40,13 @@ describe("resolvePlanOfferRules", () => {
         consent_from_session: "customer_id",
         row_stacking_policy: PlanOfferRowStackingPolicy.ALLOW_MULTIPLE,
         max_stacking_cycles: 6,
+        trial_bonus_days: 7,
       })
     ).toEqual({
       consent_from_session: "customer_id",
       row_stacking_policy: PlanOfferRowStackingPolicy.ALLOW_MULTIPLE,
       max_stacking_cycles: 6,
+      trial_bonus_days: 7,
     })
   })
 
@@ -101,5 +105,14 @@ describe("rule field validators", () => {
       /max_stacking_cycles/
     )
     expect(normalizeMaxStackingCycles(0)).toBe(0)
+  })
+
+  it("rejects a non-positive or fractional trial bonus", () => {
+    expect(() => normalizeTrialBonusDays(0)).toThrow(/trial_bonus_days/)
+    expect(() => normalizeTrialBonusDays(-3)).toThrow(/trial_bonus_days/)
+    expect(() => normalizeTrialBonusDays(1.5)).toThrow(/trial_bonus_days/)
+    expect(normalizeTrialBonusDays(null)).toBeNull()
+    expect(normalizeTrialBonusDays(undefined)).toBeNull()
+    expect(normalizeTrialBonusDays(7)).toBe(7)
   })
 })

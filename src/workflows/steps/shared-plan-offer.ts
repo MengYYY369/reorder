@@ -48,6 +48,7 @@ export type UpsertPlanOfferInput = {
     consent_from_session?: "customer_id" | null
     row_stacking_policy?: PlanOfferRowStackingPolicy | "extend" | "allow_multiple"
     max_stacking_cycles?: number | null
+    trial_bonus_days?: number | null
   } | null
   metadata?: Record<string, unknown> | null
 }
@@ -313,6 +314,22 @@ function normalizeRules(
     assertPositiveInteger(rules.trial_days, "rules.trial_days")
   }
 
+  // The whitelist ends here: a key not built into the returned object below is
+  // silently dropped on every upsert.
+  if (
+    !rules.trial_enabled &&
+    rules.trial_bonus_days !== null &&
+    rules.trial_bonus_days !== undefined
+  ) {
+    throw planOfferErrors.invalidTrialConfiguration(
+      "'rules.trial_bonus_days' must be null when trial is disabled"
+    )
+  }
+
+  if (rules.trial_bonus_days !== null && rules.trial_bonus_days !== undefined) {
+    assertPositiveInteger(rules.trial_bonus_days, "rules.trial_bonus_days")
+  }
+
   return {
     minimum_cycles: rules.minimum_cycles ?? null,
     trial_enabled: rules.trial_enabled,
@@ -324,6 +341,7 @@ function normalizeRules(
     ),
     row_stacking_policy: normalizeRowStackingPolicy(rules.row_stacking_policy),
     max_stacking_cycles: normalizeMaxStackingCycles(rules.max_stacking_cycles),
+    trial_bonus_days: rules.trial_bonus_days ?? null,
   }
 }
 

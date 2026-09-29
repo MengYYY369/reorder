@@ -45,6 +45,7 @@ const planOfferRulesSchema = z.object({
   consent_from_session: z.literal("customer_id").nullable().optional(),
   row_stacking_policy: z.enum(["extend", "allow_multiple"]).optional(),
   max_stacking_cycles: z.number().int().nonnegative().nullable().optional(),
+  trial_bonus_days: z.number().int().positive().nullable().optional(),
 }).superRefine((rules, ctx) => {
   if (!rules.trial_enabled && rules.trial_days !== null) {
     ctx.addIssue({
@@ -68,6 +69,14 @@ const planOfferRulesSchema = z.object({
       message:
         "'rules.trial_requires_payment_method' must be false when trial is disabled",
       path: ["trial_requires_payment_method"],
+    })
+  }
+
+  if (!rules.trial_enabled && rules.trial_bonus_days != null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "'rules.trial_bonus_days' must be null when trial is disabled",
+      path: ["trial_bonus_days"],
     })
   }
 })

@@ -56,4 +56,9 @@ export const redemptionErrors = {
       "invalid_data",
       "Trial codes are for new users only"
     ),
+  trialRequiresPaymentMethod: (code: string) =>
+    new RedemptionError(
+      "invalid_data",
+      `Redemption code ${code} grants a trial that requires a payment method, which redemption codes cannot collect`
+    ),
 }

@@ -5,11 +5,13 @@ import { adminRenewalsMiddlewares } from "./admin/renewals/middlewares"
 import { adminDunningMiddlewares } from "./admin/dunning/middlewares"
 import { adminCancellationsMiddlewares } from "./admin/cancellations/middlewares"
 import { adminRedemptionsMiddlewares } from "./admin/redemptions/middlewares"
+import { adminTrialClaimsMiddlewares } from "./admin/trial-claims/middlewares"
 import { adminSubscriptionLogsMiddlewares } from "./admin/subscription-logs/middlewares"
 import { adminSubscriptionAnalyticsMiddlewares } from "./admin/subscription-analytics/middlewares"
 import { adminSubscriptionSettingsMiddlewares } from "./admin/subscription-settings/middlewares"
 import { storeCustomerSubscriptionsMiddlewares } from "./store/customers/me/subscriptions/middlewares"
 import { storeCustomerRedemptionsMiddlewares } from "./store/customers/me/redemptions/middlewares"
+import { storeCustomerTrialsMiddlewares } from "./store/customers/me/trials/middlewares"
 import { storeProductMiddlewares } from "./store/products/middlewares"
 import { saasBridgeMiddlewares } from "../modules/saas-bridge/auth"
 import { rejectConflictingPurchase } from "./store/carts/completion-gate"
@@ -25,8 +27,10 @@ export default defineMiddlewares({
     ...adminDunningMiddlewares,
     ...adminCancellationsMiddlewares,
     ...adminRedemptionsMiddlewares,
+    ...adminTrialClaimsMiddlewares,
     ...storeCustomerSubscriptionsMiddlewares,
     ...storeCustomerRedemptionsMiddlewares,
+    ...storeCustomerTrialsMiddlewares,
     ...storeProductMiddlewares,
     ...saasBridgeMiddlewares,
     {

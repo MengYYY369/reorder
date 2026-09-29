@@ -90,6 +90,7 @@ const MIGRATION_PATHS: string[] = [
   "renewal",
   "settings",
   "subscription",
+  "trial-claim",
 ].map((moduleName) => migrationDirOf(moduleName))
 
 const PROBE_DB_NAME = "reorder_migrations_probe"
@@ -121,12 +122,26 @@ const CREATION_FAILURE_MIGRATION = "Migration20260922120000"
 const CREATION_FAILED_EVENT = "subscription.creation_failed"
 
 /**
- * The measured migration inventory: 22 migrations across the 9 module
- * directories that ship them (`saas-bridge` ships none). A floor like "more than
- * 20" would still pass if three directories were skipped, so the cases compare
- * against the exact set discovered on disk instead.
+ * Task 12 of the billing hardening plan: the third activity-log migration, and
+ * the two operational event types it appends to the same check constraint.
+ * Named for the same reason as `CREATION_FAILURE_MIGRATION` — the rollback case
+ * addresses it by name and asserts its event types from both sides.
  */
-const EXPECTED_MIGRATION_COUNT = 22
+const RENEWAL_RESOLUTION_MIGRATION = "Migration20260929120000"
+const RENEWAL_ABANDONED_EVENT = "renewal.abandoned"
+const RENEWAL_AWAITING_MANUAL_RESOLUTION_EVENT = "renewal.awaiting_manual_resolution"
+
+/**
+ * The measured migration inventory: 27 migrations across the 10 module
+ * directories that ship them (`saas-bridge` ships none). Task 12 of the billing
+ * hardening plan added the third one (the two operational renewal event types
+ * on the `subscription_log` check constraint) and Task 13 the fourth (the two
+ * lookahead event types on the same constraint); Task 20's `trial_claim` table
+ * took the inventory to 27. A floor like "more than 20" would still pass
+ * if three directories were skipped, so the cases compare against the exact set
+ * discovered on disk instead.
+ */
+const EXPECTED_MIGRATION_COUNT = 27
 
 function migrationDirOf(moduleName: string): string {
   return path.join(MODULES_ROOT, moduleName, "migrations")
@@ -922,7 +937,7 @@ async function restoreAppliedMigration(
  * then re-applies it whatever `use` did.
  *
  * The revert goes through `withMigratorFor` bound to the migration's own directory
- * even when the database is the nine-directory probe: `setupDatabase()` configures
+ * even when the database is the ten-directory probe: `setupDatabase()` configures
  * the shared wrapper's ORM with `pathToMigrations: migrationPaths[0]`
  * (`@medusajs/test-utils/dist/database.js:100-112`, the activity-log directory), so
  * its own `orm.getMigrator()` cannot see any other module's migration and umzug
@@ -1020,9 +1035,9 @@ medusaIntegrationTestRunner({
     /**
      * Two sibling describes rather than one, and the split is load-bearing: jest
      * inherits a failing `beforeAll` into EVERY case of that describe, so a case
-     * that shares the nine-directory probe's hook can never attribute its own red.
+     * that shares the ten-directory probe's hook can never attribute its own red.
      * With `Migration20260924120000`'s `to_regclass` guard neutralized, the probe
-     * below rejects while applying `renewal` — the 7th of the 9, before
+     * below rejects while applying `renewal` — the 7th of the 10, before
      * `subscription` creates its table — and all eight cases then report that one
      * inherited error while their own bodies never run. The renewal-only probes
      * therefore live in the describe after this one, which has no hook for them to
@@ -1404,6 +1419,112 @@ medusaIntegrationTestRunner({
         )
       })
 
+      it("admits the two operational renewal events and rolls them back over their own rows", async () => {
+        // The creation-failure case before this one reverts and re-applies
+        // THAT migration over the shared probe, and the re-apply re-creates
+        // the event-type gate with its own value list — silently undoing this
+        // migration's constraint while this migration's `mikro_orm_migrations`
+        // row stays. Re-run this migration's own down()+up() so the gate this
+        // case asserts is the one its `up()` leaves, whatever a sibling's
+        // revert left behind.
+        await withMigratorFor(
+          PROBE_DB_NAME,
+          migrationDirOf("activity-log"),
+          async (migrator) => {
+            await migrator.down({ migrations: [RENEWAL_RESOLUTION_MIGRATION] })
+            await migrator.up({ migrations: [RENEWAL_RESOLUTION_MIGRATION] })
+          }
+        )
+
+        // Task 12's gate: the two alertable renewal events must be writable in a
+        // fully migrated database (before this migration they hit the check
+        // constraint at runtime, per the lessons.md rule), and the rollback must
+        // behave like the fixed 1.6.0 one — delete its own rows BEFORE re-adding
+        // the constraint, so a host whose log already contains either event can
+        // still revert the plugin.
+        await seedLogRow(probeWrapper, {
+          id: "slog_task12_abandoned",
+          eventType: RENEWAL_ABANDONED_EVENT,
+          subscriptionId: "sub_t7",
+          subscriptionReference: "SUB_PROBE",
+        })
+        await seedLogRow(probeWrapper, {
+          id: "slog_task12_parked",
+          eventType: RENEWAL_AWAITING_MANUAL_RESOLUTION_EVENT,
+          subscriptionId: "sub_t7",
+          subscriptionReference: "SUB_PROBE",
+        })
+        // A neighbour from before Task 12, as the row the rollback leaves alone.
+        await seedLogRow(probeWrapper, {
+          id: "slog_task12_created",
+          eventType: "subscription.created",
+          subscriptionId: "sub_t7",
+          subscriptionReference: "SUB_PROBE",
+        })
+
+        // The rows the shared probe carries from the sibling rollback case are
+        // none of this case's business: the two Task 12 rows resolve (the gate
+        // admitted them) and the `subscription.created` neighbour sits beside
+        // them.
+        const seededRows = await probeQuery(
+          probeWrapper,
+          `select id from subscription_log where id like 'slog_task12_%' order by id`
+        )
+        expect(seededRows.map((row) => String(row.id))).toEqual([
+          "slog_task12_abandoned",
+          "slog_task12_created",
+          "slog_task12_parked",
+        ])
+        expect(await logGate(probeWrapper)).toEqual({
+          constraintCount: 1,
+          definition: expect.stringContaining(RENEWAL_ABANDONED_EVENT),
+          creationFailureRows: 0,
+          survivingIds: expect.stringContaining(
+            "slog_task12_abandoned,slog_task12_created,slog_task12_parked"
+          ),
+          displayColumnsNullable: "subscription_id=YES,subscription_reference=YES",
+        })
+
+        await withMigrationReverted(
+          PROBE_DB_NAME,
+          migrationDirOf("activity-log"),
+          RENEWAL_RESOLUTION_MIGRATION,
+          probeWrapper,
+          async () => {
+            // Its own rows are gone, and only its own rows: the delete targets
+            // its own event types, not the table — the `subscription.created`
+            // neighbour survives it.
+            const revertedRows = await probeQuery(
+              probeWrapper,
+              `select id from subscription_log where id like 'slog_task12_%' order by id`
+            )
+            expect(revertedRows.map((row) => String(row.id))).toEqual([
+              "slog_task12_created",
+            ])
+
+            const revertedGate = await logGate(probeWrapper)
+
+            expect(revertedGate.constraintCount).toBe(1)
+            expect(revertedGate.definition).not.toContain(RENEWAL_ABANDONED_EVENT)
+            expect(revertedGate.definition).not.toContain(
+              RENEWAL_AWAITING_MANUAL_RESOLUTION_EVENT
+            )
+          }
+        )
+
+        // Restored: the constraint admits both event types again.
+        const restoredGate = await logGate(probeWrapper)
+
+        expect(restoredGate.constraintCount).toBe(1)
+        expect(restoredGate.definition).toContain(RENEWAL_ABANDONED_EVENT)
+        expect(restoredGate.definition).toContain(
+          RENEWAL_AWAITING_MANUAL_RESOLUTION_EVENT
+        )
+        expect(await appliedMigrationNames(probeWrapper)).toEqual(
+          expectedMigrationNames()
+        )
+      })
+
       /**
        * Task 17's harness half: which of the two shapes the step's `retire` set
        * can arise from is reachable in a migrated database, and which only in a
@@ -1504,7 +1625,7 @@ medusaIntegrationTestRunner({
      * The two probes that migrate the renewal directory ALONE, which is the state
      * a FIRST INSTALL is in: the plugin's module migrators go in module order, so
      * `renewal` is migrated long before `subscription` creates its table (renewal
-     * is the 7th of the 9 directories in `MIGRATION_PATHS`, subscription the 9th,
+     * is the 7th of the 10 directories in `MIGRATION_PATHS`, subscription the 9th,
      * and the app bootstrap's own migration log puts `MODULE: renewal` before
      * `MODULE: subscription` exactly that way round). `Migration20260924120000`'s
      * normalization SQL then joins `subscription` only if `to_regclass` says the
@@ -1644,7 +1765,7 @@ medusaIntegrationTestRunner({
             // shared probe's rejection: measured with the guard replaced by a
             // literal that is always non-null, the stack below is this case's own
             // `withSoloProbe` -> `migrateProbe`, and it is the reason these two
-            // probes sit in their own describe rather than in the nine-directory one
+            // probes sit in their own describe rather than in the ten-directory one
             // above.
             expect(await liveScheduled(solo.wrapper, "sub_solo")).toEqual(["cyc_solo_b"])
           }

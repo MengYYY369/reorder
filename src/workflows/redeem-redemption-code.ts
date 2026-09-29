@@ -15,6 +15,8 @@ import {
   type RedeemExtendStepOutput,
   type RedemptionResolution,
 } from "./steps/redeem-redemption-code"
+import { recordTrialClaimStep } from "./steps/record-trial-claim"
+import { TrialClaimSource } from "../modules/trial-claim/types"
 import type { CustomerRefusal } from "./utils/store-step-failure"
 import { ActivityLogEventType, ActivityLogActorType } from "../modules/activity-log/types"
 import { normalizeActivityLogEvent } from "../modules/activity-log/utils/normalize-log-event"
@@ -28,6 +30,7 @@ type RedeemOutput = RedeemCreateStepOutput & {
 }
 
 const RESOLVE_CODE_STEP = resolveRedemptionCodeStep.__step__
+const RECORD_TRIAL_CLAIM_STEP = recordTrialClaimStep.__step__
 
 /**
  * The refusals this workflow authors for the caller, and the only ones a
@@ -104,12 +107,28 @@ export const REDEEM_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
   {
     step: RESOLVE_CODE_STEP,
     type: MedusaError.Types.INVALID_DATA,
+    copy:
+      /^Redemption code \S+ grants a trial that requires a payment method, which redemption codes cannot collect$/,
+  },
+  {
+    step: RESOLVE_CODE_STEP,
+    type: MedusaError.Types.INVALID_DATA,
     copy: /^Multiple matching subscriptions found; pass subscription_id to disambiguate$/,
   },
   {
     step: RESOLVE_CODE_STEP,
     type: MedusaError.Types.INVALID_DATA,
     copy: /^Redemption requires an active subscription of variant \S+, but none was found$/,
+  },
+  {
+    // The trial-claim ledger's unique index refused a concurrent second trial
+    // of the same product (plan Task 20): `TrialClaimModuleService.record`
+    // rethrows the DAL's 23505 mapping as this fixed-text refusal. It is a
+    // customer-appropriate answer to a race between two trial doors, not an
+    // infrastructure fault, so it belongs in this list.
+    step: RECORD_TRIAL_CLAIM_STEP,
+    type: MedusaError.Types.INVALID_DATA,
+    copy: /^Trial has already been claimed for customer \S+ and product \S+$/,
   },
 ]
 
@@ -157,6 +176,25 @@ export const redeemRedemptionCodeWorkflow = createWorkflow(
         customer_id: input.customer_id,
         product_id: resolution.grant.product_id,
         variant_id: resolution.grant.variant_id,
+      })
+
+      // The ledger write for the redemption door (plan Task 20). The step
+      // itself is a no-op unless the created subscription is a trial, so
+      // free-cycle grants never record a claim.
+      const trialClaimInput = transform(
+        { resolution, created, input },
+        ({ resolution, created, input }) => ({
+          customer_id: input.customer_id,
+          product_id: resolution.grant.product_id,
+          variant_id: resolution.grant.variant_id,
+          source: TrialClaimSource.REDEMPTION,
+          subscription_id: created.subscription_id,
+          trial_ends_at: created.trial_ends_at,
+          is_trial: created.is_trial,
+        })
+      )
+      recordTrialClaimStep(trialClaimInput).config({
+        name: "record-redemption-trial-claim",
       })
 
       const ensureInput = transform({ created }, ({ created }) => ({

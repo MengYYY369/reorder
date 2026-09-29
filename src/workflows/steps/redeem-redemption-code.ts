@@ -160,6 +160,25 @@ export const resolveRedemptionCodeStep = createStep(
         effectiveConfig?.rules?.trial_requires_payment_method ?? false,
     }
 
+    // `trial_requires_payment_method` is enforced here by REFUSING the
+    // redemption outright — decided once in plan Task 15 (2026-09-29), not
+    // left to the implementer: the redemption path is a door with no cart and
+    // no way to collect a payment method, so the only alternative was silently
+    // degrading a trial-enabled code to a non-trial grant, which would make the
+    // offer's rule a lie. The `days` guard keeps the refusal aligned with the
+    // trial the create branch would actually mint (`isTrial` below): without it
+    // a malformed offer row (trial enabled, no days) would refuse a grant that
+    // was never a trial. The `requires_payment_method` field stays because the
+    // claim endpoint (plan Task 21) adds a third enforcement point and would
+    // re-open a delete decision.
+    if (
+      trial.is_enabled &&
+      trial.days !== null &&
+      trial.requires_payment_method
+    ) {
+      throw redemptionErrors.trialRequiresPaymentMethod(code.code)
+    }
+
     const { data: customers } = await query.graph({
       entity: "customer",
       fields: ["id", "email", "first_name", "last_name"],

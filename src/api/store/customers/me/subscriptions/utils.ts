@@ -7,6 +7,11 @@ import { ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/util
 import { CancellationCaseStatus } from "../../../../../modules/cancellation/types"
 import { DunningCaseStatus } from "../../../../../modules/dunning/types"
 import { resolveProductSubscriptionConfig } from "../../../../../modules/plan-offer/utils/effective-config"
+import type { PlanOfferRules } from "../../../../../modules/plan-offer/types"
+import { TRIAL_CLAIM_MODULE } from "../../../../../modules/trial-claim"
+import TrialClaimModuleService, {
+  TrialClaimIneligibleError,
+} from "../../../../../modules/trial-claim/service"
 import {
   SubscriptionFrequencyInterval,
   SubscriptionStatus,
@@ -18,6 +23,7 @@ import {
   resolveCustomerPaymentMethod,
 } from "../../../../../modules/subscription/utils/payment-methods"
 import { serializeStoreSubscriptionListItem } from "../../../../../modules/subscription/utils/store-list-serialization"
+import { isPaypalVaultBindingSupported } from "../../../../../workflows/utils/paypal-vault-binding"
 
 const ACTIVE_CANCELLATION_STATUSES = [
   CancellationCaseStatus.REQUESTED,
@@ -282,7 +288,7 @@ function mapPaymentRecovery(
   }
 }
 
-async function getActiveCancellationCase(
+export async function getActiveCancellationCase(
   query: any,
   subscriptionId: string
 ) {
@@ -710,6 +716,10 @@ export async function getStoreProductSubscriptionOfferResponse(
     variant_id: variantId,
   })
 
+  const trialVerdict = config.rules
+    ? await resolveTrialEligibility(req, config)
+    : null
+
   return {
     subscription_offer: {
       is_subscription_available: config.is_enabled,
@@ -749,9 +759,75 @@ export async function getStoreProductSubscriptionOfferResponse(
             days: config.rules.trial_days ?? null,
             requires_payment_method:
               config.rules.trial_requires_payment_method ?? false,
+            bonus_days: config.rules.trial_bonus_days ?? null,
+            eligible: trialVerdict?.eligible ?? false,
+            reason: trialVerdict?.reason ?? null,
+            binding: {
+              // The vault rail is the only binding mechanism (Q11) — the
+              // provider rail is a different product reached through the
+              // storefront's native path, not through the claim endpoint.
+              method: "vault" as const,
+              // True when the installed medusa-paypal provider ships the
+              // vault approval capability (Phase 14, Task 22; a hardcoded
+              // false until the provider half landed). A provider that
+              // predates the capability answers false, so the storefront
+              // hides the bound button — and the bind endpoint refuses with
+              // a clear error all the same.
+              supported: isPaypalVaultBindingSupported(req.scope),
+            },
           }
         : null,
     },
+  }
+}
+
+/**
+ * Per-customer trial eligibility for the offer DTO: `false` hides the trial
+ * button, and the ordinary subscribe button sits beside it either way. An
+ * anonymous request cannot hold a claim or a subscription — but it also
+ * cannot claim (the endpoint requires a customer), so it is answered
+ * `authentication_required` rather than over-promising.
+ */
+async function resolveTrialEligibility(
+  req: MedusaRequest<unknown, { variant_id?: string } | undefined>,
+  config: {
+    is_enabled: boolean
+    rules: PlanOfferRules | null
+  }
+): Promise<{ eligible: boolean; reason: string | null }> {
+  if (
+    !config.is_enabled ||
+    !config.rules?.trial_enabled ||
+    config.rules.trial_days === null
+  ) {
+    return { eligible: false, reason: "trial_not_offered" }
+  }
+
+  const customerId = (
+    req as { auth_context?: { actor_id?: string } }
+  ).auth_context?.actor_id
+
+  if (!customerId) {
+    return { eligible: false, reason: "authentication_required" }
+  }
+
+  const trialClaimModule = req.scope.resolve<TrialClaimModuleService>(
+    TRIAL_CLAIM_MODULE
+  )
+
+  try {
+    await trialClaimModule.assertEligible(customerId, req.params.id, req.scope)
+
+    return { eligible: true, reason: null }
+  } catch (error) {
+    if (error instanceof TrialClaimIneligibleError) {
+      return { eligible: false, reason: "already_claimed_or_subscribed" }
+    }
+
+    // An unreadable eligibility state must not break the whole offer read:
+    // the claim endpoint re-checks authoritatively, so the safe answer here
+    // is the conservative one.
+    return { eligible: false, reason: "eligibility_unavailable" }
   }
 }
 

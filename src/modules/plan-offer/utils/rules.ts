@@ -26,7 +26,28 @@ export function resolvePlanOfferRules(
     max_stacking_cycles: normalizeMaxStackingCycles(
       rules?.max_stacking_cycles
     ),
+    trial_bonus_days: normalizeTrialBonusDays(rules?.trial_bonus_days),
   }
+}
+
+/**
+ * `null`/`0` disables the bind-and-extend button; a set value must be a
+ * positive integer of whole days (the same unit `trial_days` uses).
+ */
+export function normalizeTrialBonusDays(
+  value: number | null | undefined
+): number | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (!Number.isInteger(value) || value <= 0) {
+    throw planOfferErrors.invalidData(
+      "'rules.trial_bonus_days' must be a positive integer or null"
+    )
+  }
+
+  return value
 }
 
 export function normalizeRowStackingPolicy(
