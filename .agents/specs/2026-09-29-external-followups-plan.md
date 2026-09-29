@@ -1,45 +1,64 @@
 # External Follow-ups — Vault Binding, Host Storefront, PayPal Gates, and Release
 
-> **Status (2026-09-29).** The reorder-side hardening plan
+> **Status (2026-09-29, revised after twin-subagent review + release execution).**
+> The reorder-side hardening plan
 > (`.agents/specs/2026-09-28-billing-engine-hardening-plan.md`, Tasks 1–25) is
-> implemented, gate-green, and committed. Everything *this* document lists
-> cannot be done from `D:\Projects\reorder`: it lives in
-> `D:\Projects\medusa-paypal`, in `D:\Projects\medusa-saas` (edit-forbidden
-> here), in the owner's PayPal account, or in a production deployment that
-> requires its own authorization.
+> implemented, gate-green, and committed. **Workstream D executed the same
+> day:** the owner authorized the release, reorder shipped as **1.7.0**
+> (commit `8778416`, tag `v1.7.0`, published to GitHub Packages), the host
+> bumped to `^1.7.0` with a regenerated `pnpm-lock.yaml` (commit `ca959e7`),
+> and backend image `medusa-saas-backend:0.4.35` was built per
+> `medusa-saas/docs/deploy.md` §1 (Method A) and deployed per §2 — see
+> Workstream D for the record. What remains lives in `D:\Projects\medusa-paypal`
+> (Workstream A), in `D:\Projects\medusa-saas` (Workstream B, owner's repo),
+> in the owner's PayPal account (Workstream C), or in post-deploy observation.
 
-**Deadline that orders the work.** The earliest production renewal cycle is
+**Deadline that ordered the work.** The earliest production renewal cycle is
 **2026-10-18 08:28:48 UTC** and the scheduler runs every five minutes. The
-money-safety core (hardening Tasks 1–12) must be deployed before it. The trial
-chain (Tasks 20–25) may slip further.
+money-safety core (hardening Tasks 1–12) went live on 2026-09-29 — three weeks
+ahead of the deadline. The trial chain (Tasks 20–25) shipped in the same
+release: 25 tasks share one linear commit history, so a partial release was
+never possible.
 
-**Nothing in this document writes to production.** Production access is
-read-only (`ssh ubuntu@170.106.132.210`, then
-`sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store`), and
-deployment is a separate authorization, as with the money-basis switch.
+**Production access stays read-only from here** (`ssh
+ubuntu@170.106.132.210`, then
+`sudo -n docker exec medusa-prod-db-1 psql -U medusa -d medusa_store`).
+Deployment writes only through the documented runbook with the owner's
+authorization, as with the money-basis switch — granted and used on
+2026-09-29 for Workstream D.
 
 ## The four workstreams
 
 | # | Workstream | Lives in | Depends on |
 |---|------------|----------|------------|
-| A | PayPal plugin: the vault-binding capability (P1 → P2 → P5) | `D:\Projects\medusa-paypal` (0.6.1 → 0.7.0) | nothing |
-| B | Host storefront and host config: trial CTA, vaulted-rail cancel button, event whitelist, dependency bumps | `D:\Projects\medusa-saas` | A for the bound path; D for the endpoints |
+| A | PayPal plugin: the vault-binding capability (P1 → P2 → P5) | `D:\Projects\medusa-paypal` (0.7.1 → **0.8.0**) | nothing |
+| B | Host storefront and host config: trial CTA, vaulted-rail cancel button, event whitelist, dependency bumps | `D:\Projects\medusa-saas` | B4a done (with D); B's bound half needs A + C |
 | C | PayPal LIVE account gates (pre-launch checklist) | owner's PayPal account | production access (owner) |
-| D | Production release of the reorder plugin | deploy pipeline + prod | its own authorization |
+| D | Production release of the reorder plugin | deploy pipeline + prod | **done 2026-09-29** |
 
-Dependency shape, in one paragraph: **D** is deadline-bound and independent of
-A/B/C — the money-safety core needs none of them. **A** is independent and can
-start immediately. **B**'s card-free half needs D live; B's bound half needs A
-published and C passed. **C** gates only the bound (bind-a-card) path; a
-card-free trial makes no PayPal calls and is unaffected by the account gates.
+Dependency shape, in one paragraph: **D** was deadline-bound and needed only
+its own authorization plus the host dependency bump (B4a) — the reorder plugin
+reaches production solely inside the host backend image, so publishing the
+package and bumping `medusa-saas` precede every deploy. That ordering was
+followed on 2026-09-29 (publish → host bump `ca959e7` → image `0.4.35`). **A**
+is independent and can start immediately. **B**'s card-free half works against
+the live 1.7.0; B's bound half needs A published and C passed. **C** gates only
+the bound (bind-a-card) path; a card-free trial makes no PayPal calls and is
+unaffected by the account gates.
 
 ---
 
 ## Workstream A — medusa-paypal: the vault-binding capability
 
-**Repo:** `D:\Projects\medusa-paypal` (0.6.1 → **0.7.0**).
+**Repo:** `D:\Projects\medusa-paypal` (0.7.1 → **0.8.0**). The 0.7.x line was
+taken on 2026-09-29 by another workstream — 0.7.0 shipped the admin
+configuration page (`paypal_settings` / `paypal_settings_audit` tables +
+migration, `GET /store/paypal/config`, hot reload) and 0.7.1 the host i18n +
+audit-log sub-page; both tags exist and the host already runs `^0.7.1`. The
+vault-binding release is therefore the **next minor: 0.8.0**.
 **Plan:** `.agents/specs/2026-09-28-paypal-vault-binding-plan.md` (committed in
-the reorder repo; copy it into `medusa-paypal` when work starts). The plan's
+the reorder repo; copy it into `medusa-paypal` when work starts, and update its
+line 5 — it still says "currently 0.6.1"). The plan's
 own Execution Handoff recommends subagent-driven execution; the sandbox
 verification (its Task P4) **already passed on 2026-09-28**, so the sequence is
 P1 → P2 → P5, with P4 reduced to a re-run.
@@ -57,13 +76,22 @@ is needed when it lands — the probe flips on its own.
       Two sandbox facts are settled and must not be re-litigated: `returnUrl`
       and `cancelUrl` are required and are parameters (never hard-coded), and
       after approval the setup token reads back **`VAULTED`**, not `APPROVED` —
-      treat `APPROVED` / `VAULTED` / `TOKENIZED` as exchangeable.
+      treat `APPROVED` / `VAULTED` / `TOKENIZED` as exchangeable. The pinned
+      `@paypal/paypal-server-sdk@1.0.0` exposes all three
+      (`vaultController.d.ts`), so this is glue, not SDK work.
 - [ ] **A2 — Task P2: `startVaultApproval` / `completeVaultApproval` on the
       module service**, with the client built through
-      `findPaypalProviderDeclaration(paymentModule)` — **not** the module's own
-      client, which has empty credentials in the production host (the host
-      registers the plugin as a bare string, so module options never arrive;
-      this is uncertainty U5 and it only appears in production). Export
+      `findPaypalProviderDeclaration(paymentModule)` (already present at
+      `src/api/lib/paypal.ts:37`). **Re-derive the credential premise against
+      0.7.x before implementing.** The original U5 argument — the host
+      registers the plugin as a bare string in
+      `apps/backend/medusa-config.ts`, so module options never arrive and the
+      module's own client has empty credentials in production — predates
+      0.7.0, which introduced a DB settings resolver described as "the only
+      configuration source" with client hot-rebuild on change. Whether the
+      module's own client is now credentialed in production must be verified
+      first; `findPaypalProviderDeclaration` remains the correct fallback
+      route either way. Export
       `PAYPAL_VAULT_BINDING_CAPABILITY` from the package root as documentation;
       the duck-type is the mechanism. `store_in_vault: ON_SUCCESS` stays
       exactly as it is.
@@ -73,7 +101,7 @@ is needed when it lands — the probe flips on its own.
       payment session dispatching `authorizePayment` / `capturePayment`). If
       it disagrees with the client-level result, the disagreement is the
       finding.
-- [ ] **A4 — Task P5: release 0.7.0** — version, CHANGELOG (naming the two
+- [ ] **A4 — Task P5: release 0.8.0** — version, CHANGELOG (naming the two
       methods and that `ON_SUCCESS` is unchanged), README (method signatures,
       the duck-type idiom, and the pre-launch account-gate checklist from
       Workstream C). Gates: `npm run build` and `npm test`.
@@ -88,9 +116,9 @@ trial-length channel and there must not be one.
 
 ## Workstream B — medusa-saas: host storefront and host config
 
-**Repo:** `D:\Projects\medusa-saas` — **edit-forbidden for this repository's
-tooling** (the owner's uncommitted work lives there). Someone authorized in
-that repo must schedule these.
+**Repo:** `D:\Projects\medusa-saas` — the owner's repo. The dependency bump
+the release needed (B4a) was authorized and made there on 2026-09-29; the
+storefront work below is still the owner's to schedule.
 **Contract documentation:** `docs/api/store-customer-self-service-tutorial.md`
 in the reorder repo — section 3 covers `POST .../cancellation/finalize` and the
 whole "Trials: claiming and binding" contract, including every refusal text and
@@ -119,17 +147,27 @@ eligibility reason.
       an option the customer may engage with, not a gate they must pass.
 - [ ] **B3 — extend the host's event whitelist.** The host's
       `saas_bridge.subscriptions` list in
-      `apps/backend/medusa-config.ts` must gain
+      `apps/backend/medusa-config.ts` (currently 10 members) must gain
       `renewal.abandoned`, `renewal.awaiting_manual_resolution`,
       `renewal.upcoming`, `subscription.trial_ending` — otherwise the host
-      never receives the new events. The two `renewal.failed`-class emails
-      (`saas-email-renewal-failed`, `saas-email-expired`) have subscribers in
-      the host that have never fired; after D they can. Whether the host adds
+      never receives the new events. The two dead customer-email subscribers
+      exist in the host — `saas-email-renewal-failed` listens on
+      `renewal.failed` and `saas-email-expired` on `subscription.expired` —
+      and neither has ever fired; after D they can. Whether the host adds
       email subscribers for `renewal.upcoming` / `subscription.trial_ending`
-      (the reminder emails) is a host product decision, not a plugin gap.
-- [ ] **B4 — dependency bumps.** Bump the reorder plugin to the release from D
-      and `@mengyyy369/medusa-paypal` to 0.7.0 once A4 publishes. Both are
-      pinned in the host's backend `package.json`.
+      (the reminder emails) is a host product decision, not a plugin gap —
+      and the host also owes a disposition decision for the two operational
+      events (see owner decision 5).
+- [x] **B4a — the reorder dependency bump (done 2026-09-29, with D).** The
+      host installs `@mengyyy369/reorder` from GitHub Packages, so publishing
+      1.7.0 alone changes nothing until the host declares it:
+      `apps/backend/package.json` now says `^1.7.0` and `pnpm-lock.yaml` pins
+      1.7.0 (commit `ca959e7`). This bump is a **prerequisite of every
+      backend image build**, not a follow-up.
+- [ ] **B4b — the medusa-paypal dependency bump.** Bump
+      `@mengyyy369/medusa-paypal` to 0.8.0 once A4 publishes and the vault
+      path is wanted live. The current declaration is `^0.7.1`, and a 0.x
+      caret does not accept 0.8.0, so this bump is mandatory, not cosmetic.
 - [ ] **Note, not a task — RDA (uncertainty U3) stays open.** The host
       storefront passes no explicit risk data on any PayPal flow today (read
       2026-09-28). If PayPal turns out to enforce RDA on vault-without-purchase
@@ -166,48 +204,71 @@ no production test access. They gate the **bound** path only.
 
 ## Workstream D — production release of the reorder plugin
 
-Separate authorization, as with the money-basis switch. Deadline:
-**2026-10-18 08:28:48 UTC**.
+**Executed 2026-09-29**, three weeks before the deadline, following
+`medusa-saas/docs/deploy.md` (§1 Method A build, §2 server upgrade). Record:
 
-- [ ] **D1 — authorize and schedule the release**, and pick the version. This
-      is a minor bump (new endpoints, new event types): update `package.json`
-      and `CHANGELOG.md`. The release carries the already-deployed i18n pin
-      (`medusa-saas-backend:0.4.26`) forward.
-- [ ] **D2 — build and deploy the backend image.** The money-safety core is
-      hardening Tasks 1–12; Tasks 13–19 (reconciliation, reminders, docs, CI)
-      may follow in the same release or the next one.
+- [x] **D1 — authorize, version, and release.** Owner authorization given
+      2026-09-29. Minor bump to **1.7.0**; CHANGELOG written from the
+      v1.6.1..HEAD history; commit `8778416` `chore(release): v1.7.0`, tag
+      `v1.7.0` pushed, and the package **published to GitHub Packages** with
+      tag `latest`. The release carries all 25 hardening tasks — the 25 tasks
+      are one linear commit history on `main`, so nothing could be split into
+      a "next release" (an earlier draft of this plan claimed Tasks 13–19
+      could follow separately; that was wrong on the numbering —
+      reconciliation is Tasks 8–9 — and impossible on the history).
+- [x] **D2 — host bump, image build, deploy.** Host bumped to `^1.7.0` with a
+      regenerated `pnpm-lock.yaml` (commit `ca959e7`, pushed), then image
+      `medusa-saas-backend:0.4.35` built locally with the `.npmrc` build
+      secret (never copied anywhere), shipped by `docker save | gzip` + scp to
+      `~/medusa-saas/`, loaded on the server, and switched in compose after a
+      `compose.yaml.bak-0.4.34` backup. **Five reorder migrations** apply on
+      upgrade via `docker compose run --rm store npx medusa db:migrate`
+      (the runbook's `backend` service name is stale; the service is `store`):
+      `renewal` cycle states + failure bookkeeping (20260928120000),
+      `settings` two columns (20260928120001), two `activity-log` CHECK
+      drop/re-add migrations (20260929120000/130000), and the new
+      `trial-claim` module table (20260929140000).
 - [ ] **D3 — post-deploy verification (read-only).**
-      - The two dead emails actually send: confirm from observation that the
-        host's `saas-email-renewal-failed` and `saas-email-expired` subscribers
-        fire. Do **not** edit `medusa-saas`; report missing configuration as a
-        finding instead.
+      - The two dead emails actually send: `saas-email-renewal-failed`
+        (on `renewal.failed`) and `saas-email-expired` (on
+        `subscription.expired`). **Observation protocol:** production failure
+        injection is off-limits, so this verifies on the first real
+        occurrence — a standing observation item, not a same-day gate. Report
+        missing host configuration as a finding; do not edit `medusa-saas`
+        from here.
       - A failed renewal stops retrying after `renewal_max_attempts` instead
         of every five minutes forever.
       - A structurally failed period parks in `abandoned` /
-        `awaiting_manual_resolution` and the corresponding events appear on the
-        bus (requires B3's whitelist change to be observed host-side).
+        `awaiting_manual_resolution` and the corresponding events appear on
+        the bus (requires B3's whitelist change to be observed host-side).
       - `POST /admin/renewals/:id/resolve-stuck` responds and settles a parked
         cycle.
       - The reminder job emits `renewal.upcoming` / `subscription.trial_ending`
         `renewal_reminder_lead_days` before a due date.
-- [ ] **D4 — standing constraints.** Production DB access is read-only via the
-      ssh + psql command above; never start the app against the restored
-      production copy (restored payment references plus live provider
-      credentials can charge real money); never print credential values.
+      - Schema spot-checks after migrate: `trial_claim` table exists with its
+        unique index; `renewal_cycle` accepts the two new states;
+        `subscription_settings` has the two new columns.
+- [x] **D4 — standing constraints (in force throughout).** Production DB
+      access is read-only via the ssh + psql command above; never start the
+      app against the restored production copy (restored payment references
+      plus live provider credentials can charge real money); never print
+      credential values.
 
 ---
 
 ## Sequencing
 
-1. **D** — deploy the money-safety core before 2026-10-18 08:28 UTC (own
-   authorization). Independent of everything else.
+1. ~~**D**~~ — **done 2026-09-29**: 1.7.0 published, host bumped, image
+   `0.4.35` deployed. The money-safety core is live 20 days before the
+   2026-10-18 deadline; D3's observation items continue.
 2. **A** — medusa-paypal P1 → P2 → P5 (can start immediately, in parallel).
+   Re-derive the A2 credential premise against 0.7.x first.
 3. **C** — the owner checks the LIVE gates (any time before enabling the bound
    path).
 4. **B1/B2/B3** — storefront trial CTA, vaulted-rail cancel button, event
-   whitelist. The card-free trial works as soon as D is live; the bound half
-   additionally needs A published and C passed.
-5. **B4** — dependency bumps after A4 and D.
+   whitelist. The card-free trial works against the live 1.7.0 as soon as B1
+   ships; the bound half additionally needs A published and C passed.
+5. **B4b** — the medusa-paypal bump after A4 (B4a already done).
 
 ## End-to-end acceptance — the trial feature is done when
 
@@ -226,15 +287,18 @@ Separate authorization, as with the money-basis switch. Deadline:
 
 ## Owner decisions outstanding
 
-1. Authorization and date for the reorder release (before 2026-10-18 08:28
-   UTC).
-2. Authorization to publish `@mengyyy369/medusa-paypal` 0.7.0 to GitHub
-   Packages.
-3. The LIVE PayPal account-gate check (Workstream C).
-4. Whether to run the optional Medusa-hosted charge test in
-   `D:\Projects\medusa-e2e`.
-5. Whether the host sends emails for `renewal.upcoming` /
+1. Authorization to publish `@mengyyy369/medusa-paypal` **0.8.0** to GitHub
+   Packages (A4).
+2. The LIVE PayPal account-gate check (Workstream C).
+3. Whether to run the optional Medusa-hosted charge test in
+   `D:\Projects\medusa-e2e` (A3).
+4. Whether the host sends emails for `renewal.upcoming` /
    `subscription.trial_ending` (host product decision).
+5. What the host does **to the customer's SaaS entitlement** when it receives
+   `renewal.abandoned` / `renewal.awaiting_manual_resolution` — keep access,
+   suspend, or notify-and-wait. These two events exist precisely so the host
+   can decide; until it does, a parked cycle neither charges nor cancels
+   anything (that is the plugin's never-cancel rule, R3).
 
 ## Closed — do not reopen
 
@@ -247,6 +311,10 @@ Separate authorization, as with the money-basis switch. Deadline:
 - **`store_in_vault: ON_SUCCESS`** stays as it is; the setup-token flow is a
   second, independent way to obtain a vault id.
 - **The money-basis switch** is done and recorded in the release docs.
+- **Public Mintlify docs sync and the `sync-docs` skill**: removed 2026-09-29
+  at owner decision — the sync-after-push rule was upstream template
+  machinery, not this project's workflow. The `.agents/skills/sync-docs/`
+  directory, its `AGENTS.md` bullet, and the `lessons.md` rule are gone.
 - **Repo-internal leftover, not part of this plan:**
   `src/modules/settings/migrations/.snapshot-medusa-settings.json` is a stale
   pre-rename duplicate (the live snapshot is
