@@ -48,6 +48,23 @@ export async function emitSubscriptionBusEvent(
   }
 }
 
+/**
+ * Persist-then-emit variant for callers that run inside a step or job body
+ * instead of through `createSubscriptionLogEventStep` itself. The bus emission
+ * happens only when the persist actually created the record, so a replay that
+ * dedupes cannot double-emit one occurrence.
+ */
+export async function persistAndEmitSubscriptionLogEvent(
+  container: { resolve<T>(key: string): T },
+  logEvent: NormalizedActivityLogEvent
+): Promise<void> {
+  const result = await persistSubscriptionLogEvent(container, logEvent)
+
+  if (result.action === "created") {
+    await emitSubscriptionBusEvent(container, logEvent)
+  }
+}
+
 export type CreateSubscriptionLogEventStepInput = {
   log_event: NormalizedActivityLogEvent
 }

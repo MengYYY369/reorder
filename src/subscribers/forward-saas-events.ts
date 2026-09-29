@@ -11,7 +11,7 @@ import { forwardEvent } from "../modules/saas-bridge/forward"
 
 /**
  * Forwards whitelisted lifecycle events into the medusa-webhooks fan-out.
- * Registered statically on all ten lifecycle events; the runtime
+ * Registered statically on all fourteen lifecycle events; the runtime
  * `subscriptions` whitelist (from the saas_bridge option) decides what is
  * actually forwarded — with saas_bridge unconfigured, nothing is.
  *
@@ -53,5 +53,9 @@ export const config: SubscriberConfig = {
     "subscription.plan_change_scheduled",
     "renewal.succeeded",
     "renewal.failed",
+    "renewal.abandoned",
+    "renewal.awaiting_manual_resolution",
+    "renewal.upcoming",
+    "subscription.trial_ending",
   ],
 }
