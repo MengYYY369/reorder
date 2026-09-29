@@ -15,6 +15,12 @@ import {
 import { RENEWAL_MODULE } from "../../src/modules/renewal"
 import type RenewalModuleService from "../../src/modules/renewal/service"
 import { RenewalCycleStatus } from "../../src/modules/renewal/types"
+import { ACTIVITY_LOG_MODULE } from "../../src/modules/activity-log"
+import type ActivityLogModuleService from "../../src/modules/activity-log/service"
+import {
+  ActivityLogActorType,
+  ActivityLogEventType,
+} from "../../src/modules/activity-log/types"
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
 import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
@@ -23,6 +29,13 @@ import { markDunningUnrecoveredWorkflow } from "../../src/workflows/mark-dunning
 import { runDunningRetryWorkflow } from "../../src/workflows/run-dunning-retry"
 import { startDunningWorkflow } from "../../src/workflows/start-dunning"
 import { updateDunningRetryScheduleWorkflow } from "../../src/workflows/update-dunning-retry-schedule"
+import processDunningRetriesJob from "../../src/jobs/process-dunning-retries"
+import { listDueDunningCasesForProcessing } from "../../src/modules/dunning/utils/scheduler-query"
+// Namespace imports so the no-cancellation assertions below can spy on the
+// plugin's cancellation workflow exports: if the dunning exhaustion path ever
+// grows a cancellation side effect, these spies fail the suite.
+import * as cancelSubscriptionModule from "../../src/workflows/cancel-subscription"
+import * as finalizeCancellationModule from "../../src/workflows/finalize-cancellation"
 import {
   createDunningAttemptSeed,
   createDunningCaseSeed,
@@ -269,7 +282,7 @@ medusaIntegrationTestRunner({
 
           return originalGraph(input)
         })
-        jest
+        const authorizeSpy = jest
           .spyOn(paymentModule, "authorizePaymentSession")
           .mockResolvedValue({ id: "pay_1", amount: 1.29 } as any)
         jest
@@ -312,7 +325,277 @@ medusaIntegrationTestRunner({
           payment_reference: "pay_1",
         })
         expect(updatedSubscription.status).toEqual(SubscriptionStatus.ACTIVE)
-        expect(updatedCycle.status).toEqual(RenewalCycleStatus.FAILED)
+
+        // Recovery settles the period: the cycle is finalized through the
+        // shared period-finalization step with the order that was actually
+        // paid, and the period is charged exactly once — one authorization
+        // against one payment collection on the case's own renewal order.
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+        expect(updatedCycle.generated_order_id).toEqual("ord_dun_success")
+        expect(updatedCycle.processed_at).toBeTruthy()
+        expect(authorizeSpy).toHaveBeenCalledTimes(1)
+
+        const { data: links } = (await query.graph({
+          entity: "order_payment_collection",
+          fields: ["payment_collection_id"],
+          filters: { order_id: "ord_dun_success" },
+        })) as { data: Array<{ payment_collection_id: string }> }
+        expect(links).toHaveLength(1)
+      })
+
+      it("closes a retry against an already-succeeded cycle as recovered without charging", async () => {
+        // The R2 crash window: recovery finalizes the period before it closes
+        // the case, so a crash in between leaves a `succeeded` cycle behind an
+        // open case. The retry must close the case without a second charge.
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-009",
+          status: SubscriptionStatus.PAST_DUE,
+        })
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SUCCEEDED,
+          scheduled_for: new Date("2026-03-16T10:00:00.000Z"),
+          generated_order_id: "ord_dun_settled",
+        })
+        const dunningCase = await createDunningCaseSeed(container, {
+          subscription_id: subscription.id,
+          renewal_cycle_id: cycle.id,
+          renewal_order_id: "ord_dun_settled",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 1,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+        })
+
+        const authorizeSpy = jest.spyOn(paymentModule, "authorizePaymentSession")
+
+        const { result } = await runDunningRetryWorkflow(container).run({
+          input: {
+            dunning_case_id: dunningCase.id,
+            now: "2026-03-30T10:00:00.000Z",
+          },
+        })
+
+        const updatedCase = await dunningModule.retrieveDunningCase(dunningCase.id)
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        const attempts = await dunningModule.listDunningAttempts({
+          dunning_case_id: dunningCase.id,
+        } as any)
+
+        expect(result.outcome).toEqual("recovered")
+        expect(updatedCase).toMatchObject({
+          status: DunningCaseStatus.RECOVERED,
+          recovery_reason: "cycle_already_succeeded",
+        })
+        expect(updatedCase.closed_at).toBeTruthy()
+        expect(updatedCase.recovered_at).toBeTruthy()
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+        // Nothing ran: no attempt row and no charge for the settled period.
+        expect(attempts).toHaveLength(0)
+        expect(authorizeSpy).not.toHaveBeenCalled()
+      })
+
+      it("closes a retry against an abandoned cycle as unrecovered without charging", async () => {
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-010",
+          status: SubscriptionStatus.PAST_DUE,
+        })
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.ABANDONED,
+          scheduled_for: new Date("2026-03-16T10:00:00.000Z"),
+          generated_order_id: "ord_dun_abandoned",
+        })
+        const dunningCase = await createDunningCaseSeed(container, {
+          subscription_id: subscription.id,
+          renewal_cycle_id: cycle.id,
+          renewal_order_id: "ord_dun_abandoned",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 1,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+        })
+
+        const authorizeSpy = jest.spyOn(paymentModule, "authorizePaymentSession")
+
+        const { result } = await runDunningRetryWorkflow(container).run({
+          input: {
+            dunning_case_id: dunningCase.id,
+            now: "2026-03-30T10:00:00.000Z",
+          },
+        })
+
+        const updatedCase = await dunningModule.retrieveDunningCase(dunningCase.id)
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        const updatedSubscription = await subscriptionModule.retrieveSubscription(
+          subscription.id
+        )
+        const attempts = await dunningModule.listDunningAttempts({
+          dunning_case_id: dunningCase.id,
+        } as any)
+
+        expect(result.outcome).toEqual("unrecovered")
+        expect(updatedCase).toMatchObject({
+          status: DunningCaseStatus.UNRECOVERED,
+          recovery_reason: "cycle_abandoned",
+        })
+        expect(updatedCase.closed_at).toBeTruthy()
+        expect(updatedCase.recovered_at).toBeFalsy()
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.ABANDONED)
+        // The period was written off: no charge, and the subscription is left
+        // past_due for the host to decide about.
+        expect(attempts).toHaveLength(0)
+        expect(authorizeSpy).not.toHaveBeenCalled()
+        expect(updatedSubscription.status).toEqual(SubscriptionStatus.PAST_DUE)
+      })
+
+      it("finalizes a recovered period with the same core semantics as the automatic success path", async () => {
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const activityLogModule = container.resolve<ActivityLogModuleService>(
+          ACTIVITY_LOG_MODULE
+        )
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+        const query = container.resolve<any>(ContainerRegistrationKeys.QUERY)
+        const originalGraph = query.graph.bind(query)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-PARITY",
+          status: SubscriptionStatus.PAST_DUE,
+        })
+        // The period's anchor sits in the past — parity with the automatic
+        // path means the cadence advances from `scheduled_for` (R6), not from
+        // the recovery time.
+        const scheduledFor = new Date("2026-03-16T10:00:00.000Z")
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.FAILED,
+          scheduled_for: scheduledFor,
+          generated_order_id: "ord_dun_parity",
+          last_error: "card declined",
+        })
+        await renewalModule.updateRenewalCycles({
+          id: cycle.id,
+          structural_attempt_count: 2,
+          last_failure_kind: "order_creation_failed",
+        })
+        const dunningCase = await createDunningCaseSeed(container, {
+          subscription_id: subscription.id,
+          renewal_cycle_id: cycle.id,
+          renewal_order_id: "ord_dun_parity",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 1,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+        })
+
+        mockCreatePaymentSessionsRun.mockResolvedValue({
+          result: { id: "payses_parity", context: {}, status: "pending" },
+        })
+
+        jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
+          if (input.entity === "order") {
+            return {
+              data: [{ id: "ord_dun_parity", total: 129, currency_code: "usd" }],
+            }
+          }
+
+          return originalGraph(input)
+        })
+        jest
+          .spyOn(paymentModule, "authorizePaymentSession")
+          .mockResolvedValue({ id: "pay_parity", amount: 129 } as any)
+        jest
+          .spyOn(paymentModule, "capturePayment")
+          .mockResolvedValue({ id: "pay_parity" } as any)
+
+        await runDunningRetryWorkflow(container).run({
+          input: {
+            dunning_case_id: dunningCase.id,
+            now: "2026-03-30T10:00:00.000Z",
+          },
+        })
+
+        const updatedCase = await dunningModule.retrieveDunningCase(dunningCase.id)
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        const updatedSubscription = await subscriptionModule.retrieveSubscription(
+          subscription.id
+        )
+        const cycles = await renewalModule.listRenewalCycles({
+          subscription_id: subscription.id,
+        } as any)
+        const nextCycle = cycles.find((record) => record.id !== cycle.id)
+        const renewalSucceededLogs = await activityLogModule.listSubscriptionLogs({
+          subscription_id: subscription.id,
+          event_type: ActivityLogEventType.RENEWAL_SUCCEEDED,
+        } as any)
+
+        // The case still closes as recovered by the payment itself.
+        expect(updatedCase).toMatchObject({
+          status: DunningCaseStatus.RECOVERED,
+          recovery_reason: "payment_recovered",
+        })
+
+        // Core semantics shared with the automatic success path: the cycle
+        // settles with the order that paid it, the structural slate resets,
+        // the subscription reactivates on the cadence advanced from the
+        // period's own scheduled_for, the next cycle is ensured on that same
+        // anchor, and renewal.succeeded is persisted from the dunning rail.
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+        expect(updatedCycle.generated_order_id).toEqual("ord_dun_parity")
+        expect(updatedCycle.processed_at).toBeTruthy()
+        expect(updatedCycle.structural_attempt_count).toEqual(0)
+        expect(updatedSubscription.status).toEqual(SubscriptionStatus.ACTIVE)
+        expect(updatedSubscription.last_renewal_at).toBeTruthy()
+
+        const expectedNext = new Date(scheduledFor)
+        expectedNext.setUTCMonth(expectedNext.getUTCMonth() + 1)
+        expect(updatedSubscription.next_renewal_at!.toISOString()).toEqual(
+          expectedNext.toISOString()
+        )
+        expect(nextCycle).toBeDefined()
+        expect(nextCycle?.status).toEqual(RenewalCycleStatus.SCHEDULED)
+        expect(new Date(nextCycle!.scheduled_for).toISOString()).toEqual(
+          expectedNext.toISOString()
+        )
+
+        expect(renewalSucceededLogs).toHaveLength(1)
+        expect(renewalSucceededLogs[0]).toMatchObject({
+          event_type: ActivityLogEventType.RENEWAL_SUCCEEDED,
+          actor_type: ActivityLogActorType.SYSTEM,
+        })
+        expect(renewalSucceededLogs[0].metadata).toMatchObject({
+          source: "dunning",
+          trigger_type: "dunning_recovery",
+          order_id: "ord_dun_parity",
+        })
       })
 
       it("recovers a 0.01 epsilon-boundary retry reusing one payment collection", async () => {
@@ -510,10 +793,30 @@ medusaIntegrationTestRunner({
         const container = getContainer()
         const dunningModule =
           container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
         const paymentModule =
           container.resolve<IPaymentModuleService>(Modules.PAYMENT)
         const query = container.resolve<any>(ContainerRegistrationKeys.QUERY)
         const originalGraph = query.graph.bind(query)
+
+        // Decision R3: a background job must never cancel the customer
+        // relationship as a side effect of writing off a period. The spies on
+        // the plugin's cancellation workflows' run methods fail this suite if
+        // the exhaustion path ever grows that side effect. (The spies sit on
+        // the workflow function's own `run` property — the module namespace
+        // exports themselves are non-configurable under the ESM jest
+        // environment and cannot be spied directly.)
+        const cancelSubscriptionRunSpy = jest.spyOn(
+          cancelSubscriptionModule.cancelSubscriptionWorkflow,
+          "run"
+        )
+        const finalizeCancellationRunSpy = jest.spyOn(
+          finalizeCancellationModule.finalizeCancellationWorkflow,
+          "run"
+        )
 
         const subscription = await createSubscriptionSeed(container, {
           reference: "SUB-DUN-WF-006",
@@ -557,6 +860,13 @@ medusaIntegrationTestRunner({
           { id: "payses_3", status: "pending" },
         ] as any)
 
+        // Spied before the run so the exhaustion emission below is observable;
+        // created inside this test, so it only records this run's calls.
+        const eventBus = container.resolve("event_bus") as unknown as {
+          emit: (data: unknown) => Promise<void>
+        }
+        const emitSpy = jest.spyOn(eventBus, "emit")
+
         const { result } = await runDunningRetryWorkflow(container).run({
           input: {
             dunning_case_id: dunningCase.id,
@@ -573,6 +883,39 @@ medusaIntegrationTestRunner({
           recovery_reason: "retry_limit_exhausted",
         })
         expect(updatedCase.closed_at).toBeTruthy()
+
+        // Exhaustion abandons the originating cycle (R3): the period is
+        // written off into the terminal status, carrying the exhaustion
+        // reason, so the due query stops selecting it.
+        const updatedCycle = await renewalModule.retrieveRenewalCycle(cycle.id)
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.ABANDONED)
+        expect(updatedCycle.last_error).toContain("retry_limit_exhausted")
+
+        // The subscription is left past_due — not cancelled, and carrying no
+        // cancellation timestamp.
+        const updatedSubscription = await subscriptionModule.retrieveSubscription(
+          subscription.id
+        )
+        expect(updatedSubscription.status).toEqual(SubscriptionStatus.PAST_DUE)
+        expect(updatedSubscription.cancelled_at).toBeFalsy()
+        expect(updatedSubscription.cancel_effective_at).toBeFalsy()
+
+        // Task 12: post-payment exhaustion emits the alertable write-off the
+        // host's R3 decision hangs on, exactly once — the settlement helper
+        // (`abandonCycleOnDunningExhaustion`) persists AND emits where the
+        // cycle write lands.
+        const abandonedEvents = emitSpy.mock.calls
+          .flatMap((call) => {
+            const payload = call[0] as unknown
+            return Array.isArray(payload) ? payload : [payload]
+          })
+          .filter(
+            (event) => (event as { name?: string })?.name === "renewal.abandoned"
+          )
+        expect(abandonedEvents).toHaveLength(1)
+
+        expect(cancelSubscriptionRunSpy).not.toHaveBeenCalled()
+        expect(finalizeCancellationRunSpy).not.toHaveBeenCalled()
       })
 
       it("supports manual actions, retry schedule override, and dunning read models", async () => {
@@ -684,6 +1027,24 @@ medusaIntegrationTestRunner({
           recovery_reason: "marked_unrecovered_by_admin",
         })
 
+        // The admin closure abandons the originating cycle too (R3): the
+        // operator's write-off of the case is the write-off of the period,
+        // while the subscription itself stays past_due.
+        const workflowRenewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const abandonedCycle = await workflowRenewalModule.retrieveRenewalCycle(
+          anotherCycle.id
+        )
+        expect(abandonedCycle.status).toEqual(RenewalCycleStatus.ABANDONED)
+        expect(abandonedCycle.last_error).toContain(
+          "marked unrecovered by admin"
+        )
+        const unrecoveredSubscriptionRow =
+          await subscriptionModule.retrieveSubscription(anotherSubscription.id)
+        expect(unrecoveredSubscriptionRow.status).toEqual(
+          SubscriptionStatus.PAST_DUE
+        )
+
         const listResponse = await listAdminDunningCases(container, {
           limit: 20,
           offset: 0,
@@ -701,6 +1062,195 @@ medusaIntegrationTestRunner({
           }),
         })
         expect(detailResponse.dunning_case.attempts).toHaveLength(1)
+      })
+
+      it("parks a case whose subscription is no longer chargeable and still processes the rest of the batch", async () => {
+        // Task 10 Step 1 wedge: the subscription was cancelled while its
+        // dunning case was due. The retry used to throw before the RETRYING
+        // transition, leaving the stale past `next_retry_at` in the due set —
+        // re-selected and re-thrown by every scheduler run forever. The step
+        // must park the case (it leaves the due set, stays open for manual
+        // resolution) and the run must carry on with the remaining cases.
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const renewalModule =
+          container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+        const paymentModule =
+          container.resolve<IPaymentModuleService>(Modules.PAYMENT)
+        const query = container.resolve<any>(ContainerRegistrationKeys.QUERY)
+        const originalGraph = query.graph.bind(query)
+
+        const cancelledSubscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-WEDGE",
+          status: SubscriptionStatus.CANCELLED,
+        })
+        const wedgedCycle = await createRenewalCycleSeed(container, {
+          subscription_id: cancelledSubscription.id,
+          status: RenewalCycleStatus.FAILED,
+          generated_order_id: "ord_dun_wedge",
+        })
+        const wedgedCase = await createDunningCaseSeed(container, {
+          subscription_id: cancelledSubscription.id,
+          renewal_cycle_id: wedgedCycle.id,
+          renewal_order_id: "ord_dun_wedge",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 1,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+        })
+
+        // A healthy due case in the same batch: the wedged one must not take
+        // the whole run down with it.
+        const healthySubscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-WEDGE-OK",
+          status: SubscriptionStatus.PAST_DUE,
+        })
+        const healthyCycle = await createRenewalCycleSeed(container, {
+          subscription_id: healthySubscription.id,
+          status: RenewalCycleStatus.FAILED,
+          generated_order_id: "ord_dun_wedge_ok",
+        })
+        const healthyCase = await createDunningCaseSeed(container, {
+          subscription_id: healthySubscription.id,
+          renewal_cycle_id: healthyCycle.id,
+          renewal_order_id: "ord_dun_wedge_ok",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 0,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+        })
+
+        mockCreatePaymentSessionsRun.mockResolvedValue({
+          result: { id: "payses_wedge_ok", context: {}, status: "pending" },
+        })
+
+        jest.spyOn(query, "graph").mockImplementation(async (input: any) => {
+          if (input.entity === "order") {
+            const ids = (input.filters?.id ?? []) as string[]
+            return {
+              data: ids.map((id) => ({
+                id,
+                total: 1.29,
+                currency_code: "usd",
+              })),
+            }
+          }
+
+          return originalGraph(input)
+        })
+        jest
+          .spyOn(paymentModule, "authorizePaymentSession")
+          .mockResolvedValue({ id: "pay_wedge_ok", amount: 1.29 } as any)
+        jest
+          .spyOn(paymentModule, "capturePayment")
+          .mockResolvedValue({ id: "pay_wedge_ok" } as any)
+
+        // Terminates: the wedged case parks instead of throwing, so the
+        // fixed-page re-query drains the due set.
+        await processDunningRetriesJob(container)
+
+        const parkedCase = await dunningModule.retrieveDunningCase(wedgedCase.id)
+        expect(parkedCase).toMatchObject({
+          status: DunningCaseStatus.AWAITING_MANUAL_RESOLUTION,
+          recovery_reason: "subscription_not_chargeable",
+        })
+        expect(parkedCase.next_retry_at).toBeNull()
+        expect(parkedCase.closed_at).toBeFalsy()
+
+        // Nothing ran against the wedged case: no attempt, no charge, and the
+        // period is neither paid nor written off — parking is not exhaustion.
+        const wedgedAttempts = await dunningModule.listDunningAttempts({
+          dunning_case_id: wedgedCase.id,
+        } as any)
+        expect(wedgedAttempts).toHaveLength(0)
+        const untouchedCycle = await renewalModule.retrieveRenewalCycle(
+          wedgedCycle.id
+        )
+        expect(untouchedCycle.status).toEqual(RenewalCycleStatus.FAILED)
+
+        // The case left the due set...
+        const due = await listDueDunningCasesForProcessing(container, {
+          limit: 20,
+        })
+        expect(due.cases.some((item) => item.id === wedgedCase.id)).toBe(false)
+        expect(due.count).toEqual(0)
+        // ...while staying resolvable: retry-now accepts the status through
+        // the step's own guards, and both mark-* workflows close it.
+        await markDunningUnrecoveredWorkflow(container).run({
+          input: {
+            dunning_case_id: wedgedCase.id,
+            triggered_by: "admin_user",
+            reason: "subscription cancelled",
+          },
+        })
+        const closedCase = await dunningModule.retrieveDunningCase(wedgedCase.id)
+        expect(closedCase.status).toEqual(DunningCaseStatus.UNRECOVERED)
+
+        // The healthy case still ran to recovery.
+        const recoveredCase = await dunningModule.retrieveDunningCase(healthyCase.id)
+        expect(recoveredCase.status).toEqual(DunningCaseStatus.RECOVERED)
+        const recoveredSubscription = await subscriptionModule.retrieveSubscription(
+          healthySubscription.id
+        )
+        expect(recoveredSubscription.status).toEqual(SubscriptionStatus.ACTIVE)
+        const recoveredCycle = await renewalModule.retrieveRenewalCycle(
+          healthyCycle.id
+        )
+        expect(recoveredCycle.status).toEqual(RenewalCycleStatus.SUCCEEDED)
+      })
+
+      it("terminates the scheduler run through the iteration cap when a case can never leave the due set", async () => {
+        // Task 10 Step 2 safety net: the case's renewal cycle row is gone — an
+        // integrity fault the step's dispositions do not know about, so every
+        // retry still throws before any transition (not_found, alertable).
+        // Step 1 cannot make progress here; the cap is what ends the run and
+        // releases the job lock instead of looping forever.
+        const container = getContainer()
+        const dunningModule =
+          container.resolve<DunningModuleService>(DUNNING_MODULE)
+        const logger = container.resolve<{ warn: (...args: unknown[]) => void }>(
+          "logger"
+        )
+        const warnSpy = jest.spyOn(logger, "warn")
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-DUN-WF-CAP",
+          status: SubscriptionStatus.PAST_DUE,
+        })
+        const wedgedCase = await createDunningCaseSeed(container, {
+          subscription_id: subscription.id,
+          renewal_cycle_id: "cyc_missing_cap",
+          renewal_order_id: "ord_dun_cap",
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 0,
+          max_attempts: 3,
+          retry_schedule: defaultRetrySchedule,
+          next_retry_at: new Date("2026-03-30T10:00:00.000Z"),
+        })
+
+        await processDunningRetriesJob(container)
+
+        // The case is untouched and still due — the wedge is real; the cap,
+        // not progress, ended the run.
+        const unchangedCase = await dunningModule.retrieveDunningCase(wedgedCase.id)
+        expect(unchangedCase.status).toEqual(DunningCaseStatus.RETRY_SCHEDULED)
+        expect(unchangedCase.closed_at).toBeFalsy()
+        expect(unchangedCase.next_retry_at).toBeTruthy()
+
+        const due = await listDueDunningCasesForProcessing(container, {
+          limit: 20,
+        })
+        expect(due.cases.some((item) => item.id === wedgedCase.id)).toBe(true)
+
+        const capReached = warnSpy.mock.calls.some((call) =>
+          call.some((line) => String(line).includes("hit the iteration cap"))
+        )
+        expect(capReached).toBe(true)
       })
     })
   },

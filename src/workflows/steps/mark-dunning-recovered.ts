@@ -6,16 +6,32 @@ import { dunningErrors } from "../../modules/dunning/utils/errors"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
+import {
+  ActivityLogActorType,
+  ActivityLogEventType,
+} from "../../modules/activity-log/types"
+import { persistDunningLifecycleEvent } from "../utils/dunning-log-event"
+import { toISOStringOrNull } from "../utils/date-output"
 
 type SubscriptionRecord = {
   id: string
+  reference: string
   status: SubscriptionStatus
+  customer_id: string
+  customer_snapshot: { full_name?: string | null } | null
+  product_snapshot: {
+    product_title?: string | null
+    variant_title?: string | null
+  } | null
 }
 
 type DunningCaseRecord = {
   id: string
   subscription_id: string
+  renewal_cycle_id: string
+  renewal_order_id: string | null
   status: DunningCaseStatus
+  attempt_count: number
   next_retry_at: Date | null
   recovered_at: Date | null
   closed_at: Date | null
@@ -116,6 +132,41 @@ export const markDunningRecoveredStep = createStep(
         status: SubscriptionStatus.ACTIVE,
       })
     }
+
+    // DUNNING_RECOVERED (Task 11): persisted AND emitted through the shared
+    // activity-log funnel for the operator-driven closure.
+    await persistDunningLifecycleEvent(container, {
+      event_type: ActivityLogEventType.DUNNING_RECOVERED,
+      dunning_case_id: updatedCase.id,
+      subscription_id: dunningCase.subscription_id,
+      renewal_cycle_id: dunningCase.renewal_cycle_id,
+      renewal_order_id: dunningCase.renewal_order_id,
+      subscription_display: {
+        customer_id: subscription.customer_id,
+        reference: subscription.reference,
+        customer_name: subscription.customer_snapshot?.full_name ?? null,
+        product_title: subscription.product_snapshot?.product_title ?? null,
+        variant_title: subscription.product_snapshot?.variant_title ?? null,
+      },
+      previous_state: {
+        status: dunningCase.status,
+        attempt_count: dunningCase.attempt_count,
+        next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+      },
+      new_state: {
+        status: DunningCaseStatus.RECOVERED,
+        attempt_count: updatedCase.attempt_count,
+        next_retry_at: null,
+        recovery_reason: "marked_recovered_by_admin",
+      },
+      actor_type: input.triggered_by
+        ? ActivityLogActorType.USER
+        : ActivityLogActorType.SYSTEM,
+      actor_id: input.triggered_by ?? null,
+      trigger_type: "manual",
+      reason: input.reason ?? null,
+      dedupe_qualifier: toISOStringOrNull(changedAt),
+    })
 
     return new StepResponse(updatedCase, {
       previous_case: dunningCase,

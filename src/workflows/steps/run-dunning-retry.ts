@@ -25,12 +25,34 @@ import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
+import { RENEWAL_MODULE } from "../../modules/renewal"
+import type RenewalModuleService from "../../modules/renewal/service"
+import {
+  RenewalCycleStatus,
+  type RenewalAppliedPendingUpdateData,
+} from "../../modules/renewal/types"
+import { ActivityLogActorType, ActivityLogEventType } from "../../modules/activity-log/types"
+import {
+  persistDunningLifecycleEvent,
+  type DunningLogEventSubscriptionDisplay,
+} from "../utils/dunning-log-event"
+import { persistRenewalResolutionEvent } from "../utils/renewal-log-event"
+import { toISOStringOrNull } from "../utils/date-output"
+import {
+  finalizeRenewalPeriod,
+  type FinalizeRenewalPeriodSubscription,
+} from "./finalize-renewal-period"
 
 type SubscriptionRecord = {
   id: string
   reference: string
   status: SubscriptionStatus
   customer_id: string
+  customer_snapshot: { full_name?: string | null } | null
+  product_snapshot: {
+    product_title?: string | null
+    variant_title?: string | null
+  } | null
   payment_context: {
     payment_provider_id: string | null
     payment_mode?: string | null
@@ -85,6 +107,23 @@ type OrderRecord = {
   currency_code?: string
 }
 
+/**
+ * The cycle a dunning case recovers, as the retry step reads it: the fields
+ * the settled-cycle guard (R2) decides on plus everything the shared
+ * period-finalization step needs to settle the period on recovery.
+ */
+type DunningRetryCycleRecord = {
+  id: string
+  subscription_id: string
+  status: RenewalCycleStatus
+  scheduled_for: Date
+  attempt_count: number
+  processed_at: Date | null
+  generated_order_id: string | null
+  last_error: string | null
+  applied_pending_update_data: RenewalAppliedPendingUpdateData | null
+}
+
 type PaymentSessionRecord = {
   id: string
   status?: string | null
@@ -121,9 +160,12 @@ export type RunDunningRetryStepInput = {
 
 type RunDunningRetryStepOutput = {
   dunning_case_id: string
-  dunning_attempt_id: string
-  outcome: "recovered" | "retry_scheduled" | "unrecovered"
-  subscription_status: SubscriptionStatus
+  /** Null when the retry closed the case without executing a payment attempt. */
+  dunning_attempt_id: string | null
+  /** `parked` leaves the case open as `awaiting_manual_resolution`. */
+  outcome: "recovered" | "retry_scheduled" | "unrecovered" | "parked"
+  /** Absent when the retry closed out before loading the subscription. */
+  subscription_status?: SubscriptionStatus
   correlation_id: string
   attempt_no: number
   time_to_recover_ms?: number | null
@@ -176,6 +218,27 @@ function normalizeNow(now?: string | Date | null) {
   return normalized
 }
 
+/**
+ * Display snapshot for a dunning lifecycle event, from a subscription the step
+ * has already loaded. The settled-cycle guard closes cases before the
+ * subscription is ever read, so those events pass null instead.
+ */
+function subscriptionDisplay(
+  subscription: SubscriptionRecord | null
+): DunningLogEventSubscriptionDisplay {
+  if (!subscription) {
+    return null
+  }
+
+  return {
+    customer_id: subscription.customer_id,
+    reference: subscription.reference,
+    customer_name: subscription.customer_snapshot?.full_name ?? null,
+    product_title: subscription.product_snapshot?.product_title ?? null,
+    variant_title: subscription.product_snapshot?.variant_title ?? null,
+  }
+}
+
 async function loadDunningCase(
   container: MedusaContainer,
   id: string
@@ -201,6 +264,139 @@ async function loadSubscription(
   } catch {
     throw subscriptionErrors.notFound("Subscription", id)
   }
+}
+
+async function loadRenewalCycleForRetry(
+  container: MedusaContainer,
+  id: string
+): Promise<DunningRetryCycleRecord> {
+  const renewalModule = container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+
+  try {
+    return (await renewalModule.retrieveRenewalCycle(
+      id
+    )) as unknown as DunningRetryCycleRecord
+  } catch {
+    throw dunningErrors.notFound("RenewalCycle", id)
+  }
+}
+
+/**
+ * Exhaustion abandons the originating cycle (decision R3): when the case
+ * closes as `unrecovered`, the period it recovers is written off into Task
+ * 1's terminal `abandoned` status. This is the inverse of the settled-cycle
+ * guard (R2) at the top of the retry step, which closes cases whose cycle is
+ * ALREADY settled — here the case exhausts first, so the cycle settles into
+ * the other terminal state instead.
+ *
+ * Ordering: the cycle write lands BEFORE the case closes (the same discipline
+ * recovery follows — finalize before close). A crash in between leaves an
+ * `abandoned` cycle behind an open case, which the settled-cycle guard then
+ * closes without charging; the reverse window would leave a `failed` cycle
+ * behind a closed case that the due query is free to select and charge again.
+ *
+ * Decision R3: the subscription is left `past_due` and this plugin must NOT
+ * cancel it. Cancelling a customer relationship is not a side effect a
+ * background job performs; the host receives the abandonment signal and
+ * decides what happens to the relationship.
+ *
+ * Emission point (Tasks 11/12): the abandonment event (`renewal.abandoned`)
+ * is persisted AND emitted through the shared funnel exactly where the write
+ * below lands, carrying the cycle id and the exhaustion reason. Emission only
+ * happens when the write happened — the terminal guards above return first.
+ */
+async function abandonCycleOnDunningExhaustion(
+  container: MedusaContainer,
+  renewalCycleId: string,
+  exhaustionReason: string,
+  errorMessage: string,
+  emission: {
+    dunning_case_id: string
+    subscription_id: string
+    renewal_order_id: string | null
+    subscription_display: DunningLogEventSubscriptionDisplay
+    trigger_type: string
+    attempt_no: number
+    correlation_id: string
+    triggered_by: string | null
+  }
+): Promise<void> {
+  const renewalModule = container.resolve<RenewalModuleService>(RENEWAL_MODULE)
+
+  // Re-read at write time: the payment attempt ran after the step loaded the
+  // cycle, and a concurrent settling run (e.g. an operator force-run) may
+  // have succeeded in between. A `succeeded` period is never overwritten
+  // with `abandoned` — that would un-settle a paid period — and an already
+  // `abandoned` cycle makes this write a no-op.
+  const renewalCycle = await loadRenewalCycleForRetry(container, renewalCycleId)
+
+  if (
+    renewalCycle.status === RenewalCycleStatus.SUCCEEDED ||
+    renewalCycle.status === RenewalCycleStatus.ABANDONED
+  ) {
+    return
+  }
+
+  const exhaustionError = `Dunning exhausted (${exhaustionReason}): ${errorMessage}`
+
+  await renewalModule.updateRenewalCycles({
+    id: renewalCycle.id,
+    status: RenewalCycleStatus.ABANDONED,
+    last_error: exhaustionError,
+  })
+
+  await persistRenewalResolutionEvent(container, {
+    event_type: ActivityLogEventType.RENEWAL_ABANDONED,
+    subscription_id: emission.subscription_id,
+    renewal_cycle_id: renewalCycle.id,
+    subscription_display: emission.subscription_display,
+    previous_state: {
+      status: renewalCycle.status,
+      attempt_count: renewalCycle.attempt_count,
+      generated_order_id: renewalCycle.generated_order_id,
+      last_error: renewalCycle.last_error,
+    },
+    new_state: {
+      status: RenewalCycleStatus.ABANDONED,
+      last_error: exhaustionError,
+    },
+    reason: exhaustionError,
+    reason_code: exhaustionReason,
+    actor_type: emission.triggered_by
+      ? ActivityLogActorType.USER
+      : ActivityLogActorType.SYSTEM,
+    actor_id: emission.triggered_by,
+    trigger_type: emission.trigger_type,
+    source: "dunning",
+    dunning_case_id: emission.dunning_case_id,
+    order_id: emission.renewal_order_id,
+    attempt_no: emission.attempt_no,
+    correlation_id: emission.correlation_id,
+  })
+}
+
+/**
+ * Moves a due case the retry cannot even start out of the due set while
+ * keeping it open for manual resolution: `retry-now`, both mark-* workflows,
+ * and `update-dunning-retry-schedule` all accept
+ * `awaiting_manual_resolution`. `next_retry_at` is cleared — the stale past
+ * value is what kept re-selecting the case — and the park reason lands in
+ * `recovery_reason`, the field the Admin detail payload surfaces for why a
+ * case sits where it does.
+ */
+async function parkDunningCase(
+  container: MedusaContainer,
+  dunningCaseId: string,
+  parkReason: string
+): Promise<void> {
+  const dunningModule = container.resolve<DunningModuleService>(DUNNING_MODULE)
+
+  await dunningModule.updateDunningCases({
+    id: dunningCaseId,
+    status: DunningCaseStatus.AWAITING_MANUAL_RESOLUTION,
+    next_retry_at: null,
+    recovery_reason: parkReason,
+  } as any)
 }
 
 async function getNextAttemptNo(
@@ -244,11 +440,40 @@ async function loadOrderCharge(
   }
 }
 
-function validateRetryableCase(
+/**
+ * Pre-transition retry guards, returned as dispositions. A case the scheduler
+ * selects (status `retry_scheduled`, `next_retry_at` in the past) can be
+ * impossible to even start: the case lost its order or schedule, the retry
+ * budget is already spent, or the subscription is no longer chargeable (e.g.
+ * it was cancelled or paused while the case was pending). Before the
+ * disposition split these guards THREW before the RETRYING transition below,
+ * so the case kept its stale past `next_retry_at`, stayed in the due set, and
+ * was re-selected — and re-thrown — by every scheduler run forever, holding
+ * the job lock with it. The park/exhaust dispositions instead transition the
+ * case out of the due set in the same run that selected it:
+ *
+ * - `park` → `awaiting_manual_resolution` with a reason (`parkDunningCase`);
+ *   the case stays open and resolvable.
+ * - `exhaust` → `unrecovered`; the retry budget is spent, so the case closes
+ *   the same way the post-payment exhaustion does (decision R3: the cycle
+ *   settles `abandoned` first, the subscription is never cancelled).
+ *
+ * The remaining refusals still throw, on purpose: terminal statuses and
+ * `retrying` are never selected by the scheduler's due query, and `not_due`
+ * means the case was not in the due set to begin with — none of them can wedge
+ * the loop.
+ */
+type PreTransitionDisposition =
+  | { kind: "ok" }
+  | { kind: "park"; reason: string; message: string }
+  | { kind: "exhaust"; message: string }
+
+function resolveRetryDisposition(
   dunningCase: DunningCaseRecord,
+  subscription: SubscriptionRecord,
   now: Date,
   ignoreSchedule?: boolean
-) {
+): PreTransitionDisposition {
   if (dunningCase.status === DunningCaseStatus.RECOVERED) {
     throw dunningErrors.alreadyRecovered(dunningCase.id)
   }
@@ -262,15 +487,19 @@ function validateRetryableCase(
   }
 
   if (!dunningCase.renewal_order_id) {
-    throw dunningErrors.invalidData(
-      `DunningCase '${dunningCase.id}' is missing renewal_order_id`
-    )
+    return {
+      kind: "park",
+      reason: "missing_renewal_order",
+      message: `DunningCase '${dunningCase.id}' is missing renewal_order_id`,
+    }
   }
 
   if (!dunningCase.retry_schedule) {
-    throw dunningErrors.invalidData(
-      `DunningCase '${dunningCase.id}' is missing retry_schedule`
-    )
+    return {
+      kind: "park",
+      reason: "missing_retry_schedule",
+      message: `DunningCase '${dunningCase.id}' is missing retry_schedule`,
+    }
   }
 
   if (!ignoreSchedule && !dunningCase.next_retry_at) {
@@ -282,8 +511,24 @@ function validateRetryableCase(
   }
 
   if (dunningCase.attempt_count >= dunningCase.max_attempts) {
-    throw dunningErrors.maxAttemptsExceeded(dunningCase.id)
+    return {
+      kind: "exhaust",
+      message: `DunningCase '${dunningCase.id}' reached max_attempts (${dunningCase.max_attempts}) without recovery`,
+    }
   }
+
+  if (
+    subscription.status !== SubscriptionStatus.PAST_DUE &&
+    subscription.status !== SubscriptionStatus.ACTIVE
+  ) {
+    return {
+      kind: "park",
+      reason: "subscription_not_chargeable",
+      message: `Subscription '${subscription.id}' can't run dunning retry from status '${subscription.status}'`,
+    }
+  }
+
+  return { kind: "ok" }
 }
 
 function classifyPaymentRetryFailure(
@@ -589,22 +834,250 @@ export const runDunningRetryStep = createStep(
     })
 
     try {
-      validateRetryableCase(dunningCase, now, input.ignore_schedule)
+      // Settled-cycle guard (decision R2). Load the cycle before anything can
+      // charge: when its period is already settled (`succeeded`) or written
+      // off (`abandoned`), close the case instead of charging — a second
+      // charge for one period is the one outcome this step must never
+      // produce. This is what makes the recovery write order stop being
+      // load-bearing: recovery finalizes the period BEFORE it closes the
+      // case, so a crash between the two writes leaves a settled cycle behind
+      // an open case, and this guard closes it without charging. Writing in
+      // the opposite order would strand a `failed` cycle behind a closed case
+      // that the scheduler is then free to charge again. Terminal cases
+        // (`recovered` / `unrecovered`) fall through to the existing refusals in
+        // `resolveRetryDisposition` — the guard only closes cases a retry could
+        // still charge from.
+      const renewalCycle = await loadRenewalCycleForRetry(
+        container,
+        dunningCase.renewal_cycle_id
+      )
+      const cycleIsSettled =
+        renewalCycle.status === RenewalCycleStatus.SUCCEEDED ||
+        renewalCycle.status === RenewalCycleStatus.ABANDONED
+      const caseIsClosed =
+        dunningCase.status === DunningCaseStatus.RECOVERED ||
+        dunningCase.status === DunningCaseStatus.UNRECOVERED
+
+      if (cycleIsSettled && !caseIsClosed) {
+        const cyclePaid = renewalCycle.status === RenewalCycleStatus.SUCCEEDED
+        const closedAt = new Date()
+
+        await dunningModule.updateDunningCases({
+          id: dunningCase.id,
+          status: cyclePaid
+            ? DunningCaseStatus.RECOVERED
+            : DunningCaseStatus.UNRECOVERED,
+          next_retry_at: null,
+          recovered_at: cyclePaid ? closedAt : null,
+          closed_at: closedAt,
+          recovery_reason: cyclePaid
+            ? "cycle_already_succeeded"
+            : "cycle_abandoned",
+        } as any)
+
+        logDunningEvent(logger, "warn", {
+          event: "dunning.retry",
+          outcome: "blocked",
+          correlation_id: correlationId,
+          dunning_case_id: dunningCase.id,
+          subscription_id: dunningCase.subscription_id,
+          renewal_cycle_id: dunningCase.renewal_cycle_id,
+          attempt_no: attemptNo,
+          duration_ms: Date.now() - startedAtMs,
+          failure_count: 0,
+          alertable: false,
+          message: `Renewal cycle is already ${renewalCycle.status}; the case is closed without a charge`,
+          metadata: {
+            retry_outcome: cyclePaid
+              ? "settled_cycle_recovered"
+              : "settled_cycle_abandoned",
+            cycle_status: renewalCycle.status,
+          },
+        })
+
+        // Lifecycle event (Task 11): the case closed here counts as a real
+        // recovery/write-off occurrence even though no payment attempt ran.
+        // The subscription row is deliberately not read on this path, so the
+        // event carries only the subscription_id it is centered on.
+        await persistDunningLifecycleEvent(container, {
+          event_type: cyclePaid
+            ? ActivityLogEventType.DUNNING_RECOVERED
+            : ActivityLogEventType.DUNNING_UNRECOVERED,
+          dunning_case_id: dunningCase.id,
+          subscription_id: dunningCase.subscription_id,
+          renewal_cycle_id: dunningCase.renewal_cycle_id,
+          renewal_order_id: dunningCase.renewal_order_id,
+          subscription_display: null,
+          previous_state: {
+            status: dunningCase.status,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+          },
+          new_state: {
+            status: cyclePaid
+              ? DunningCaseStatus.RECOVERED
+              : DunningCaseStatus.UNRECOVERED,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: null,
+            recovery_reason: cyclePaid
+              ? "cycle_already_succeeded"
+              : "cycle_abandoned",
+          },
+          actor_type: input.triggered_by
+            ? ActivityLogActorType.USER
+            : ActivityLogActorType.SYSTEM,
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+          reason: input.reason ?? null,
+          correlation_id: correlationId,
+          dedupe_qualifier: toISOStringOrNull(closedAt),
+        })
+
+        return new StepResponse<RunDunningRetryStepOutput>({
+          dunning_case_id: dunningCase.id,
+          dunning_attempt_id: null,
+          outcome: cyclePaid ? "recovered" : "unrecovered",
+          correlation_id: correlationId,
+          attempt_no: attemptNo,
+        })
+      }
 
       const subscription = await loadSubscription(
         container,
         dunningCase.subscription_id
       )
 
-      if (
-        subscription.status !== SubscriptionStatus.PAST_DUE &&
-        subscription.status !== SubscriptionStatus.ACTIVE
-      ) {
-        throw subscriptionErrors.invalidState(
-          subscription.id,
-          "run dunning retry",
-          subscription.status
+      // Pre-transition wedge guards (see `resolveRetryDisposition`): park or
+      // close the case instead of throwing, so a case the scheduler selected
+      // always leaves the due set in the run that selected it.
+      const disposition = resolveRetryDisposition(
+        dunningCase,
+        subscription,
+        now,
+        input.ignore_schedule
+      )
+
+      if (disposition.kind === "park") {
+        await parkDunningCase(container, dunningCase.id, disposition.reason)
+
+        logDunningEvent(logger, "warn", {
+          event: "dunning.retry",
+          outcome: "blocked",
+          correlation_id: correlationId,
+          dunning_case_id: dunningCase.id,
+          subscription_id: dunningCase.subscription_id,
+          renewal_cycle_id: dunningCase.renewal_cycle_id,
+          attempt_no: attemptNo,
+          duration_ms: Date.now() - startedAtMs,
+          blocked_count: 1,
+          failure_kind: "invalid_transition",
+          alertable: true,
+          message: disposition.message,
+          metadata: {
+            retry_outcome: "parked",
+            park_reason: disposition.reason,
+          },
+        })
+
+        return new StepResponse<RunDunningRetryStepOutput>({
+          dunning_case_id: dunningCase.id,
+          dunning_attempt_id: null,
+          outcome: "parked",
+          correlation_id: correlationId,
+          attempt_no: attemptNo,
+        })
+      }
+
+      if (disposition.kind === "exhaust") {
+        // The retry budget was spent before this run. Close the case the same
+        // way the post-payment exhaustion does: settle the cycle `abandoned`
+        // first (R3), then close the case `unrecovered`. No attempt row is
+        // written — this run executed no payment attempt.
+        const finishedAt = new Date()
+
+        await abandonCycleOnDunningExhaustion(
+          container,
+          renewalCycle.id,
+          "retry_limit_exhausted",
+          disposition.message,
+          {
+            dunning_case_id: dunningCase.id,
+            subscription_id: dunningCase.subscription_id,
+            renewal_order_id: dunningCase.renewal_order_id,
+            subscription_display: subscriptionDisplay(subscription),
+            trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+            attempt_no: attemptNo,
+            correlation_id: correlationId,
+            triggered_by: input.triggered_by ?? null,
+          }
         )
+
+        const updatedCase = await dunningModule.updateDunningCases({
+          id: dunningCase.id,
+          status: DunningCaseStatus.UNRECOVERED,
+          next_retry_at: null,
+          closed_at: finishedAt,
+          recovery_reason: "retry_limit_exhausted",
+        } as any)
+
+        logDunningEvent(logger, "warn", {
+          event: "dunning.retry",
+          outcome: "failed",
+          correlation_id: correlationId,
+          dunning_case_id: updatedCase.id,
+          subscription_id: updatedCase.subscription_id,
+          renewal_cycle_id: updatedCase.renewal_cycle_id,
+          attempt_no: attemptNo,
+          duration_ms: Date.now() - startedAtMs,
+          failure_count: 1,
+          unrecovered_count: 1,
+          avg_attempts: attemptNo,
+          failure_kind: "retry_exhausted",
+          alertable: false,
+          message: disposition.message,
+          metadata: {
+            retry_outcome: "unrecovered",
+          },
+        })
+
+        // Lifecycle event (Task 11): the budget was spent before this run, so
+        // the case closed without executing a payment attempt — no
+        // dunning.retry_executed here, only the unrecovered closure.
+        await persistDunningLifecycleEvent(container, {
+          event_type: ActivityLogEventType.DUNNING_UNRECOVERED,
+          dunning_case_id: updatedCase.id,
+          subscription_id: updatedCase.subscription_id,
+          renewal_cycle_id: updatedCase.renewal_cycle_id,
+          renewal_order_id: updatedCase.renewal_order_id,
+          subscription_display: subscriptionDisplay(subscription),
+          previous_state: {
+            status: dunningCase.status,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+          },
+          new_state: {
+            status: DunningCaseStatus.UNRECOVERED,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: null,
+            recovery_reason: "retry_limit_exhausted",
+          },
+          actor_type: input.triggered_by
+            ? ActivityLogActorType.USER
+            : ActivityLogActorType.SYSTEM,
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+          reason: input.reason ?? null,
+          correlation_id: correlationId,
+          dedupe_qualifier: toISOStringOrNull(finishedAt),
+        })
+
+        return new StepResponse<RunDunningRetryStepOutput>({
+          dunning_case_id: updatedCase.id,
+          dunning_attempt_id: null,
+          outcome: "unrecovered",
+          correlation_id: correlationId,
+          attempt_no: attemptNo,
+        })
       }
 
       const startedAt = now
@@ -656,6 +1129,70 @@ export const runDunningRetryStep = createStep(
           payment_reference: outcome.payment_reference,
         } as any)
 
+        // Lifecycle event (Task 11): one dunning.retry_executed per payment
+        // attempt that actually ran, persisted and emitted as soon as the
+        // attempt row closes.
+        await persistDunningLifecycleEvent(container, {
+          event_type: ActivityLogEventType.DUNNING_RETRY_EXECUTED,
+          dunning_case_id: dunningCase.id,
+          subscription_id: dunningCase.subscription_id,
+          renewal_cycle_id: dunningCase.renewal_cycle_id,
+          renewal_order_id: dunningCase.renewal_order_id,
+          subscription_display: subscriptionDisplay(subscription),
+          previous_state: {
+            status: dunningCase.status,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+          },
+          new_state: {
+            status: DunningCaseStatus.RETRYING,
+            attempt_count: attemptNo,
+            attempt_status: "succeeded",
+            error_code: null,
+          },
+          actor_type: input.triggered_by
+            ? ActivityLogActorType.USER
+            : ActivityLogActorType.SYSTEM,
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+          attempt_no: attemptNo,
+          reason: input.reason ?? null,
+          correlation_id: correlationId,
+          dedupe_qualifier: attemptNo,
+        })
+
+        // Finalize the period through the shared period-finalization step:
+        // the retry charged the case's own renewal order, so that order is
+        // the one that paid the period. The cycle becomes `succeeded`, the
+        // cadence advances anchored on `scheduled_for` (R6), `last_renewal_at`
+        // is set, applied pending changes clear, `structural_attempt_count`
+        // resets, the next cycle is ensured, and `renewal.succeeded` is
+        // persisted and emitted — the same core semantics as the automatic
+        // success path. This runs BEFORE the case closes as `recovered`:
+        // together with the settled-cycle guard above, a crash between the
+        // two writes leaves a settled cycle behind an open case, which the
+        // next retry closes without charging, instead of a `failed` cycle
+        // behind a closed case that the scheduler would charge again.
+        const finalizeSubscription = (await subscriptionModule.retrieveSubscription(
+          subscription.id
+        )) as unknown as FinalizeRenewalPeriodSubscription
+
+        await finalizeRenewalPeriod(container, {
+          cycle: renewalCycle,
+          subscription: finalizeSubscription,
+          applied_pending_changes: renewalCycle.applied_pending_update_data,
+          generated_order_id: dunningCase.renewal_order_id,
+          trigger: {
+            source: "dunning",
+            trigger_type: "dunning_recovery",
+            actor_type: input.triggered_by
+              ? ActivityLogActorType.USER
+              : ActivityLogActorType.SYSTEM,
+            actor_id: input.triggered_by ?? null,
+            correlation_id: correlationId,
+          },
+        })
+
         const updatedCase = await dunningModule.updateDunningCases({
           id: dunningCase.id,
           status: DunningCaseStatus.RECOVERED,
@@ -674,6 +1211,38 @@ export const runDunningRetryStep = createStep(
             status: SubscriptionStatus.ACTIVE,
           })
         }
+
+        // Lifecycle event (Task 11): the payment-side recovery closed the
+        // case; the period settlement itself already emitted renewal.succeeded
+        // through finalizeRenewalPeriod above.
+        await persistDunningLifecycleEvent(container, {
+          event_type: ActivityLogEventType.DUNNING_RECOVERED,
+          dunning_case_id: updatedCase.id,
+          subscription_id: updatedCase.subscription_id,
+          renewal_cycle_id: updatedCase.renewal_cycle_id,
+          renewal_order_id: updatedCase.renewal_order_id,
+          subscription_display: subscriptionDisplay(subscription),
+          previous_state: {
+            status: dunningCase.status,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+          },
+          new_state: {
+            status: DunningCaseStatus.RECOVERED,
+            attempt_count: attemptNo,
+            next_retry_at: null,
+            recovery_reason: "payment_recovered",
+          },
+          actor_type: input.triggered_by
+            ? ActivityLogActorType.USER
+            : ActivityLogActorType.SYSTEM,
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+          attempt_no: attemptNo,
+          reason: input.reason ?? null,
+          correlation_id: correlationId,
+          dedupe_qualifier: toISOStringOrNull(finishedAt),
+        })
 
         const createdAt = updatedCase.created_at
           ? new Date(updatedCase.created_at)
@@ -723,11 +1292,68 @@ export const runDunningRetryStep = createStep(
         payment_reference: outcome.payment_reference,
       } as any)
 
+      // Lifecycle event (Task 11): one dunning.retry_executed per payment
+      // attempt that actually ran, whether the case then re-arms or closes —
+      // the closure itself carries its own dunning.unrecovered event.
+      await persistDunningLifecycleEvent(container, {
+        event_type: ActivityLogEventType.DUNNING_RETRY_EXECUTED,
+        dunning_case_id: dunningCase.id,
+        subscription_id: dunningCase.subscription_id,
+        renewal_cycle_id: dunningCase.renewal_cycle_id,
+        renewal_order_id: dunningCase.renewal_order_id,
+        subscription_display: subscriptionDisplay(subscription),
+        previous_state: {
+          status: dunningCase.status,
+          attempt_count: dunningCase.attempt_count,
+          next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+        },
+        new_state: {
+          status: DunningCaseStatus.RETRYING,
+          attempt_count: attemptNo,
+          attempt_status: "failed",
+          error_code: outcome.error_code,
+        },
+        actor_type: input.triggered_by
+          ? ActivityLogActorType.USER
+          : ActivityLogActorType.SYSTEM,
+        actor_id: input.triggered_by ?? null,
+        trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+        attempt_no: attemptNo,
+        reason: input.reason ?? null,
+        correlation_id: correlationId,
+        dedupe_qualifier: attemptNo,
+      })
+
       const shouldCloseAsUnrecovered =
         outcome.kind === "permanent_failure" ||
         attemptNo >= dunningCase.max_attempts
 
       if (shouldCloseAsUnrecovered) {
+        const recoveryReason =
+          outcome.kind === "permanent_failure"
+            ? "permanent_payment_failure"
+            : "retry_limit_exhausted"
+
+        // Exhaustion settles the cycle `abandoned` before the case closes —
+        // see `abandonCycleOnDunningExhaustion` for the ordering and the R3
+        // no-cancellation rule.
+        await abandonCycleOnDunningExhaustion(
+          container,
+          renewalCycle.id,
+          recoveryReason,
+          outcome.error_message,
+          {
+            dunning_case_id: dunningCase.id,
+            subscription_id: dunningCase.subscription_id,
+            renewal_order_id: dunningCase.renewal_order_id,
+            subscription_display: subscriptionDisplay(subscription),
+            trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+            attempt_no: attemptNo,
+            correlation_id: correlationId,
+            triggered_by: input.triggered_by ?? null,
+          }
+        )
+
         const updatedCase = await dunningModule.updateDunningCases({
           id: dunningCase.id,
           status: DunningCaseStatus.UNRECOVERED,
@@ -736,10 +1362,7 @@ export const runDunningRetryStep = createStep(
           last_payment_error_code: outcome.error_code,
           last_payment_error_message: outcome.error_message,
           closed_at: finishedAt,
-          recovery_reason:
-            outcome.kind === "permanent_failure"
-              ? "permanent_payment_failure"
-              : "retry_limit_exhausted",
+          recovery_reason: recoveryReason,
         } as any)
 
         logDunningEvent(logger, "warn", {
@@ -764,6 +1387,37 @@ export const runDunningRetryStep = createStep(
           },
         })
 
+        // Lifecycle event (Task 11): post-payment exhaustion (permanent
+        // failure or spent budget) closed the case as unrecovered.
+        await persistDunningLifecycleEvent(container, {
+          event_type: ActivityLogEventType.DUNNING_UNRECOVERED,
+          dunning_case_id: updatedCase.id,
+          subscription_id: updatedCase.subscription_id,
+          renewal_cycle_id: updatedCase.renewal_cycle_id,
+          renewal_order_id: updatedCase.renewal_order_id,
+          subscription_display: subscriptionDisplay(subscription),
+          previous_state: {
+            status: dunningCase.status,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+          },
+          new_state: {
+            status: DunningCaseStatus.UNRECOVERED,
+            attempt_count: attemptNo,
+            next_retry_at: null,
+            recovery_reason: recoveryReason,
+          },
+          actor_type: input.triggered_by
+            ? ActivityLogActorType.USER
+            : ActivityLogActorType.SYSTEM,
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+          attempt_no: attemptNo,
+          reason: input.reason ?? null,
+          correlation_id: correlationId,
+          dedupe_qualifier: toISOStringOrNull(finishedAt),
+        })
+
         return new StepResponse<RunDunningRetryStepOutput>({
           dunning_case_id: updatedCase.id,
           dunning_attempt_id: attempt.id,
@@ -781,6 +1435,25 @@ export const runDunningRetryStep = createStep(
       )
 
       if (!nextRetryAt) {
+        // Same exhaustion settlement as above: the schedule has no interval
+        // left, so the cycle is written off before the case closes.
+        await abandonCycleOnDunningExhaustion(
+          container,
+          renewalCycle.id,
+          "retry_schedule_exhausted",
+          outcome.error_message,
+          {
+            dunning_case_id: dunningCase.id,
+            subscription_id: dunningCase.subscription_id,
+            renewal_order_id: dunningCase.renewal_order_id,
+            subscription_display: subscriptionDisplay(subscription),
+            trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+            attempt_no: attemptNo,
+            correlation_id: correlationId,
+            triggered_by: input.triggered_by ?? null,
+          }
+        )
+
         const updatedCase = await dunningModule.updateDunningCases({
           id: dunningCase.id,
           status: DunningCaseStatus.UNRECOVERED,
@@ -812,6 +1485,37 @@ export const runDunningRetryStep = createStep(
             error_code: outcome.error_code,
             payment_reference: outcome.payment_reference,
           },
+        })
+
+        // Lifecycle event (Task 11): the retry schedule had no interval left,
+        // so the case closed as unrecovered after the executed attempt.
+        await persistDunningLifecycleEvent(container, {
+          event_type: ActivityLogEventType.DUNNING_UNRECOVERED,
+          dunning_case_id: updatedCase.id,
+          subscription_id: updatedCase.subscription_id,
+          renewal_cycle_id: updatedCase.renewal_cycle_id,
+          renewal_order_id: updatedCase.renewal_order_id,
+          subscription_display: subscriptionDisplay(subscription),
+          previous_state: {
+            status: dunningCase.status,
+            attempt_count: dunningCase.attempt_count,
+            next_retry_at: toISOStringOrNull(dunningCase.next_retry_at),
+          },
+          new_state: {
+            status: DunningCaseStatus.UNRECOVERED,
+            attempt_count: attemptNo,
+            next_retry_at: null,
+            recovery_reason: "retry_schedule_exhausted",
+          },
+          actor_type: input.triggered_by
+            ? ActivityLogActorType.USER
+            : ActivityLogActorType.SYSTEM,
+          actor_id: input.triggered_by ?? null,
+          trigger_type: input.ignore_schedule ? "manual_retry" : "scheduled_retry",
+          attempt_no: attemptNo,
+          reason: input.reason ?? null,
+          correlation_id: correlationId,
+          dedupe_qualifier: toISOStringOrNull(finishedAt),
         })
 
         return new StepResponse<RunDunningRetryStepOutput>({

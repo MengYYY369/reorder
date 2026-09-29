@@ -17,6 +17,22 @@ const JOB_NAME = "process-dunning-retries"
 const JOB_LOCK_KEY = "jobs:dunning-retries"
 const DEFAULT_BATCH_SIZE = 20
 
+/**
+ * Safety net for the discovery loop, mirroring `recover-stuck-renewal-cycles`:
+ * the loop re-queries the due set with `skip: 0` every pass — that fixed page
+ * is what makes concurrent resolution safe, but it also means a case that is
+ * selected and then never leaves the due set is re-selected forever, holding
+ * the job lock indefinitely. The retry step's pre-transition dispositions are
+ * what make progress (a selected case parks, exhausts, recovers, or
+ * reschedules into the future in the same run that selected it), so healthy
+ * passes shrink the due set to empty within ceil(count / batch size) passes.
+ * The cap only exists for wedges a future regression could reintroduce: it
+ * bounds a single run to 100 passes x 20 cases, far beyond any realistic
+ * backlog a 5-minute tick is expected to drain, and anything left over defers
+ * to the next tick instead of wedging the lock.
+ */
+const MAX_BATCH_ITERATIONS = 100
+
 type LockingService = {
   execute<T>(
     keys: string | string[],
@@ -143,13 +159,39 @@ async function runJob(container: MedusaContainer) {
     let recovered = 0
     let rescheduled = 0
     let unrecovered = 0
+    let parked = 0
     let failed = 0
     let blocked = 0
     let attemptTotal = 0
     let recoveredTtrTotal = 0
     let recoveredTtrCount = 0
+    let capReached = false
 
     while (true) {
+      if (page >= MAX_BATCH_ITERATIONS) {
+        // A wedge the retry step's dispositions do not cover (or a backlog
+        // larger than one run may drain): stop, leave the rest due, and make
+        // the run terminal so the job lock is released for the next tick.
+        capReached = true
+
+        logDunningEvent(logger, "warn", {
+          event: "dunning.job",
+          job_name: JOB_NAME,
+          outcome: "blocked",
+          correlation_id: jobCorrelationId,
+          duration_ms: Date.now() - startedAt,
+          batch_size: batchSize,
+          alertable: true,
+          failure_kind: "unexpected_error",
+          message: `Dunning scheduler hit the iteration cap (${MAX_BATCH_ITERATIONS} passes); remaining due cases are left for the next run`,
+          metadata: {
+            max_iterations: MAX_BATCH_ITERATIONS,
+          },
+        })
+
+        break
+      }
+
       const result = await listDueDunningCasesForProcessing(container, {
         limit: batchSize,
       })
@@ -207,6 +249,8 @@ async function runJob(container: MedusaContainer) {
           rescheduled += 1
         } else if (outcome === "unrecovered") {
           unrecovered += 1
+        } else if (outcome === "parked") {
+          parked += 1
         } else if (outcome === "blocked") {
           blocked += 1
         } else {
@@ -229,6 +273,7 @@ async function runJob(container: MedusaContainer) {
       recovered_count: recovered,
       rescheduled_count: rescheduled,
       unrecovered_count: unrecovered,
+      parked_count: parked,
       failure_count: failed,
       blocked_count: blocked,
       avg_attempts: processed ? Number((attemptTotal / processed).toFixed(2)) : 0,
@@ -244,6 +289,7 @@ async function runJob(container: MedusaContainer) {
       message: "Dunning scheduler completed",
       metadata: {
         raw_count: rawCount,
+        iteration_cap_reached: capReached,
       },
     })
   } catch (error) {

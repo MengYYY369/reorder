@@ -20,6 +20,12 @@ import { SubscriptionStatus } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import type { SubscriptionSettingsShape } from "../../modules/settings/utils/normalize-settings"
 import { getEffectiveSubscriptionSettings } from "../utils/subscription-settings"
+import { persistDunningLifecycleEvent } from "../utils/dunning-log-event"
+import { toISOStringOrNull } from "../utils/date-output"
+import {
+  ActivityLogActorType,
+  ActivityLogEventType,
+} from "../../modules/activity-log/types"
 
 const ACTIVE_DUNNING_CASE_STATUSES = new Set<DunningCaseStatus>([
   DunningCaseStatus.OPEN,
@@ -38,6 +44,22 @@ type SubscriptionRecord = {
   id: string
   status: SubscriptionStatus
   metadata: Record<string, unknown> | null
+}
+
+/**
+ * Display-only projection merged into the loaded subscription for the
+ * DUNNING_STARTED activity-log snapshot. Kept separate from
+ * `SubscriptionRecord` so the compensation path keeps handing
+ * `updateSubscriptions` the narrow shape it always did.
+ */
+type SubscriptionDisplayRecord = {
+  reference: string
+  customer_id: string
+  customer_snapshot: { full_name?: string | null } | null
+  product_snapshot: {
+    product_title?: string | null
+    variant_title?: string | null
+  } | null
 }
 
 type RenewalCycleRecord = {
@@ -117,7 +139,7 @@ async function loadSubscription(
   try {
     return (await subscriptionModule.retrieveSubscription(
       id
-    )) as SubscriptionRecord
+    )) as SubscriptionRecord & SubscriptionDisplayRecord
   } catch {
     throw subscriptionErrors.notFound("Subscription", id)
   }
@@ -327,6 +349,45 @@ export const startDunningStep = createStep(
           status: SubscriptionStatus.PAST_DUE,
         })
       }
+
+      // DUNNING_STARTED (Task 11): persisted AND emitted through the shared
+      // activity-log funnel when a case is actually created. A re-armed
+      // existing case (the "updated" branch below) is not a start — the
+      // original dunning.started already recorded it and renewal.failed
+      // records the new failure.
+      await persistDunningLifecycleEvent(container, {
+        event_type: ActivityLogEventType.DUNNING_STARTED,
+        dunning_case_id: created.id,
+        subscription_id: subscription.id,
+        renewal_cycle_id: cycle.id,
+        renewal_order_id:
+          input.renewal_order_id ?? cycle.generated_order_id ?? null,
+        subscription_display: {
+          customer_id: subscription.customer_id,
+          reference: subscription.reference,
+          customer_name: subscription.customer_snapshot?.full_name ?? null,
+          product_title: subscription.product_snapshot?.product_title ?? null,
+          variant_title: subscription.product_snapshot?.variant_title ?? null,
+        },
+        previous_state: {
+          subscription_status: subscription.status,
+        },
+        new_state: {
+          status: DunningCaseStatus.RETRY_SCHEDULED,
+          attempt_count: 0,
+          max_attempts: maxAttempts,
+          next_retry_at: toISOStringOrNull(defaultNextRetryAt),
+          subscription_status: previousSubscription
+            ? SubscriptionStatus.PAST_DUE
+            : subscription.status,
+        },
+        actor_type: input.triggered_by
+          ? ActivityLogActorType.USER
+          : ActivityLogActorType.SYSTEM,
+        actor_id: input.triggered_by ?? null,
+        trigger_type: input.triggered_by ? "manual" : "renewal_payment_failure",
+        reason: input.reason ?? null,
+      })
 
       return new StepResponse<StartDunningStepOutput, StartDunningCompensation>(
         {

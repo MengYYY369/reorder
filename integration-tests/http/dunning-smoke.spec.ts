@@ -294,7 +294,11 @@ medusaIntegrationTestRunner({
           recovery_reason: "permanent_payment_failure",
         })
         expect(updatedSubscription.status).toEqual(SubscriptionStatus.PAST_DUE)
-        expect(updatedCycle.status).toEqual(RenewalCycleStatus.FAILED)
+        // Exhaustion abandons the originating cycle (R3): the case's
+        // permanent failure writes the period off into the terminal status,
+        // while the subscription stays past_due for the host to decide about.
+        expect(updatedCycle.status).toEqual(RenewalCycleStatus.ABANDONED)
+        expect(updatedCycle.last_error).toContain("permanent_payment_failure")
       })
     })
   },

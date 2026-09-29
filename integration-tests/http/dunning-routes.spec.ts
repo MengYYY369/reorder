@@ -6,7 +6,11 @@ import {
   DunningAttemptStatus,
   DunningCaseStatus,
 } from "../../src/modules/dunning/types"
+import { RENEWAL_MODULE } from "../../src/modules/renewal"
+import type RenewalModuleService from "../../src/modules/renewal/service"
 import { RenewalCycleStatus } from "../../src/modules/renewal/types"
+import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
+import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
 import {
   createAdminAuthHeaders,
@@ -358,6 +362,28 @@ medusaIntegrationTestRunner({
           status: DunningCaseStatus.UNRECOVERED,
           recovery_reason: "marked_unrecovered_by_admin",
         })
+
+        // The route-driven closure abandons the originating cycle (R3) while
+        // the subscription itself stays past_due — no cancellation side
+        // effect.
+        const routeRenewalModule = container.resolve<RenewalModuleService>(
+          RENEWAL_MODULE
+        )
+        const routeSubscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+
+        const routeAbandonedCycle = await routeRenewalModule.retrieveRenewalCycle(
+          unrecoveredCycle.id
+        )
+        expect(routeAbandonedCycle.status).toEqual(RenewalCycleStatus.ABANDONED)
+        expect(routeAbandonedCycle.last_error).toContain(
+          "marked unrecovered by admin"
+        )
+
+        const routeSubscription = await routeSubscriptionModule.retrieveSubscription(
+          unrecoveredSubscription.id
+        )
+        expect(routeSubscription.status).toEqual(SubscriptionStatus.PAST_DUE)
       })
 
       it("covers admin flow from list to detail to manual resolution to refresh verification", async () => {

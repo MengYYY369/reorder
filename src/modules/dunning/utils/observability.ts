@@ -34,6 +34,7 @@ type DunningLogPayload = {
   recovered_count?: number
   rescheduled_count?: number
   unrecovered_count?: number
+  parked_count?: number
   avg_attempts?: number
   recovery_rate?: number
   fail_rate?: number
