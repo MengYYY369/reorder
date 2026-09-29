@@ -80,7 +80,8 @@
     "@medusajs/ui": "4.2.2",
     "@mengyyy369/medusa-webhooks": "^1.3.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-i18next": "13.5.0"
   },
   "peerDependenciesMeta": {
     "@mengyyy369/medusa-webhooks": {

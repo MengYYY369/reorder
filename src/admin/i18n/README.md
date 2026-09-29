@@ -166,6 +166,25 @@ exception: the order widget's discount fallback was the raw
 `"subscription_discount"` identifier (a bug) and became
 `subscriptions.orderWidget.noDiscount` = `"No discount"`.
 
+### react-i18next must be the dashboard's instance
+
+Admin code imports `useTranslation` / `getI18n` from `"react-i18next"`. That
+import must resolve to the exact module instance `@medusajs/dashboard`
+initializes: the dashboard pins an exact version (Medusa 2.20.0 → `13.5.0`)
+and calls `i18next.use(initReactI18next).init(...)` on its own copy only —
+the bundle contains no `I18nextProvider`. When a host app provides a second
+copy (e.g. its own `react-i18next@14.x` at the backend app root), that copy
+is never initialized: every `t()` returns the raw key and the whole plugin
+admin renders `domain.area.key` strings while core dashboard pages stay
+translated (the console shows `react-i18next:: You will need to pass in an
+i18next instance by using initReactI18next`). This package therefore declares
+`react-i18next` as a peer dependency pinned to the dashboard's version, and
+hosts must pin the same exact version (plus the matching `i18next` pin) in
+their backend `package.json`. Verify a host build by counting the
+`You will need to pass in an i18next instance` warnings in the built admin
+bundle — one copy produces two (one per warning variant), two copies three or
+more.
+
 ### Deliberate exceptions
 
 - The five `dunning.*` event-type identifiers
