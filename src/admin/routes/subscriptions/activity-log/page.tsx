@@ -31,6 +31,7 @@ import {
   useAdminActivityLogDetailQuery,
   useAdminActivityLogDisplayQuery,
 } from "./data-loading"
+import { ACTIVITY_LOG_DOMAIN_EVENT_TYPES } from "./activity-log-event-presets"
 
 const PAGE_SIZE = 20
 const DEFAULT_DATE_FROM = toLocalDateTimeInputValue(addDays(new Date(), -30))
@@ -116,50 +117,22 @@ const ActivityLogPage = () => {
         {
           label: t("activityLog.domains.subscriptions"),
           value: "subscriptions",
-          eventTypes: [
-            "subscription.created",
-            "subscription.paused",
-            "subscription.resumed",
-            "subscription.canceled",
-            "subscription.plan_change_scheduled",
-            "subscription.shipping_address_updated",
-            "subscription.next_delivery_skipped",
-            "subscription.payment_method_updated",
-            "subscription.creation_failed",
-          ],
+          eventTypes: [...ACTIVITY_LOG_DOMAIN_EVENT_TYPES.subscriptions],
         },
         {
           label: t("activityLog.domains.renewals"),
           value: "renewals",
-          eventTypes: [
-            "renewal.cycle_created",
-            "renewal.approval_approved",
-            "renewal.approval_rejected",
-            "renewal.force_requested",
-            "renewal.succeeded",
-            "renewal.failed",
-          ],
+          eventTypes: [...ACTIVITY_LOG_DOMAIN_EVENT_TYPES.renewals],
         },
         {
           label: t("activityLog.domains.dunning"),
           value: "dunning",
-          eventTypes: [
-            "dunning.started",
-            "dunning.retry_executed",
-            "dunning.recovered",
-            "dunning.unrecovered",
-            "dunning.retry_schedule_updated",
-          ],
+          eventTypes: [...ACTIVITY_LOG_DOMAIN_EVENT_TYPES.dunning],
         },
         {
           label: t("activityLog.domains.cancellation"),
           value: "cancellation",
-          eventTypes: [
-            "cancellation.case_started",
-            "cancellation.offer_applied",
-            "cancellation.reason_updated",
-            "cancellation.finalized",
-          ],
+          eventTypes: [...ACTIVITY_LOG_DOMAIN_EVENT_TYPES.cancellation],
         },
       ] as const,
     [t]

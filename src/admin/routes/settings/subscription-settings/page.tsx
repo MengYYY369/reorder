@@ -47,6 +47,8 @@ const settingsSchema = z
       "recommend_retention_first",
       "allow_direct_cancellation",
     ]),
+    renewal_max_attempts: z.number().int().gt(0),
+    renewal_reminder_lead_days: z.number().int().min(0),
   })
   .superRefine((values, ctx) => {
     const intervals = values.dunning_retry_intervals.map((item) => item.value)
@@ -95,6 +97,8 @@ const defaultFormValues: SubscriptionSettingsFormValues = {
   max_dunning_attempts: 3,
   default_renewal_behavior: "process_immediately",
   default_cancellation_behavior: "recommend_retention_first",
+  renewal_max_attempts: 3,
+  renewal_reminder_lead_days: 3,
 }
 
 function getChangedSections(
@@ -113,7 +117,11 @@ function getChangedSections(
     sections.push("dunning")
   }
 
-  if (dirtyFields.default_renewal_behavior) {
+  if (
+    dirtyFields.default_renewal_behavior ||
+    dirtyFields.renewal_max_attempts ||
+    dirtyFields.renewal_reminder_lead_days
+  ) {
     sections.push("renewals")
   }
 
@@ -158,6 +166,8 @@ const SubscriptionSettingsPage = () => {
       max_dunning_attempts: settings.max_dunning_attempts,
       default_renewal_behavior: settings.default_renewal_behavior,
       default_cancellation_behavior: settings.default_cancellation_behavior,
+      renewal_max_attempts: settings.renewal_max_attempts,
+      renewal_reminder_lead_days: settings.renewal_reminder_lead_days,
     }
 
     form.reset(nextValues)
@@ -236,6 +246,9 @@ const SubscriptionSettingsPage = () => {
         response.subscription_settings.default_renewal_behavior,
       default_cancellation_behavior:
         response.subscription_settings.default_cancellation_behavior,
+      renewal_max_attempts: response.subscription_settings.renewal_max_attempts,
+      renewal_reminder_lead_days:
+        response.subscription_settings.renewal_reminder_lead_days,
     })
 
     toast.success(t("settings.toast.updated"))
@@ -268,6 +281,8 @@ const SubscriptionSettingsPage = () => {
         max_dunning_attempts: values.max_dunning_attempts,
         default_renewal_behavior: values.default_renewal_behavior,
         default_cancellation_behavior: values.default_cancellation_behavior,
+        renewal_max_attempts: values.renewal_max_attempts,
+        renewal_reminder_lead_days: values.renewal_reminder_lead_days,
         expected_version: data?.subscription_settings.version ?? 0,
       },
       {
@@ -591,6 +606,44 @@ const SubscriptionSettingsPage = () => {
                 <FieldError
                   message={form.formState.errors.default_renewal_behavior?.message}
                 />
+
+                <div className="flex flex-col gap-y-2">
+                  <Label htmlFor="renewal_max_attempts">
+                    {t("settings.fields.renewalMaxAttempts")}
+                  </Label>
+                  <Input
+                    id="renewal_max_attempts"
+                    type="number"
+                    min={1}
+                    step={1}
+                    {...form.register("renewal_max_attempts", {
+                      valueAsNumber: true,
+                    })}
+                  />
+                  <FieldError
+                    message={form.formState.errors.renewal_max_attempts?.message}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-y-2">
+                  <Label htmlFor="renewal_reminder_lead_days">
+                    {t("settings.fields.renewalReminderLeadDays")}
+                  </Label>
+                  <Input
+                    id="renewal_reminder_lead_days"
+                    type="number"
+                    min={0}
+                    step={1}
+                    {...form.register("renewal_reminder_lead_days", {
+                      valueAsNumber: true,
+                    })}
+                  />
+                  <FieldError
+                    message={
+                      form.formState.errors.renewal_reminder_lead_days?.message
+                    }
+                  />
+                </div>
               </div>
             </SettingsSection>
 

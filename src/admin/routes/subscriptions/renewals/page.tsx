@@ -40,6 +40,9 @@ const RENEWAL_CYCLE_STATUS_KEYS = {
   [RenewalCycleAdminStatus.PROCESSING]: "renewals.status.processing",
   [RenewalCycleAdminStatus.SUCCEEDED]: "renewals.status.succeeded",
   [RenewalCycleAdminStatus.FAILED]: "renewals.status.failed",
+  [RenewalCycleAdminStatus.ABANDONED]: "renewals.status.abandoned",
+  [RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION]:
+    "renewals.status.awaitingManualResolution",
 } as const;
 
 const RENEWAL_ATTEMPT_STATUS_KEYS = {
@@ -60,6 +63,9 @@ const RENEWAL_RELATIVE_STATUS_KEYS = {
     "renewals.relativeStatus.currentlyProcessing",
   [RenewalCycleAdminStatus.SUCCEEDED]: "renewals.relativeStatus.processed",
   [RenewalCycleAdminStatus.FAILED]: "renewals.relativeStatus.needsReview",
+  [RenewalCycleAdminStatus.ABANDONED]: "renewals.relativeStatus.abandoned",
+  [RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION]:
+    "renewals.relativeStatus.awaitingManualResolution",
 } as const;
 
 const RenewalsPage = () => {
@@ -96,6 +102,18 @@ const RenewalsPage = () => {
       {
         label: t(RENEWAL_CYCLE_STATUS_KEYS[RenewalCycleAdminStatus.FAILED]),
         value: RenewalCycleAdminStatus.FAILED,
+      },
+      {
+        label: t(RENEWAL_CYCLE_STATUS_KEYS[RenewalCycleAdminStatus.ABANDONED]),
+        value: RenewalCycleAdminStatus.ABANDONED,
+      },
+      {
+        label: t(
+          RENEWAL_CYCLE_STATUS_KEYS[
+            RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION
+          ]
+        ),
+        value: RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION,
       },
     ] as const;
   }, [t]);
@@ -724,6 +742,10 @@ function getCycleStatusColor(status: RenewalCycleAdminStatus) {
       return "green";
     case RenewalCycleAdminStatus.FAILED:
       return "red";
+    case RenewalCycleAdminStatus.ABANDONED:
+      return "grey";
+    case RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION:
+      return "orange";
   }
 }
 

@@ -10,6 +10,7 @@ import {
   Heading,
   IconButton,
   Label,
+  Select,
   StatusBadge,
   Table,
   Text,
@@ -43,12 +44,31 @@ import {
   RenewalCycleAdminDetail,
   RenewalCycleAdminDetailResponse,
   RenewalCycleAdminStatus,
+  RenewalStuckResolutionOutcome,
+  ResolveStuckRenewalAdminRequest,
 } from "../../../../types/renewal";
 
 const forceableStatuses = new Set<RenewalCycleAdminStatus>([
   RenewalCycleAdminStatus.SCHEDULED,
   RenewalCycleAdminStatus.FAILED,
 ]);
+
+// Cycles a stuck-resolution can act on: a crashed `processing` run and a cycle
+// the reconciliation parked for a human. Mirrors the workflow's own accepted
+// statuses; the route refuses everything else.
+const stuckResolvableStatuses = new Set<RenewalCycleAdminStatus>([
+  RenewalCycleAdminStatus.PROCESSING,
+  RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION,
+]);
+
+const STUCK_RESOLUTION_OUTCOME_KEYS: Record<
+  RenewalStuckResolutionOutcome,
+  string
+> = {
+  succeeded: "renewals.detail.outcome.succeeded",
+  failed: "renewals.detail.outcome.failed",
+  abandoned: "renewals.detail.outcome.abandoned",
+};
 
 type DecisionDrawerMode = "approve" | "reject";
 
@@ -57,6 +77,9 @@ const RENEWAL_CYCLE_STATUS_KEYS = {
   [RenewalCycleAdminStatus.PROCESSING]: "renewals.status.processing",
   [RenewalCycleAdminStatus.SUCCEEDED]: "renewals.status.succeeded",
   [RenewalCycleAdminStatus.FAILED]: "renewals.status.failed",
+  [RenewalCycleAdminStatus.ABANDONED]: "renewals.status.abandoned",
+  [RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION]:
+    "renewals.status.awaitingManualResolution",
 } as const;
 
 const RENEWAL_ATTEMPT_STATUS_KEYS = {
@@ -87,6 +110,11 @@ const RenewalDetailPage = () => {
   const [decisionMode, setDecisionMode] = useState<DecisionDrawerMode>("approve");
   const [decisionReason, setDecisionReason] = useState("");
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [resolveDrawerOpen, setResolveDrawerOpen] = useState(false);
+  const [resolveOutcome, setResolveOutcome] =
+    useState<RenewalStuckResolutionOutcome>("succeeded");
+  const [resolveReason, setResolveReason] = useState("");
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useAdminRenewalDetailQuery(id);
   const renewal = data?.renewal;
@@ -177,13 +205,51 @@ const RenewalDetailPage = () => {
     },
   });
 
+  const resolveStuckMutation = useMutation({
+    mutationFn: async (body: ResolveStuckRenewalAdminRequest) =>
+      sdk.client.fetch<RenewalCycleAdminDetailResponse>(
+        `/admin/renewals/${id}/resolve-stuck`,
+        {
+          method: "POST",
+          body,
+        }
+      ),
+    onSuccess: async () => {
+      await invalidateAdminRenewalsQueries(
+        queryClient,
+        id,
+        renewal?.subscription.subscription_id
+      );
+      toast.success(t("renewals.detail.toast.resolved"));
+      setResolveDrawerOpen(false);
+      setResolveReason("");
+      setResolveOutcome("succeeded");
+      setResolveError(null);
+    },
+    onError: (mutationError) => {
+      const message = getAdminErrorMessage(
+        mutationError,
+        t("renewals.detail.errors.resolveFailed")
+      );
+
+      setResolveError(message);
+      toast.error(message);
+    },
+  });
+
   const canForce = renewal ? forceableStatuses.has(renewal.status) : false;
+  const canResolveStuck = renewal
+    ? stuckResolvableStatuses.has(renewal.status)
+    : false;
   const canDecideApproval = renewal
     ? renewal.approval.required &&
       renewal.approval.status === RenewalApprovalStatus.PENDING
     : false;
   const isActionPending =
-    forceMutation.isPending || approveMutation.isPending || rejectMutation.isPending;
+    forceMutation.isPending ||
+    approveMutation.isPending ||
+    rejectMutation.isPending ||
+    resolveStuckMutation.isPending;
 
   const metadataRows = useMemo(() => {
     if (!renewal?.metadata) {
@@ -261,6 +327,42 @@ const RenewalDetailPage = () => {
 
     await rejectMutation.mutateAsync({
       reason: normalizedReason!,
+    });
+  };
+
+  const openResolveDrawer = () => {
+    setResolveOutcome("succeeded");
+    setResolveReason("");
+    setResolveError(null);
+    setResolveDrawerOpen(true);
+  };
+
+  const handleSubmitResolve = async () => {
+    const normalizedReason = resolveReason.trim();
+
+    if (!normalizedReason) {
+      const message = t("renewals.detail.errors.reasonRequired");
+      setResolveError(message);
+      toast.error(message);
+      return;
+    }
+
+    setResolveError(null);
+
+    const confirmed = await prompt({
+      title: t("renewals.detail.prompt.resolveTitle"),
+      description: t("renewals.detail.prompt.resolveDescription"),
+      confirmText: t("renewals.detail.actions.resolveStuck"),
+      cancelText: t("common.actions.cancel"),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await resolveStuckMutation.mutateAsync({
+      outcome: resolveOutcome,
+      reason: normalizedReason,
     });
   };
 
@@ -347,6 +449,20 @@ const RenewalDetailPage = () => {
                       {forceMutation.isPending
                         ? t("renewals.detail.actions.forcing")
                         : t("renewals.detail.actions.forceRenewal")}
+                    </span>
+                  </DropdownMenu.Item>
+                ) : null}
+                {canResolveStuck ? (
+                  <DropdownMenu.Item
+                    className="flex items-center gap-x-2"
+                    disabled={isActionPending}
+                    onClick={openResolveDrawer}
+                  >
+                    <CheckCircle className="text-ui-fg-subtle" />
+                    <span>
+                      {resolveStuckMutation.isPending
+                        ? t("renewals.detail.actions.resolving")
+                        : t("renewals.detail.actions.resolveStuck")}
                     </span>
                   </DropdownMenu.Item>
                 ) : null}
@@ -799,6 +915,77 @@ const RenewalDetailPage = () => {
           </Drawer.Footer>
         </Drawer.Content>
       </Drawer>
+
+      <Drawer open={resolveDrawerOpen} onOpenChange={setResolveDrawerOpen}>
+        <Drawer.Content>
+          <Drawer.Header>
+            <Drawer.Title>{t("renewals.detail.drawer.resolveTitle")}</Drawer.Title>
+          </Drawer.Header>
+          <Drawer.Body className="flex flex-1 flex-col gap-y-4 p-4">
+            {resolveError ? <Alert variant="error">{resolveError}</Alert> : null}
+            <div className="flex flex-col gap-y-2">
+              <Label htmlFor="resolve-outcome">
+                {t("renewals.detail.drawer.resolveOutcome")}
+              </Label>
+              <Select
+                value={resolveOutcome}
+                onValueChange={(value) =>
+                  setResolveOutcome(value as RenewalStuckResolutionOutcome)
+                }
+              >
+                <Select.Trigger id="resolve-outcome">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {(
+                    Object.keys(STUCK_RESOLUTION_OUTCOME_KEYS) as RenewalStuckResolutionOutcome[]
+                  ).map((outcome) => (
+                    <Select.Item key={outcome} value={outcome}>
+                      {t(STUCK_RESOLUTION_OUTCOME_KEYS[outcome])}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-y-2">
+              <Label htmlFor="resolve-reason">
+                {t("renewals.detail.drawer.resolveReasonRequired")}
+              </Label>
+              <Textarea
+                id="resolve-reason"
+                value={resolveReason}
+                onChange={(event) => setResolveReason(event.target.value)}
+                placeholder={t("renewals.detail.drawer.resolveReasonPlaceholder")}
+              />
+            </div>
+          </Drawer.Body>
+          <Drawer.Footer>
+            <div className="flex items-center justify-end gap-x-2">
+              <Drawer.Close asChild>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  type="button"
+                  disabled={resolveStuckMutation.isPending}
+                >
+                  {t("common.actions.cancel")}
+                </Button>
+              </Drawer.Close>
+              <Button
+                size="small"
+                type="button"
+                isLoading={resolveStuckMutation.isPending}
+                disabled={resolveStuckMutation.isPending}
+                onClick={() => {
+                  void handleSubmitResolve();
+                }}
+              >
+                {t("renewals.detail.actions.resolveStuck")}
+              </Button>
+            </div>
+          </Drawer.Footer>
+        </Drawer.Content>
+      </Drawer>
     </div>
   );
 };
@@ -883,6 +1070,10 @@ function getCycleStatusColor(status: RenewalCycleAdminStatus) {
       return "green";
     case RenewalCycleAdminStatus.FAILED:
       return "red";
+    case RenewalCycleAdminStatus.ABANDONED:
+      return "grey";
+    case RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION:
+      return "orange";
   }
 }
 

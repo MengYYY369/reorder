@@ -3,6 +3,8 @@ export enum RenewalCycleAdminStatus {
   PROCESSING = "processing",
   SUCCEEDED = "succeeded",
   FAILED = "failed",
+  ABANDONED = "abandoned",
+  AWAITING_MANUAL_RESOLUTION = "awaiting_manual_resolution",
 }
 
 export enum RenewalAttemptAdminStatus {
@@ -103,5 +105,12 @@ export type ApproveRenewalChangesAdminRequest = {
 }
 
 export type RejectRenewalChangesAdminRequest = {
+  reason: string
+}
+
+export type RenewalStuckResolutionOutcome = "succeeded" | "failed" | "abandoned"
+
+export type ResolveStuckRenewalAdminRequest = {
+  outcome: RenewalStuckResolutionOutcome
   reason: string
 }

@@ -13,6 +13,8 @@ export type AdminSubscriptionSettings = {
   max_dunning_attempts: number
   default_renewal_behavior: AdminSubscriptionRenewalBehavior
   default_cancellation_behavior: AdminSubscriptionCancellationBehavior
+  renewal_max_attempts: number
+  renewal_reminder_lead_days: number
   version: number
   updated_by: string | null
   updated_at: string | null
@@ -30,6 +32,8 @@ export type UpdateSubscriptionSettingsAdminBody = {
   max_dunning_attempts: number
   default_renewal_behavior: AdminSubscriptionRenewalBehavior
   default_cancellation_behavior: AdminSubscriptionCancellationBehavior
+  renewal_max_attempts: number
+  renewal_reminder_lead_days: number
   expected_version: number
   reason?: string | null
 }

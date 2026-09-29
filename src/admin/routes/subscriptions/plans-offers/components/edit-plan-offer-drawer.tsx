@@ -28,6 +28,7 @@ import {
   adminPlanOffersQueryKeys,
   useAdminPlanOfferDetailQuery,
 } from "../data-loading"
+import { NativeTrialVariantDisplay } from "./native-trial-display"
 
 const frequencyRowSchema = z.object({
   interval: z.enum(PlanOfferFrequencyInterval),
@@ -45,6 +46,7 @@ const editPlanOfferSchema = z
     trial_enabled: z.boolean(),
     trial_days: z.number().int().nullable(),
     trial_requires_payment_method: z.boolean(),
+    trial_bonus_days: z.number().int().nullable(),
     stacking_policy: z.enum([
       "allowed",
       "disallow_all",
@@ -99,6 +101,26 @@ const editPlanOfferSchema = z
         path: ["trial_days"],
       })
     }
+
+    if (!values.trial_enabled && values.trial_bonus_days !== null) {
+      ctx.addIssue({
+        code: "custom",
+        message: "planOffers.validation.trialBonusDaysDisabled",
+        path: ["trial_bonus_days"],
+      })
+    }
+
+    if (
+      values.trial_enabled &&
+      values.trial_bonus_days !== null &&
+      values.trial_bonus_days <= 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "planOffers.validation.trialBonusDaysPositive",
+        path: ["trial_bonus_days"],
+      })
+    }
   })
 
 type EditPlanOfferFormValues = z.infer<typeof editPlanOfferSchema>
@@ -132,6 +154,7 @@ export const EditPlanOfferDrawer = ({
       trial_enabled: false,
       trial_days: null,
       trial_requires_payment_method: false,
+      trial_bonus_days: null,
       stacking_policy: "allowed",
       consent_from_session: null,
       row_stacking_policy: "extend",
@@ -178,6 +201,9 @@ export const EditPlanOfferDrawer = ({
         : null,
       trial_requires_payment_method:
         detail.rules?.trial_requires_payment_method ?? false,
+      trial_bonus_days: detail.rules?.trial_enabled
+        ? detail.rules?.trial_bonus_days ?? null
+        : null,
       stacking_policy: detail.rules?.stacking_policy ?? "allowed",
       consent_from_session: detail.rules?.consent_from_session ?? null,
       row_stacking_policy: detail.rules?.row_stacking_policy ?? "extend",
@@ -255,6 +281,7 @@ export const EditPlanOfferDrawer = ({
         trial_requires_payment_method: values.trial_enabled
           ? values.trial_requires_payment_method
           : false,
+        trial_bonus_days: values.trial_enabled ? values.trial_bonus_days : null,
         stacking_policy: values.stacking_policy,
         consent_from_session: values.consent_from_session,
         row_stacking_policy: values.row_stacking_policy,
@@ -298,7 +325,12 @@ export const EditPlanOfferDrawer = ({
       shouldValidate: false,
       shouldDirty: true,
     })
+    form.setValue("trial_bonus_days", null, {
+      shouldValidate: false,
+      shouldDirty: true,
+    })
     form.clearErrors("trial_days")
+    form.clearErrors("trial_bonus_days")
   }, [form, trialEnabled])
 
   return (
@@ -359,6 +391,8 @@ export const EditPlanOfferDrawer = ({
                       </Text>
                     </div>
                   </div>
+
+                  <NativeTrialVariantDisplay productId={detail.target.product_id} />
 
                   <div className="grid gap-2">
                     <div className="flex items-center justify-between rounded-lg border border-ui-border-base px-4 py-3">
@@ -430,75 +464,6 @@ export const EditPlanOfferDrawer = ({
                       >
                         {t("planOffers.form.offerRulesEditHint")}
                       </Text>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit-minimum-cycles">
-                          {t("planOffers.form.minimumCycles")}
-                        </Label>
-                        <Input
-                          id="edit-minimum-cycles"
-                          type="number"
-                          min={1}
-                          step={1}
-                          {...form.register("minimum_cycles", {
-                            setValueAs: (value) =>
-                              value === "" || value === null || value === undefined
-                                ? null
-                                : Number(value),
-                          })}
-                        />
-                        <Text
-                          size="small"
-                          leading="compact"
-                          className="text-ui-fg-subtle"
-                        >
-                          {t("planOffers.form.minimumCyclesHint")}
-                        </Text>
-                        <FieldError
-                          message={form.formState.errors.minimum_cycles?.message}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit-stacking-policy">
-                          {t("planOffers.form.stackingPolicy")}
-                        </Label>
-                        <Controller
-                          control={form.control}
-                          name="stacking_policy"
-                          render={({ field }) => (
-                            <Select
-                              value={field.value}
-                              onValueChange={field.onChange}
-                            >
-                              <Select.Trigger id="edit-stacking-policy">
-                                <Select.Value />
-                              </Select.Trigger>
-                              <Select.Content>
-                                <Select.Item value="allowed">
-                                  {t("planOffers.form.stackingAllowed")}
-                                </Select.Item>
-                                <Select.Item value="disallow_all">
-                                  {t("planOffers.form.stackingDisallowAll")}
-                                </Select.Item>
-                                <Select.Item value="disallow_subscription_discounts">
-                                  {t(
-                                    "planOffers.form.stackingDisallowSubscriptionDiscounts"
-                                  )}
-                                </Select.Item>
-                              </Select.Content>
-                            </Select>
-                          )}
-                        />
-                        <Text
-                          size="small"
-                          leading="compact"
-                          className="text-ui-fg-subtle"
-                        >
-                          {t("planOffers.form.stackingPolicyHint")}
-                        </Text>
-                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -635,6 +600,9 @@ export const EditPlanOfferDrawer = ({
                                     false,
                                     { shouldValidate: true },
                                   )
+                                  form.setValue("trial_bonus_days", null, {
+                                    shouldValidate: true,
+                                  })
                                 }
                               }}
                             />
@@ -666,6 +634,42 @@ export const EditPlanOfferDrawer = ({
                         />
                         <FieldError
                           message={form.formState.errors.trial_days?.message}
+                        />
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Label htmlFor="edit-trial-bonus-days">
+                          {t("planOffers.form.trialBonusDays")}
+                        </Label>
+                        <Input
+                          id="edit-trial-bonus-days"
+                          type="number"
+                          min={1}
+                          step={1}
+                          disabled={!trialEnabled}
+                          {...form.register("trial_bonus_days", {
+                            setValueAs: (value) => {
+                              if (value === "" || value === undefined) {
+                                return null
+                              }
+
+                              const parsed = Number(value)
+
+                              return Number.isNaN(parsed) ? null : parsed
+                            },
+                          })}
+                        />
+                        <Text
+                          size="small"
+                          leading="compact"
+                          className="text-ui-fg-subtle"
+                        >
+                          {t("planOffers.form.trialBonusDaysHint")}
+                        </Text>
+                        <FieldError
+                          message={
+                            form.formState.errors.trial_bonus_days?.message
+                          }
                         />
                       </div>
 

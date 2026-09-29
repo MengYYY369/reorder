@@ -147,15 +147,8 @@
       "offerEnabledHint": "创建后立即启用此优惠。",
       "offerEnabledEditHint": "启用或停用此配置。",
       "offerRules": "优惠规则",
-      "offerRulesHint": "定义可选的优惠约束，例如最短周期、试用行为和叠加策略。",
-      "offerRulesEditHint": "更新最短周期、试用行为和叠加策略。",
-      "minimumCycles": "最短周期数",
-      "minimumCyclesHint": "如果没有最短订阅周期，请留空。",
-      "stackingPolicy": "叠加策略",
-      "stackingPolicyHint": "控制此优惠是否可以与其他折扣叠加。",
-      "stackingAllowed": "允许叠加",
-      "stackingDisallowAll": "全部禁止",
-      "stackingDisallowSubscriptionDiscounts": "禁止订阅折扣叠加",
+      "offerRulesHint": "定义试用行为与叠加规则。旧版的最短周期与叠加策略不可编辑且不生效。",
+      "offerRulesEditHint": "更新试用行为与叠加规则。旧版的最短周期与叠加策略不可编辑且不生效。",
       "consentFromSession": "自动续费授权",
       "consentFromSessionHint": "结账会话能证明用户授权时，把手动续费订阅翻转为自动续费。不配置则永不翻转。",
       "consentNone": "从不自动翻转",
@@ -170,7 +163,7 @@
       "trialEnabledHint": "允许此优惠包含试用期。",
       "trialDays": "试用天数",
       "trialRequiresPaymentMethod": "要求支付方式",
-      "trialRequiresPaymentMethodHint": "领取试用前需绑定可自动续费的支付方式。仅存储供将来使用——当前未强制(v1 试用到期不扣款)。",
+      "trialRequiresPaymentMethodHint": "试用需绑定可自动续费的支付方式。开启后，非自动续费的试用结账将被拒绝，试用兑换码将被拒收。",
       "frequencies": "频率",
       "frequenciesHint": "定义允许的频率与可选折扣。",
       "frequenciesEditHint": "更新允许的频率及其折扣。",
@@ -182,14 +175,24 @@
       "discountType": "折扣类型",
       "percentage": "按百分比",
       "fixed": "固定金额",
-      "discountValue": "折扣值"
+      "discountValue": "折扣值",
+      "trialBonusDays": "绑卡赠送试用天数",
+      "trialBonusDaysHint": "客户为领取的试用绑定支付方式后额外赠送的试用天数。留空（或 0）则隐藏绑定并延长选项。",
+      "nativeTrialTitle": "PayPal 原生试用（变体元数据，只读）",
+      "nativeTrialHint": "这些值保存在商品变体的 PayPal 订阅元数据中，由 PayPal 自己扣费。仅作参考展示——上方的试用配置不会改变它们。",
+      "nativeTrialPeriods": "试用：{{value}} 天",
+      "nativeTrialPeriodsMissing": "试用：未配置",
+      "nativeTrialSetupFee": "开通费：{{value}}",
+      "nativeTrialSetupFeeMissing": "开通费：无"
     },
     "validation": {
       "selectVariant": "请选择变体",
       "frequencyUnique": "频率不能重复",
       "discountValueRequired": "请填写折扣值",
       "trialDaysRequired": "启用试用时必须填写试用天数",
-      "trialDaysPositive": "试用天数必须大于 0"
+      "trialDaysPositive": "试用天数必须大于 0",
+      "trialBonusDaysDisabled": "禁用试用时必须留空绑卡赠送天数",
+      "trialBonusDaysPositive": "绑卡赠送天数必须大于 0"
     }
   },
   "subscriptions": {
@@ -425,7 +428,9 @@
       "scheduled": "已排期",
       "processing": "正在处理",
       "succeeded": "已成功",
-      "failed": "已失败"
+      "failed": "已失败",
+      "abandoned": "已终止",
+      "awaitingManualResolution": "待人工处理"
     },
     "attemptStatus": {
       "processing": "进行中",
@@ -443,7 +448,9 @@
       "awaitingProcessing": "等待处理",
       "currentlyProcessing": "正在处理",
       "processed": "已处理",
-      "needsReview": "需要复核"
+      "needsReview": "需要复核",
+      "abandoned": "已停止重试",
+      "awaitingManualResolution": "需要人工介入"
     },
     "detail": {
       "title": "续订",
@@ -458,7 +465,9 @@
         "approveChanges": "批准变更",
         "rejectChanges": "拒绝变更",
         "approve": "批准",
-        "reject": "拒绝"
+        "reject": "拒绝",
+        "resolveStuck": "解决滞留周期",
+        "resolving": "解决中……"
       },
       "prompt": {
         "forceTitle": "立即续订？",
@@ -466,18 +475,22 @@
         "approveTitle": "批准变更？",
         "approveDescription": "您即将批准此续订周期的待处理变更。",
         "rejectTitle": "拒绝变更？",
-        "rejectDescription": "您即将拒绝此续订周期的待处理变更。"
+        "rejectDescription": "您即将拒绝此续订周期的待处理变更。",
+        "resolveTitle": "解决滞留周期？",
+        "resolveDescription": "所选结果会将此续订周期结算、重新排队或终止，并会在活动日志中记录操作人与原因。"
       },
       "toast": {
         "forced": "续订已触发",
         "approved": "待处理变更已批准",
-        "rejected": "待处理变更已拒绝"
+        "rejected": "待处理变更已拒绝",
+        "resolved": "滞留周期已解决"
       },
       "errors": {
         "forceFailed": "触发续订失败",
         "approveFailed": "批准变更失败",
         "rejectFailed": "拒绝变更失败",
-        "reasonRequired": "请填写原因"
+        "reasonRequired": "请填写原因",
+        "resolveFailed": "解决滞留续订周期失败"
       },
       "sections": {
         "cycleOverview": "周期概览",
@@ -518,7 +531,16 @@
         "rejectTitle": "拒绝变更",
         "reasonRequired": "原因 *",
         "optionalNote": "可选的审核备注",
-        "requiredRejectionReason": "必填的拒绝原因"
+        "requiredRejectionReason": "必填的拒绝原因",
+        "resolveTitle": "解决滞留周期",
+        "resolveOutcome": "处理结果",
+        "resolveReasonRequired": "原因 *",
+        "resolveReasonPlaceholder": "说明支付服务商显示的状态，以及为什么该结果是正确的"
+      },
+      "outcome": {
+        "succeeded": "按成功处理",
+        "failed": "按失败处理",
+        "abandoned": "按终止处理"
       }
     }
   },
@@ -1079,7 +1101,9 @@
       "addInterval": "添加间隔",
       "maxDunningAttempts": "最大催收尝试次数",
       "defaultRenewalBehavior": "默认续订行为",
-      "defaultCancellationBehavior": "默认取消行为"
+      "defaultCancellationBehavior": "默认取消行为",
+      "renewalMaxAttempts": "最大续费尝试次数",
+      "renewalReminderLeadDays": "续费提醒提前天数"
     },
     "behaviorOptions": {
       "renewal": {

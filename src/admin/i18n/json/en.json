@@ -147,15 +147,8 @@
       "offerEnabledHint": "Enable this offer as soon as it is created.",
       "offerEnabledEditHint": "Enable or disable this configuration.",
       "offerRules": "Offer rules",
-      "offerRulesHint": "Define optional offer constraints such as minimum period, trial behavior, and stacking policy.",
-      "offerRulesEditHint": "Update minimum period, trial behavior, and stacking policy.",
-      "minimumCycles": "Minimum cycles",
-      "minimumCyclesHint": "Leave empty if there is no minimum subscription period.",
-      "stackingPolicy": "Stacking policy",
-      "stackingPolicyHint": "Control whether this offer can stack with other discounts.",
-      "stackingAllowed": "Allowed",
-      "stackingDisallowAll": "Disallow all",
-      "stackingDisallowSubscriptionDiscounts": "Disallow subscription discounts",
+      "offerRulesHint": "Define trial behavior and stacking rules. The legacy minimum period and stacking policy are not editable and not enforced.",
+      "offerRulesEditHint": "Update trial behavior and stacking rules. The legacy minimum period and stacking policy are not editable and not enforced.",
       "consentFromSession": "Auto-renew consent",
       "consentFromSessionHint": "Flip a manual subscription to automatic renewals when the checkout session proves consent. Never flips on its own.",
       "consentNone": "Never flip automatically",
@@ -170,7 +163,7 @@
       "trialEnabledHint": "Allow a trial period for this offer.",
       "trialDays": "Trial days",
       "trialRequiresPaymentMethod": "Require payment method",
-      "trialRequiresPaymentMethodHint": "Require an auto-renewable payment method to claim the trial. Stored for future use — not enforced yet (PayPal mechanism pending, v1 trials end without charging).",
+      "trialRequiresPaymentMethodHint": "Require an auto-renewable payment method for the trial. When on, a manual-mode trial checkout is rejected and a trial redemption code is refused.",
       "frequencies": "Frequencies",
       "frequenciesHint": "Define allowed frequencies and optional discounts.",
       "frequenciesEditHint": "Update allowed frequencies and their discounts.",
@@ -182,14 +175,24 @@
       "discountType": "Discount type",
       "percentage": "Percentage",
       "fixed": "Fixed",
-      "discountValue": "Discount value"
+      "discountValue": "Discount value",
+      "trialBonusDays": "Trial bonus days for binding a card",
+      "trialBonusDaysHint": "Extra trial days granted once the customer binds a payment method to the claimed trial. Leave empty (or 0) to hide the bind-and-extend option.",
+      "nativeTrialTitle": "Native PayPal trial (variant metadata, read-only)",
+      "nativeTrialHint": "These values live in the product variant's PayPal subscription metadata and are charged by PayPal itself. They are shown for reference only — the offer's trial values above do not change them.",
+      "nativeTrialPeriods": "Trial: {{value}} day(s)",
+      "nativeTrialPeriodsMissing": "Trial: not configured",
+      "nativeTrialSetupFee": "Setup fee: {{value}}",
+      "nativeTrialSetupFeeMissing": "Setup fee: none"
     },
     "validation": {
       "selectVariant": "Select a variant",
       "frequencyUnique": "Frequency must be unique",
       "discountValueRequired": "Discount value is required",
       "trialDaysRequired": "Trial days is required when trial is enabled",
-      "trialDaysPositive": "Trial days must be greater than 0"
+      "trialDaysPositive": "Trial days must be greater than 0",
+      "trialBonusDaysDisabled": "Trial bonus days must be empty when trial is disabled",
+      "trialBonusDaysPositive": "Trial bonus days must be greater than 0"
     }
   },
   "subscriptions": {
@@ -425,7 +428,9 @@
       "scheduled": "Scheduled",
       "processing": "Processing",
       "succeeded": "Succeeded",
-      "failed": "Failed"
+      "failed": "Failed",
+      "abandoned": "Abandoned",
+      "awaitingManualResolution": "Awaiting manual resolution"
     },
     "attemptStatus": {
       "processing": "Processing",
@@ -443,7 +448,9 @@
       "awaitingProcessing": "Awaiting processing",
       "currentlyProcessing": "Currently processing",
       "processed": "Processed",
-      "needsReview": "Needs review"
+      "needsReview": "Needs review",
+      "abandoned": "Retries stopped",
+      "awaitingManualResolution": "Needs a human"
     },
     "detail": {
       "title": "Renewal",
@@ -458,7 +465,9 @@
         "approveChanges": "Approve changes",
         "rejectChanges": "Reject changes",
         "approve": "Approve",
-        "reject": "Reject"
+        "reject": "Reject",
+        "resolveStuck": "Resolve stuck cycle",
+        "resolving": "Resolving..."
       },
       "prompt": {
         "forceTitle": "Force renewal?",
@@ -466,18 +475,22 @@
         "approveTitle": "Approve changes?",
         "approveDescription": "You are about to approve the pending changes for this renewal cycle.",
         "rejectTitle": "Reject changes?",
-        "rejectDescription": "You are about to reject the pending changes for this renewal cycle."
+        "rejectDescription": "You are about to reject the pending changes for this renewal cycle.",
+        "resolveTitle": "Resolve stuck cycle?",
+        "resolveDescription": "The chosen outcome settles, re-queues, or terminates this renewal cycle, and records you and this reason in the activity log."
       },
       "toast": {
         "forced": "Renewal forced",
         "approved": "Pending changes approved",
-        "rejected": "Pending changes rejected"
+        "rejected": "Pending changes rejected",
+        "resolved": "Stuck cycle resolved"
       },
       "errors": {
         "forceFailed": "Failed to force renewal",
         "approveFailed": "Failed to approve changes",
         "rejectFailed": "Failed to reject changes",
-        "reasonRequired": "Reason is required"
+        "reasonRequired": "Reason is required",
+        "resolveFailed": "Failed to resolve the stuck renewal cycle"
       },
       "sections": {
         "cycleOverview": "Cycle overview",
@@ -518,7 +531,16 @@
         "rejectTitle": "Reject changes",
         "reasonRequired": "Reason *",
         "optionalNote": "Optional review note",
-        "requiredRejectionReason": "Required rejection reason"
+        "requiredRejectionReason": "Required rejection reason",
+        "resolveTitle": "Resolve stuck cycle",
+        "resolveOutcome": "Outcome",
+        "resolveReasonRequired": "Reason *",
+        "resolveReasonPlaceholder": "Describe what the payment provider shows and why this outcome is the correct one"
+      },
+      "outcome": {
+        "succeeded": "Mark as succeeded",
+        "failed": "Mark as failed",
+        "abandoned": "Mark as abandoned"
       }
     }
   },
@@ -1079,7 +1101,9 @@
       "addInterval": "Add interval",
       "maxDunningAttempts": "Max dunning attempts",
       "defaultRenewalBehavior": "Default renewal behavior",
-      "defaultCancellationBehavior": "Default cancellation behavior"
+      "defaultCancellationBehavior": "Default cancellation behavior",
+      "renewalMaxAttempts": "Max renewal attempts",
+      "renewalReminderLeadDays": "Renewal reminder lead days"
     },
     "behaviorOptions": {
       "renewal": {

@@ -38,6 +38,8 @@ export const adminPlanOffersQueryKeys = {
     ] as const,
   variantSelection: (productId: string) =>
     [...adminPlanOffersQueryKeys.all, "variant-selection", productId] as const,
+  variantMetadata: (productId: string) =>
+    [...adminPlanOffersQueryKeys.all, "variant-metadata", productId] as const,
   display: (params: {
     pageSize: number;
     offset: number;
@@ -207,5 +209,34 @@ export function useAdminProductVariantsSelectionQuery(
         offset: 0,
       }),
     enabled: open && Boolean(productId),
+  });
+}
+
+/**
+ * Variant metadata for the offer form's read-only native-trial display: a
+ * variant carrying `paypal_subscription` metadata is a provider-managed
+ * subscription whose trial length and setup fee live in the variant metadata
+ * (Q14/Q11) — shown to the operator beside the offer's own trial values so
+ * the two numbers cannot be confused.
+ */
+export type ProductVariantMetadataRow = {
+  id: string
+  title: string | null
+  metadata: Record<string, unknown> | null
+}
+
+export function useAdminProductVariantsMetadataQuery(productId?: string | null) {
+  return useQuery<ProductVariantMetadataRow[]>({
+    queryKey: adminPlanOffersQueryKeys.variantMetadata(productId ?? ""),
+    queryFn: async () => {
+      const response = await sdk.admin.product.listVariants(productId!, {
+        limit: 100,
+        offset: 0,
+        fields: "id,title,metadata",
+      });
+
+      return (response.variants ?? []) as ProductVariantMetadataRow[];
+    },
+    enabled: Boolean(productId),
   });
 }
