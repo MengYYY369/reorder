@@ -57,8 +57,8 @@ migration, `GET /store/paypal/config`, hot reload) and 0.7.1 the host i18n +
 audit-log sub-page; both tags exist and the host already runs `^0.7.1`. The
 vault-binding release is therefore the **next minor: 0.8.0**.
 **Plan:** `.agents/specs/2026-09-28-paypal-vault-binding-plan.md` (committed in
-the reorder repo; copy it into `medusa-paypal` when work starts, and update its
-line 5 — it still says "currently 0.6.1"). The plan's
+the reorder repo; copy it into `medusa-paypal` when work starts — its version
+line and line references were refreshed against 0.7.1 on 2026-10-01). The plan's
 own Execution Handoff recommends subagent-driven execution; the sandbox
 verification (its Task P4) **already passed on 2026-09-28**, so the sequence is
 P1 → P2 → P5, with P4 reduced to a re-run.
@@ -80,10 +80,11 @@ is needed when it lands — the probe flips on its own.
       `@paypal/paypal-server-sdk@1.0.0` exposes all three
       (`vaultController.d.ts`), so this is glue, not SDK work.
 - [ ] **A2 — Task P2: `startVaultApproval` / `completeVaultApproval` on the
-      module service**, with the client built through
-      `findPaypalProviderDeclaration(paymentModule)` (already present at
-      `src/api/lib/paypal.ts:37`). **Re-derive the credential premise against
-      0.7.x before implementing.** The original U5 argument — the host
+      module service**, with the client built from the module's own
+      `getResolvedPaypalConfig()` (the plan's Task P2 Step 1; the module-local
+      container cannot resolve `payment`, and the payment-module route
+      `findPaypalProviderDeclaration` → `resolvePaypalClient` belongs to the
+      HTTP routes). The original U5 argument — the host
       registers the plugin as a bare string in
       `apps/backend/medusa-config.ts`, so module options never arrive and the
       module's own client has empty credentials in production — predates
@@ -105,8 +106,10 @@ is needed when it lands — the probe flips on its own.
       finding.
 - [ ] **A4 — Task P5: release 0.8.0** — version, CHANGELOG (naming the two
       methods and that `ON_SUCCESS` is unchanged), README (method signatures,
-      the duck-type idiom, and the pre-launch account-gate checklist from
-      Workstream C). Gates: `npm run build` and `npm test`.
+      the duck-type idiom, the sandbox `403 NOT_AUTHORIZED` failure signature,
+      and a note that the four account gates are already documented at
+      `README.md:189-196` and stay unverifiable until production access
+      exists). Gates: `npm run build`, `npm test`, and the A3 re-run.
       **Publishing to GitHub Packages is a separate, explicit authorization.**
 
 **Do not rebuild Task P3** (deleted): the native rail's trial length is part of
