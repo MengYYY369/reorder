@@ -16,6 +16,9 @@ export type StoreSubscriptionListItemSource = {
   status: string
   created_at?: string | Date | null
   next_renewal_at?: string | Date | null
+  cancel_effective_at?: string | Date | null
+  is_trial?: boolean | null
+  trial_ends_at?: string | Date | null
   frequency_interval: string
   frequency_value: number
   skip_next_cycle: boolean
@@ -42,6 +45,9 @@ export type StoreSubscriptionListItemDto = {
   frequency_value: number
   next_renewal_at: string | null
   effective_next_renewal_at: string | null
+  cancel_effective_at: string | null
+  is_trial: boolean
+  trial_ends_at: string | null
   payment_mode: string | null
   has_payment_method: boolean
   active_cancellation_case: StoreSubscriptionActiveCancellationCase | null
@@ -71,6 +77,13 @@ export function serializeStoreSubscriptionListItem(
         frequency_value: subscription.frequency_value,
       })
     ),
+    // The redemption boundary (a free-period grant's scheduled end) and the
+    // trial state are the two fields the storefront reads to tell a trial row
+    // from a paid manual one; `payment_provider_id` is deliberately not
+    // projected, so this is the only signal.
+    cancel_effective_at: toIsoStringOrNull(subscription.cancel_effective_at),
+    is_trial: Boolean(subscription.is_trial),
+    trial_ends_at: toIsoStringOrNull(subscription.trial_ends_at),
     // `payment_context` is a nullable jsonb column: a row created before the
     // plugin stored anything there reads back as null, not as "no payment mode".
     payment_mode:

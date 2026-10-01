@@ -37,6 +37,9 @@ type SubscriptionStoreListItem = {
   status: string
   created_at?: string | Date | null
   next_renewal_at: string | null
+  cancel_effective_at?: string | Date | null
+  is_trial?: boolean | null
+  trial_ends_at?: string | Date | null
   frequency_interval: "week" | "month" | "year"
   frequency_value: number
   skip_next_cycle: boolean
@@ -147,6 +150,9 @@ export async function listStoreCustomerSubscriptions(
       "customer_id",
       "created_at",
       "next_renewal_at",
+      "cancel_effective_at",
+      "is_trial",
+      "trial_ends_at",
       "frequency_interval",
       "frequency_value",
       "skip_next_cycle",

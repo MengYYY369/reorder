@@ -7,7 +7,6 @@ import {
 } from "@medusajs/framework/utils"
 import type {
   ICartModuleService,
-  ILinkModuleService,
   IOrderModuleService,
   IPaymentModuleService,
   MedusaContainer,
@@ -24,13 +23,23 @@ import { SAAS_BRIDGE_TENANT_KEY } from "../../src/modules/saas-bridge/auth"
 import type { SaasBridgeTenantConfig } from "../../src/modules/saas-bridge/types"
 import { POST as postRenew } from "../../src/api/store/saas/renew/route"
 import { createSubscriptionSeed } from "../helpers/subscription-fixtures"
-import {
-  createCustomer,
-  createProductWithVariant,
-} from "../helpers/subscription-fixtures"
+import { createProductWithVariant } from "../helpers/subscription-fixtures"
 import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
 import { createPlanOfferSeed } from "../helpers/plan-offer-fixtures"
 import { createRedemptionBatch } from "../helpers/redemption-fixtures"
+import {
+  PlanOfferFrequencyInterval,
+  PlanOfferScope,
+} from "../../src/modules/plan-offer/types"
+
+/**
+ * The link module's `create` as this spec uses it. `ILinkModuleService` is not
+ * exported by the pinned `@medusajs/framework/types`, so the two call sites
+ * below name the one method they call.
+ */
+type LinkModuleService = {
+  create(links: unknown): Promise<unknown>
+}
 
 jest.setTimeout(120 * 1000)
 
@@ -138,7 +147,7 @@ async function seedBridgeOrder(
   const cartModule = container.resolve<ICartModuleService>(Modules.CART)
   const orderModule = container.resolve<IOrderModuleService>(Modules.ORDER)
   const paymentModule = container.resolve<IPaymentModuleService>(Modules.PAYMENT)
-  const link = container.resolve<ILinkModuleService>(
+  const link = container.resolve<LinkModuleService>(
     ContainerRegistrationKeys.LINK
   )
 
@@ -182,7 +191,7 @@ async function seedBridgeOrder(
     data: {},
   } as never)
 
-  const order = await orderModule.createOrders({
+  const order = (await orderModule.createOrders({
     customer_id: customer.id,
     email: customer.email,
     currency_code: "usd",
@@ -209,7 +218,7 @@ async function seedBridgeOrder(
       postal_code: "00001",
       country_code: "us",
     },
-  } as never)
+  } as never)) as unknown as { id: string }
 
   const links: Record<string, Record<string, unknown>>[] = [
     {
@@ -516,11 +525,13 @@ medusaIntegrationTestRunner({
           "frequencyValue",
           "hasPaymentMethod",
           "id",
+          "isTrial",
           "nextRenewalAt",
           "orderId",
           "paymentMode",
           "reference",
           "status",
+          "trialEndsAt",
         ])
         expect(subscription.id).toEqual(subscriptionId)
         expect(subscription.status).toEqual("active")
@@ -528,6 +539,8 @@ medusaIntegrationTestRunner({
         expect(subscription.frequencyValue).toEqual(1)
         expect(subscription.nextRenewalAt).toEqual(expect.any(String))
         expect(subscription.cancelEffectiveAt).toEqual(null)
+        expect(subscription.isTrial).toEqual(false)
+        expect(subscription.trialEndsAt).toEqual(null)
         expect(subscription.paymentMode).toEqual("manual")
         expect(subscription.hasPaymentMethod).toEqual(false)
         expect(subscription.orderId).toEqual(seed.order_id)
@@ -563,6 +576,32 @@ medusaIntegrationTestRunner({
         expect(foreign.status).toEqual(404)
       })
 
+      it("reports the trial state on a trial row", async () => {
+        const container = getContainer()
+        const headers = await bridgeHeaders(container)
+        const customer = await createTenantCustomer(container)
+
+        const trialEndsAt = new Date(Date.now() + 7 * 86_400_000)
+        await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.ACTIVE,
+          is_trial: true,
+          trial_ends_at: trialEndsAt,
+        })
+
+        const response = await api.post(
+          "/store/saas/reconcile",
+          { customer_id: customer.id },
+          { headers }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(response.data.subscriptions).toHaveLength(1)
+        expect(response.data.subscriptions[0]).toMatchObject({
+          isTrial: true,
+          trialEndsAt: trialEndsAt.toISOString(),
+        })
+      })
       it("treats an unstamped customer as this tenant's on a single-tenant host", async () => {
         const container = getContainer()
         const headers = await bridgeHeaders(container)
@@ -1117,7 +1156,7 @@ medusaIntegrationTestRunner({
         const priceSet = await pricingModule.createPriceSets({
           prices: [{ amount: 18, currency_code: "usd" }],
         })
-        const link = container.resolve<ILinkModuleService>(
+        const link = container.resolve<LinkModuleService>(
           ContainerRegistrationKeys.LINK
         )
         await link.create({
@@ -1237,10 +1276,12 @@ medusaIntegrationTestRunner({
         const { product, variant } = await createProductWithVariant(container)
         await createPlanOfferSeed(container, {
           name: `BRIDGE-REDEEM-OFFER-${Date.now()}`,
-          scope: "variant",
+          scope: PlanOfferScope.VARIANT,
           product_id: product.id,
           variant_id: variant.id,
-          allowed_frequencies: [{ interval: "month", value: 1 }],
+          allowed_frequencies: [
+            { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
+          ],
         })
         const batch = await createRedemptionBatch(container, {
           name: `BRIDGE-REDEEM-BATCH-${Date.now()}`,

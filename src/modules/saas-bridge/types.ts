@@ -53,6 +53,8 @@ export type SubscriptionRecord = {
   frequency_value: number
   next_renewal_at: Date | string | null
   cancel_effective_at: Date | string | null
+  is_trial: boolean
+  trial_ends_at: Date | string | null
   customer_id: string
   payment_context: {
     payment_mode?: string | null

@@ -8,6 +8,7 @@ import {
   createSubscriptionSeed,
 } from "../helpers/subscription-fixtures"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
+import { SubscriptionFrequencyInterval } from "../../src/modules/subscription/types"
 
 jest.setTimeout(120 * 1000)
 
@@ -25,6 +26,9 @@ type ListedSubscription = {
   frequency_value: number
   next_renewal_at: string | null
   effective_next_renewal_at: string | null
+  cancel_effective_at: string | null
+  is_trial: boolean
+  trial_ends_at: string | null
   payment_mode: string | null
   has_payment_method: boolean
 }
@@ -74,19 +78,25 @@ medusaIntegrationTestRunner({
           payment_context: {
             payment_provider_id: "pp_system_default",
             payment_mode: "auto",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
             payment_method_reference: "pm_saved_123",
+            customer_payment_reference: null,
           },
         })
 
         const manualSubscription = await createSubscriptionSeed(container, {
           customer_id: customer.id,
           status: SubscriptionStatus.ACTIVE,
-          frequency_interval: "year",
+          frequency_interval: SubscriptionFrequencyInterval.YEAR,
           frequency_value: 2,
           payment_context: {
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
             payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -140,6 +150,76 @@ medusaIntegrationTestRunner({
         })
 
         expect(response.data.subscriptions).toEqual([])
+      })
+
+      it("projects the trial, plain and redemption row states", async () => {
+        const container = getContainer()
+        const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
+
+        const trialEndsAt = new Date(Date.now() + 7 * 86_400_000)
+        const cancelEffectiveAt = new Date(Date.now() + 90 * 86_400_000)
+
+        const trial = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.ACTIVE,
+          is_trial: true,
+          trial_ends_at: trialEndsAt,
+          payment_context: {
+            payment_provider_id: null,
+            payment_mode: "auto",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
+          },
+        })
+
+        const plain = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.ACTIVE,
+          payment_context: {
+            payment_provider_id: "pp_system_default",
+            payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
+          },
+        })
+
+        const redemption = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.ACTIVE,
+          cancel_effective_at: cancelEffectiveAt,
+        })
+
+        const response = await api.get("/store/customers/me/subscriptions", {
+          headers,
+        })
+
+        const byId = new Map(
+          (response.data.subscriptions as ListedSubscription[]).map((item) => [
+            item.id,
+            item,
+          ])
+        )
+
+        expect(byId.get(seedId(trial))).toMatchObject({
+          is_trial: true,
+          trial_ends_at: trialEndsAt.toISOString(),
+          cancel_effective_at: null,
+        })
+        expect(byId.get(seedId(plain))).toMatchObject({
+          is_trial: false,
+          trial_ends_at: null,
+          cancel_effective_at: null,
+        })
+        expect(byId.get(seedId(redemption))).toMatchObject({
+          is_trial: false,
+          trial_ends_at: null,
+          cancel_effective_at: cancelEffectiveAt.toISOString(),
+        })
       })
     })
   },

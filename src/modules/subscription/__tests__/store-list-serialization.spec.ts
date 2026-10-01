@@ -87,4 +87,38 @@ describe("serializeStoreSubscriptionListItem", () => {
       serializeStoreSubscriptionListItem(BASE, null).active_cancellation_case
     ).toBeNull()
   })
+
+  it("projects the trial state a trial row carries", () => {
+    const trialEndsAt = "2026-10-08T00:00:00.000Z"
+
+    expect(
+      serializeStoreSubscriptionListItem(
+        { ...BASE, is_trial: true, trial_ends_at: trialEndsAt },
+        null
+      )
+    ).toMatchObject({ is_trial: true, trial_ends_at: trialEndsAt })
+  })
+
+  it("projects a plain paid row as not-a-trial with no boundary", () => {
+    const item = serializeStoreSubscriptionListItem(BASE, null)
+
+    expect(item.is_trial).toBe(false)
+    expect(item.trial_ends_at).toBeNull()
+    expect(item.cancel_effective_at).toBeNull()
+  })
+
+  it("projects a redemption row's cancel boundary", () => {
+    const boundary = "2026-12-31T00:00:00.000Z"
+
+    expect(
+      serializeStoreSubscriptionListItem(
+        { ...BASE, cancel_effective_at: boundary },
+        null
+      )
+    ).toMatchObject({
+      is_trial: false,
+      trial_ends_at: null,
+      cancel_effective_at: boundary,
+    })
+  })
 })

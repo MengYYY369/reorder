@@ -9,8 +9,18 @@ import {
   SubscriptionStatus,
 } from "../../src/modules/subscription/types"
 
+type ProductRecord = {
+  id: string
+  title: string
+  variants?: Array<{
+    id: string
+    title?: string | null
+    sku?: string | null
+  }>
+}
+
 type ProductModuleService = {
-  createProducts(data: Record<string, unknown>): Promise<Record<string, any>>
+  createProducts(data: Record<string, unknown>): Promise<ProductRecord>
 }
 
 type AuthModuleService = {
@@ -52,6 +62,8 @@ type SubscriptionSeedInput = {
   next_renewal_at?: Date | null
   skip_next_cycle?: boolean
   is_trial?: boolean
+  trial_ends_at?: Date | string | null
+  cancel_effective_at?: Date | string | null
   payment_context?: SubscriptionPaymentContext | null
 }
 
@@ -246,10 +258,14 @@ export async function createSubscriptionSeed(
     last_renewal_at: null,
     paused_at: null,
     cancelled_at: null,
-    cancel_effective_at: null,
+    cancel_effective_at: input.cancel_effective_at
+      ? new Date(input.cancel_effective_at)
+      : null,
     skip_next_cycle: input.skip_next_cycle ?? false,
     is_trial: input.is_trial ?? false,
-    trial_ends_at: null,
+    trial_ends_at: input.trial_ends_at
+      ? new Date(input.trial_ends_at)
+      : null,
     customer_snapshot: {
       email: "customer@example.com",
       full_name: "Customer Test",

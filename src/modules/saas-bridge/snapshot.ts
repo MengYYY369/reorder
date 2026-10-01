@@ -19,6 +19,12 @@ export function snapshot(subscription: SubscriptionRecord) {
     cancelEffectiveAt: subscription.cancel_effective_at
       ? new Date(subscription.cancel_effective_at).toISOString()
       : null,
+    // Trial state, so the SaaS can tell a card-free trial from a paid manual
+    // row without inferring it from the payment context.
+    isTrial: Boolean(subscription.is_trial),
+    trialEndsAt: subscription.trial_ends_at
+      ? new Date(subscription.trial_ends_at).toISOString()
+      : null,
     paymentMode: subscription.payment_context?.payment_mode ?? null,
     // Auto-renewal needs a stored instrument; null means the user has not
     // saved one yet (manual-mode checkout) and the switch is unavailable.

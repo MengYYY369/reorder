@@ -104,6 +104,9 @@ export async function POST(
       ),
     ])
 
+    // SAFETY: `readTenantScoped` hands back the query graph's rows, whose
+    // runtime shape is the `OrderRecord` projection this route asked for; the
+    // graph API types its payload as `unknown`.
     const order = (orderResult.data as unknown as OrderRecord[])[0]
 
     // The read answered; it simply had no row. That is this route's own 404 and
@@ -131,6 +134,8 @@ export async function POST(
             filters: { id: paymentCollectionId },
           })
       )
+      // SAFETY: the projection above (`status`, `payments.status`) is exactly
+      // the shape asserted here; the graph API types its rows as `unknown`.
       const collection = (
         collections as unknown as Array<{
           status?: string
@@ -197,6 +202,8 @@ export async function POST(
             filters: { id: cartId },
           })
       )
+      // SAFETY: the projection above (`currency_code`, `items.unit_price`,
+      // `items.quantity`) is exactly the shape asserted here.
       const cartRecord = (
         carts as unknown as Array<{
           currency_code?: string
@@ -259,6 +266,8 @@ export async function POST(
         })
     )
 
+    // SAFETY: the projection above is exactly the `SubscriptionRecord` field
+    // set; the graph API types its rows as `unknown`.
     const subscription = (data as unknown as SubscriptionRecord[])[0]
 
     // The read answered; it had no row. Distinct from the wrapped read above,
@@ -321,6 +330,8 @@ export async function POST(
           "frequency_value",
           "next_renewal_at",
           "cancel_effective_at",
+          "is_trial",
+          "trial_ends_at",
           "customer_id",
           "payment_context",
           "metadata",
@@ -329,6 +340,8 @@ export async function POST(
       })
   )
 
+  // SAFETY: same projection as the single-subscription read above; the graph
+  // API types its rows as `unknown`.
   const subscriptions = (data as unknown as SubscriptionRecord[]) ?? []
 
   res.json({ subscriptions: subscriptions.map(snapshot) })
