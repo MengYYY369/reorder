@@ -16,6 +16,10 @@ import {
   extendSubscriptionRenewalDate,
   withStackedCycles,
 } from "../../modules/subscription/utils/stacking"
+import {
+  hasStoredPaymentMethod,
+  readPaymentProviderId,
+} from "../../modules/subscription/utils/payment-context"
 
 export type CreateSubscriptionRecordStepInput = {
   customer_id: string
@@ -71,6 +75,16 @@ type ExtendCompensation = {
     next_renewal_at: Date | null
     metadata: Record<string, unknown> | null
     payment_context: Record<string, unknown> | null
+    /**
+     * The trial state the extension converts away from (ticket 12 / D12). Without
+     * these two, a rolled-back extension would leave the row already converted —
+     * `is_trial` cleared — while its period rolled back, and the trial-end
+     * conversion branch would never run for a row that is still on its trial.
+     */
+    is_trial: boolean
+    trial_ends_at: Date | null
+    /** The row's cart before the purchase cart replaced it. */
+    cart_id: string | null
   }
 }
 
@@ -151,12 +165,18 @@ export const createSubscriptionRecordStep = createStep(
     }
 
     // An extension must roll back to the previous period end; deleting the row
-    // would erase a subscription the customer already paid for.
+    // would erase a subscription the customer already paid for. The trial state
+    // and cart id are restored alongside it: the extension converts a trial row
+    // and re-points its cart, and a rollback that restored only the period would
+    // leave a converted row with a rolled-back date.
     await subscriptionModule.updateSubscriptions({
       id: compensation.id,
       next_renewal_at: compensation.previous.next_renewal_at,
       metadata: compensation.previous.metadata,
       payment_context: compensation.previous.payment_context,
+      is_trial: compensation.previous.is_trial,
+      trial_ends_at: compensation.previous.trial_ends_at,
+      cart_id: compensation.previous.cart_id,
     } as never)
   }
 )
@@ -165,6 +185,8 @@ async function extendSubscriptionRecord(
   subscriptionModule: SubscriptionModuleService,
   input: CreateSubscriptionRecordStepInput
 ) {
+  // SAFETY: the generated `listSubscriptions` answers with the full row; this
+  // assertion narrows it to the columns the extension reads and restores.
   const existing = (await subscriptionModule.listSubscriptions({
     id: [input.extend_subscription_id!],
   } as never)) as unknown as Array<{
@@ -172,6 +194,9 @@ async function extendSubscriptionRecord(
     next_renewal_at: Date | null
     metadata: Record<string, unknown> | null
     payment_context: Record<string, unknown> | null
+    is_trial: boolean
+    trial_ends_at: Date | null
+    cart_id: string | null
   }>
 
   const target = existing[0]
@@ -184,13 +209,51 @@ async function extendSubscriptionRecord(
   }
 
   const previousPaymentContext = target.payment_context ?? null
-  const paymentContext = input.consent_flip
+
+  // The consent flip is the one write that may move `payment_mode`/`mechanism`:
+  // it is proof the customer opted into automatic charging, and only a row that
+  // already holds a chargeable method is eligible (`validate-subscription-cart`
+  // gates it on `hasStoredPaymentMethod`).
+  const consentFlippedContext = input.consent_flip
     ? {
         ...previousPaymentContext,
         payment_mode: input.consent_flip.payment_mode,
         mechanism: input.consent_flip.mechanism,
       }
-    : undefined
+    : null
+
+  // Ticket 12 (D12) card attribution: a row with no stored method — a card-free
+  // trial above all — keeps a null `payment_provider_id`, and the
+  // `payment.captured` subscriber (`payment-captured-save-payment-method`)
+  // matches the payment session by exactly that id. Left null, the subscriber
+  // can never find this purchase's session, so the vaulted method never lands
+  // and the storefront's auto-renew flip never fires. Stamp this purchase's
+  // provider onto the row so the match is possible; the method reference itself
+  // stays the subscriber's write (it is the token the capture produces, which
+  // does not exist yet), and `payment_mode`/`mechanism` are untouched. A row
+  // that already holds a method is left alone — its stored context is the
+  // authority, and the consent flip owns any mode change.
+  const purchaseProviderId = readPaymentProviderId(input.payment_context)
+  const providerAttribution =
+    !hasStoredPaymentMethod(previousPaymentContext) && purchaseProviderId
+      ? {
+          payment_provider_id: purchaseProviderId,
+          source_payment_collection_id:
+            input.payment_context.source_payment_collection_id,
+          source_payment_session_id:
+            input.payment_context.source_payment_session_id,
+          customer_payment_reference:
+            input.payment_context.customer_payment_reference,
+        }
+      : null
+
+  const paymentContext =
+    consentFlippedContext || providerAttribution
+      ? {
+          ...(consentFlippedContext ?? previousPaymentContext ?? {}),
+          ...(providerAttribution ?? {}),
+        }
+      : undefined
 
   // The row being folded into already carries keys other steps own:
   // `payment_method_update_context`
@@ -227,6 +290,21 @@ async function extendSubscriptionRecord(
     product_snapshot: input.product_snapshot,
     pricing_snapshot: input.pricing_snapshot,
     metadata,
+    // Ticket 12 (D12): the repeat purchase converts a trial row to a paid one.
+    // Clearing the trial state is what stops the row's own trial-end cycle from
+    // cancelling it — at the old `trial_ends_at`, in the past — the moment the
+    // scheduler reaches it, so the paid period this purchase just bought is not
+    // thrown away. A non-trial row already carries these two values, so the write
+    // is a no-op for it.
+    is_trial: false,
+    trial_ends_at: null,
+    // The row's cart is re-pointed at the purchase cart. The
+    // `payment.captured` subscriber (`payment-captured-save-payment-method`)
+    // finds the row by `cart_id`, so a trial row — whose cart was the claim's
+    // template cart — could never have the vaulted method of this purchase
+    // stored, and the storefront's auto-renew flip would never fire. The
+    // template cart reference is replaced; nothing else reads it.
+    cart_id: input.cart_id,
     ...(paymentContext ? { payment_context: paymentContext } : {}),
   } as never)
 
@@ -241,6 +319,9 @@ async function extendSubscriptionRecord(
         next_renewal_at: target.next_renewal_at ?? null,
         metadata: target.metadata ?? null,
         payment_context: previousPaymentContext,
+        is_trial: target.is_trial ?? false,
+        trial_ends_at: target.trial_ends_at ?? null,
+        cart_id: target.cart_id ?? null,
       },
     }
   )

@@ -24,8 +24,13 @@ import {
 import {
   findBlockingReorderRailRow,
   findLiveReorderRailSubscriptions,
+  isFoldableReorderRailRow,
   type ReorderRailRowCandidate,
 } from "../utils/reorder-rail-exclusivity"
+import {
+  resolveExtendTarget,
+  type ExtendableSubscription,
+} from "../utils/stacking"
 
 /**
  * Ticket 12 acceptance coverage for the checkout-completion gate.
@@ -177,6 +182,8 @@ const nativeRow = (
  */
 function makeGraph(input: {
   cartProductIds?: string[]
+  /** The cart's line metadata, keyed by product id, as `read_cart_item_signals` reads it. */
+  cartSignals?: Array<{ product_id: string; is_subscription: boolean }>
   productTitle?: string
   fail?: "cart"
 }) {
@@ -192,6 +199,11 @@ function makeGraph(input: {
             id: CART_ID,
             items: (input.cartProductIds ?? []).map((productId) => ({
               variant: { product_id: productId },
+              metadata: input.cartSignals?.find(
+                (signal) => signal.product_id === productId
+              )?.is_subscription
+                ? { is_subscription: true }
+                : null,
             })),
           },
         ],
@@ -387,11 +399,46 @@ describe("rejectConflictingPurchase (the gate middleware)", () => {
     expect(res.status).not.toHaveBeenCalled()
     expect(res.json).not.toHaveBeenCalled()
   })
+
+  it("lets a subscription-track purchase through onto a foldable live row", async () => {
+    // Ticket 12 (D12) at the middleware seam: the cart carries the subscription
+    // signal and the live row is a card-free trial, so the repeat purchase is
+    // allowed to fold into it. The signal comes from the cart's own line
+    // metadata, read only once the reorder-rail block exists.
+    const listSubscriptions = jest.fn(
+      async (filters: { reference?: unknown }) =>
+        filters.reference
+          ? []
+          : [
+              reorderRow({
+                is_trial: true,
+                payment_context: {
+                  payment_provider_id: null,
+                  payment_mode: "auto",
+                  payment_method_reference: null,
+                },
+              }),
+            ]
+    )
+    const graph = makeGraph({
+      cartProductIds: ["prod_1"],
+      cartSignals: [{ product_id: "prod_1", is_subscription: true }],
+    })
+    const scope = makeScope({ listSubscriptions, graph })
+    const res = makeRes()
+
+    await rejectConflictingPurchase(makeReq(scope, AUTH_CUSTOMER_ID), res, next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status).not.toHaveBeenCalled()
+    expect(res.json).not.toHaveBeenCalled()
+  })
 })
 
 describe("resolveCheckoutGate (the decision unit)", () => {
   it("fails open when the recurrence read throws, without touching the cart", async () => {
     const read_cart_product_ids = jest.fn()
+    const read_cart_item_signals = jest.fn()
     const read_product_title = jest.fn()
 
     expect(
@@ -401,11 +448,13 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         },
         find_live_reorder_rows: async () => [],
         read_cart_product_ids,
+        read_cart_item_signals,
         read_product_title,
       })
     ).toEqual({ action: "allow" })
 
     expect(read_cart_product_ids).not.toHaveBeenCalled()
+    expect(read_cart_item_signals).not.toHaveBeenCalled()
     expect(read_product_title).not.toHaveBeenCalled()
   })
 
@@ -417,6 +466,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: () => notAList<NativeRowCandidate>(),
         find_live_reorder_rows: async () => [],
         read_cart_product_ids,
+        read_cart_item_signals: async () => [],
         read_product_title: async () => "unused",
       })
     ).toEqual({ action: "allow" })
@@ -432,6 +482,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids,
+        read_cart_item_signals: async () => [],
         read_product_title: async (productId) => productId,
       })
     ).toEqual({ action: "allow" })
@@ -449,6 +500,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         read_cart_product_ids: async () => {
           throw new Error("graph down")
         },
+        read_cart_item_signals: async () => [],
         read_product_title,
       })
     ).toEqual({ action: "allow" })
@@ -462,6 +514,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [nativeRow()],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: () => notAList<string>(),
+        read_cart_item_signals: async () => [],
         read_product_title: async (productId) => productId,
       })
     ).toEqual({ action: "allow" })
@@ -473,6 +526,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [nativeRow()],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => [],
+        read_cart_item_signals: async () => [],
         read_product_title: async (productId) => productId,
       })
     ).toEqual({ action: "allow" })
@@ -488,6 +542,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         ],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title,
       })
     ).toEqual({ action: "allow" })
@@ -506,6 +561,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         ],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title: async (productId) => productId,
       })
     ).toEqual({ action: "allow" })
@@ -521,6 +577,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [nativeRow()],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title,
       })
     ).toEqual({
@@ -556,6 +613,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [nativeRow()],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title,
       })
     ).toEqual({
@@ -590,6 +648,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
         find_live_recurrences: async () => [nativeRow()],
         find_live_reorder_rows: async () => [],
         read_cart_product_ids: async () => ["prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title,
       })
     ).toEqual({
@@ -646,6 +705,11 @@ describe("resolveCheckoutGate (the decision unit)", () => {
 
       return ["prod_1"]
     })
+    const read_cart_item_signals = jest.fn(async () => {
+      sequence.push("cart-signals")
+
+      return []
+    })
     const read_product_title = jest.fn(
       async (productId: string) => {
         sequence.push(`title:${productId}`)
@@ -658,6 +722,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
       find_live_recurrences,
       find_live_reorder_rows,
       read_cart_product_ids,
+      read_cart_item_signals,
       read_product_title,
     })
 
@@ -674,6 +739,9 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     expect(find_live_recurrences).toHaveBeenCalledTimes(1)
     expect(find_live_reorder_rows).toHaveBeenCalledTimes(1)
     expect(read_cart_product_ids).toHaveBeenCalledTimes(1)
+    // A native collision is decided before the reorder-rail exception is even
+    // reachable, so the cart-signal read is never entered on this path.
+    expect(read_cart_item_signals).not.toHaveBeenCalled()
     expect(read_product_title).toHaveBeenCalledTimes(1)
   })
 
@@ -690,6 +758,7 @@ describe("resolveCheckoutGate (the decision unit)", () => {
           find_live_recurrences: async () => [blocking],
           find_live_reorder_rows: async () => [],
           read_cart_product_ids: async () => ["prod_a", "prod_b"],
+          read_cart_item_signals: async () => [],
           read_product_title: async () => "Coffee Club",
         })
       ).toEqual({
@@ -709,12 +778,14 @@ describe("resolveCheckoutGate (the decision unit)", () => {
   it("blocks through the reorder-rail rule with its own wording", async () => {
     // The second direction (T8): this plugin's own live row occupies the
     // product just as a provider recurrence does, and the rejection must stay
-    // distinguishable from the native one.
+    // distinguishable from the native one. The cart is a pure one-time purchase
+    // (no signal), so the ticket 12 exception does not apply.
     expect(
       await resolveCheckoutGate({
         find_live_recurrences: async () => [],
         find_live_reorder_rows: async () => [reorderRow()],
         read_cart_product_ids: async () => ["prod_a", "prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title: async () => "Coffee Club",
       })
     ).toEqual({
@@ -737,9 +808,241 @@ describe("resolveCheckoutGate (the decision unit)", () => {
           throw new Error("db down")
         },
         read_cart_product_ids: async () => ["prod_1"],
+        read_cart_item_signals: async () => [],
         read_product_title: async (productId) => productId,
       })
     ).toEqual({ action: "allow" })
+  })
+
+  /**
+   * Ticket 12 (D12): the strict exclusion's one exception. The subscription
+   * track may buy again when the colliding live row is one the stacking fold
+   * takes; a pure one-time purchase, or a row the fold would refuse, keeps the
+   * refusal.
+   */
+  describe("subscription-track exception (ticket 12 / D12)", () => {
+    const subscriptionCart = async () => [
+      { product_id: "prod_1", is_subscription: true },
+    ]
+    const oneTimeCart = async () => [
+      { product_id: "prod_1", is_subscription: false },
+    ]
+
+    it("lets a subscription purchase fold into a card-free trial row", async () => {
+      expect(
+        await resolveCheckoutGate({
+          find_live_recurrences: async () => [],
+          find_live_reorder_rows: async () => [
+            reorderRow({
+              is_trial: true,
+              payment_context: {
+                payment_provider_id: null,
+                payment_mode: "auto",
+                payment_method_reference: null,
+              },
+            }),
+          ],
+          read_cart_product_ids: async () => ["prod_1"],
+          read_cart_item_signals: subscriptionCart,
+          read_product_title: async (productId) => productId,
+        })
+      ).toEqual({ action: "allow" })
+    })
+
+    it("lets a subscription purchase fold into a paid live row", async () => {
+      expect(
+        await resolveCheckoutGate({
+          find_live_recurrences: async () => [],
+          find_live_reorder_rows: async () => [
+            reorderRow({
+              is_trial: false,
+              payment_context: {
+                payment_provider_id: "pp_paypal_paypal",
+                payment_mode: "auto",
+                payment_method_reference: "pm_1",
+              },
+            }),
+          ],
+          read_cart_product_ids: async () => ["prod_1"],
+          read_cart_item_signals: subscriptionCart,
+          read_product_title: async (productId) => productId,
+        })
+      ).toEqual({ action: "allow" })
+    })
+
+    it("still blocks a pure one-time purchase of the same product", async () => {
+      // The cart carries no subscription signal: buying the product once more
+      // is the double-buy the strict rule refuses, whatever the live row is.
+      expect(
+        await resolveCheckoutGate({
+          find_live_recurrences: async () => [],
+          find_live_reorder_rows: async () => [
+            reorderRow({
+              is_trial: true,
+              payment_context: {
+                payment_provider_id: null,
+                payment_mode: "auto",
+                payment_method_reference: null,
+              },
+            }),
+          ],
+          read_cart_product_ids: async () => ["prod_1"],
+          read_cart_item_signals: oneTimeCart,
+          read_product_title: async () => "Coffee Club",
+        })
+      ).toEqual({
+        action: "block",
+        response_body: reorderRejectionBody(
+          "Coffee Club",
+          "prod_1",
+          "sub_reorder_1"
+        ),
+      })
+    })
+
+    it.each([
+      [
+        "a bound auto trial row",
+        {
+          is_trial: true,
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "auto",
+            payment_method_reference: "pm_bound",
+          },
+        },
+      ],
+      [
+        "a redemption row with no provider",
+        {
+          is_trial: false,
+          payment_context: {
+            payment_provider_id: null,
+            payment_mode: "auto",
+            payment_method_reference: null,
+          },
+        },
+      ],
+      [
+        "a row with no payment context at all",
+        { is_trial: false, payment_context: null },
+      ],
+    ])("still blocks %s", async (_label, overrides) => {
+      expect(
+        await resolveCheckoutGate({
+          find_live_recurrences: async () => [],
+          find_live_reorder_rows: async () => [
+            reorderRow(overrides as Partial<ReorderRailRowCandidate>),
+          ],
+          read_cart_product_ids: async () => ["prod_1"],
+          read_cart_item_signals: subscriptionCart,
+          read_product_title: async () => "Coffee Club",
+        })
+      ).toEqual({
+        action: "block",
+        response_body: reorderRejectionBody(
+          "Coffee Club",
+          "prod_1",
+          "sub_reorder_1"
+        ),
+      })
+    })
+
+    it("still blocks a paused row, which the fold would not take either", async () => {
+      // Stacking folds only ACTIVE rows; letting a PAUSED row through would make
+      // the purchase create a second live row for the same product.
+      expect(
+        await resolveCheckoutGate({
+          find_live_recurrences: async () => [],
+          find_live_reorder_rows: async () => [
+            reorderRow({
+              status: SubscriptionStatus.PAUSED,
+              is_trial: true,
+              payment_context: {
+                payment_provider_id: null,
+                payment_mode: "auto",
+                payment_method_reference: null,
+              },
+            }),
+          ],
+          read_cart_product_ids: async () => ["prod_1"],
+          read_cart_item_signals: subscriptionCart,
+          read_product_title: async () => "Coffee Club",
+        })
+      ).toEqual({
+        action: "block",
+        response_body: reorderRejectionBody(
+          "Coffee Club",
+          "prod_1",
+          "sub_reorder_1"
+        ),
+      })
+    })
+
+    it("fails open when the cart-signal read throws", async () => {
+      // The exception's read sits inside the decision's one `try`, so an
+      // unreadable cart signal lets the checkout through rather than deciding
+      // it — the same fail-open rule as every other rule read.
+      expect(
+        await resolveCheckoutGate({
+          find_live_recurrences: async () => [],
+          find_live_reorder_rows: async () => [reorderRow()],
+          read_cart_product_ids: async () => ["prod_1"],
+          read_cart_item_signals: async () => {
+            throw new Error("graph down")
+          },
+          read_product_title: async () => "Coffee Club",
+        })
+      ).toEqual({ action: "allow" })
+    })
+
+    it("is a strict subset of what the stacking fold takes", async () => {
+      // The exception may only let a purchase through onto a row the fold will
+      // actually extend. If `resolveExtendTarget` ever narrows, a predicate that
+      // did not follow would let the checkout pass and the create step mint a
+      // second row for the same product.
+      const candidates: ReorderRailRowCandidate[] = [
+        reorderRow({
+          is_trial: true,
+          payment_context: {
+            payment_provider_id: null,
+            payment_mode: "auto",
+            payment_method_reference: null,
+          },
+        }),
+        reorderRow({
+          is_trial: false,
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "auto",
+            payment_method_reference: "pm_1",
+          },
+        }),
+        reorderRow({
+          status: SubscriptionStatus.PAUSED,
+          is_trial: true,
+          payment_context: null,
+        }),
+        reorderRow({ reference: "NATIVE-I-X", is_trial: true }),
+      ]
+
+      for (const row of candidates) {
+        if (!isFoldableReorderRailRow(row)) {
+          continue
+        }
+
+        const fold = resolveExtendTarget(
+          [row as unknown as ExtendableSubscription],
+          {
+            customer_id: "cus_1",
+            product_id: "prod_1",
+            row_stacking_policy: "extend",
+          }
+        )
+
+        expect(fold.action).toBe("extend")
+      }
+    })
   })
 })
 

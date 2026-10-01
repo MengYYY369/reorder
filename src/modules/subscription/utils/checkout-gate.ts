@@ -19,6 +19,7 @@ import {
 import {
   findBlockingReorderRailRow,
   findLiveReorderRailSubscriptions,
+  isFoldableReorderRailRow,
   type ReorderRailRowCandidate,
 } from "./reorder-rail-exclusivity"
 
@@ -64,7 +65,20 @@ import {
 
 /** A cart line as far as this gate is concerned: only its product matters. */
 type CartLineItem = {
+  metadata?: Record<string, unknown> | null
   variant?: { product_id?: string | null } | null
+}
+
+/**
+ * One cart line reduced to the two facts the exception reads: which product it
+ * is for, and whether the purchase runs on the subscription track. Kept apart
+ * from `read_cart_product_ids` — that read answers the matching rule and only
+ * ever carries product ids, while the track flag is a separate question asked
+ * only once a reorder-rail block exists (ticket 12 / D12).
+ */
+export type CartItemSignal = {
+  product_id: string
+  is_subscription: boolean
 }
 
 /**
@@ -102,6 +116,13 @@ export type CheckoutGateReads = {
   find_live_reorder_rows: () => Promise<ReorderRailRowCandidate[]>
   /** Products in the cart being completed. */
   read_cart_product_ids: () => Promise<string[]>
+  /**
+   * The cart's lines as `{ product_id, is_subscription }`, read only when a
+   * reorder-rail block exists, to decide the ticket 12 exception: the
+   * subscription track may fold into a live foldable row, while a pure one-time
+   * purchase of the same product stays refused.
+   */
+  read_cart_item_signals: () => Promise<CartItemSignal[]>
   /**
    * Title for the blocking product, to name it in the rejection message.
    * Cosmetic input only: it is read after the verdict exists and behind its own
@@ -160,7 +181,8 @@ function reorderRailRejectionMessage(
  *
  * Returns the blocking row, or `null` for "nothing blocks" — which covers "a
  * customer with no live subscription", "a cart with nothing in it", "no row
- * collides" and, via the catch, "cannot decide" too. All four allow, so the
+ * collides", "the colliding reorder-rail row is one the subscription track may
+ * fold into", and, via the catch, "cannot decide" too. All five allow, so the
  * collapsed answer is enough; what matters is that it is final. Nothing read
  * after this function returns can change the verdict, which is why the catch may
  * not be widened to cover later reads.
@@ -206,6 +228,22 @@ async function decideBlockingRow(
       return null
     }
 
+    // Ticket 12 (D12): the strict exclusion has exactly one exception — the
+    // subscription track's own repeat purchase. It is a true subset of what the
+    // stacking decision folds into (`isFoldableReorderRailRow`), and it only
+    // applies when the cart itself carries the subscription signal: a pure
+    // one-time purchase of the same product keeps the original refusal. Both
+    // reads stay inside this `try`, so an unreadable cart signal fails open
+    // like every other rule read rather than deciding the checkout.
+    const cartSignals = await reads.read_cart_item_signals()
+
+    if (
+      isSubscriptionTrackPurchase(cartSignals, reorderBlocking.product_id) &&
+      isFoldableReorderRailRow(reorderBlocking)
+    ) {
+      return null
+    }
+
     return {
       product_id: reorderBlocking.product_id,
       subscription_id: reorderBlocking.id,
@@ -217,6 +255,21 @@ async function decideBlockingRow(
     // instead, exactly as if the gate passed.
     return null
   }
+}
+
+/**
+ * Whether the cart buys `productId` on the subscription track, using the same
+ * boolean wording `validate-subscription-cart` reads (`true` or `"true"`).
+ * Checked per line, so a cart that is not a subscription cart never gets the
+ * exception even when a live row would be foldable.
+ */
+function isSubscriptionTrackPurchase(
+  signals: CartItemSignal[],
+  productId: string
+): boolean {
+  return signals.some(
+    (signal) => signal.product_id === productId && signal.is_subscription
+  )
 }
 
 /**
@@ -319,6 +372,72 @@ async function readCartProductIds(
 }
 
 /**
+ * The cart's lines as `{ product_id, is_subscription }`, read only once a
+ * reorder-rail block exists. The signal wording mirrors
+ * `validate-subscription-cart`'s `isSubscriptionItem` (`true` or `"true"`) so
+ * the gate and the step cannot disagree about what a subscription cart is. A
+ * cart that cannot be read is reported as empty, which leaves the strict
+ * exclusion in force rather than granting the exception on an unreadable cart.
+ */
+async function readCartItemSignals(
+  container: MedusaContainer,
+  cartId: string | undefined
+): Promise<CartItemSignal[]> {
+  if (!cartId) {
+    return []
+  }
+
+  try {
+    const query = container.resolve<RemoteQueryFunction>(
+      ContainerRegistrationKeys.QUERY
+    )
+    const { data } = await query.graph({
+      entity: "cart",
+      fields: ["id", "items.metadata", "items.variant.product_id"],
+      filters: { id: [cartId] },
+    })
+
+    const cart = (data as Array<{ items?: CartLineItem[] | null }>)[0]
+
+    if (!cart) {
+      return []
+    }
+
+    return (cart.items ?? []).flatMap((item) => {
+      const productId = item?.variant?.product_id
+
+      return productId
+        ? [
+            {
+              product_id: productId,
+              is_subscription: readBoolean(item?.metadata?.is_subscription),
+            },
+          ]
+        : []
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The boolean wording `validate-subscription-cart` reads: a JSON boolean or the
+ * string `"true"`. Anything else — including the string `"false"` — is false,
+ * so the exception is never granted on a half-written metadata value.
+ */
+function readBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value
+  }
+
+  if (typeof value === "string") {
+    return value === "true"
+  }
+
+  return false
+}
+
+/**
  * Deliberate choices baked into this handler:
  * - a guest is passed through: there is nothing to match against, and pulling a
  *   customer out of a completed order to retroactively cancel it is worse than
@@ -358,6 +477,7 @@ export async function rejectConflictingPurchase(
     find_live_reorder_rows: () =>
       findLiveReorderRailSubscriptions(req.scope, { customer_id: customerId }),
     read_cart_product_ids: () => readCartProductIds(req.scope, req.params?.id),
+    read_cart_item_signals: () => readCartItemSignals(req.scope, req.params?.id),
     read_product_title: (productId) => readProductTitle(req.scope, productId),
   })
 

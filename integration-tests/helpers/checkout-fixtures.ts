@@ -1,7 +1,6 @@
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import type {
   ICartModuleService,
-  ILinkModuleService,
   IOrderModuleService,
   IPaymentModuleService,
   MedusaContainer,
@@ -13,11 +12,21 @@ import {
 import { createPlanOfferSeed } from "./plan-offer-fixtures"
 import { createProductWithVariant } from "./subscription-fixtures"
 
+/**
+ * The link module's `create` as this helper uses it. `ILinkModuleService` is not
+ * exported by the pinned `@medusajs/framework/types`, so the one method called
+ * here is named directly.
+ */
+type LinkModuleService = {
+  create(links: unknown): Promise<unknown>
+}
+
 export type SeededCheckout = {
   product_id: string
   variant_id: string
   cart_id: string
   order_id: string
+  payment_collection_id: string
 }
 
 /**
@@ -32,20 +41,34 @@ export type SeededCheckout = {
 export async function seedSubscriptionCheckoutCart(
   container: MedusaContainer,
   customer: { id: string; email: string | null },
-  product?: { product_id: string; variant_id: string }
+  product?: { product_id: string; variant_id: string },
+  options?: {
+    /**
+     * Data written onto the checkout's payment session. The `payment.captured`
+     * subscriber reads the vault token from `data.payment_method`, so a case
+     * that drives it seeds the token here.
+     */
+    session_data?: Record<string, unknown>
+  }
 ): Promise<SeededCheckout> {
   const cartModule = container.resolve<ICartModuleService>(Modules.CART)
   const orderModule = container.resolve<IOrderModuleService>(Modules.ORDER)
   const paymentModule = container.resolve<IPaymentModuleService>(Modules.PAYMENT)
-  const link = container.resolve<ILinkModuleService>(
+  const link = container.resolve<LinkModuleService>(
     ContainerRegistrationKeys.LINK
   )
 
-  const target = product ?? (await createProductWithVariant(container))
-  const productId = product?.product_id ?? target.product.id
-  const variantId = product?.variant_id ?? target.variant.id
+  let productId: string
+  let variantId: string
 
-  if (!product) {
+  if (product) {
+    productId = product.product_id
+    variantId = product.variant_id
+  } else {
+    const created = await createProductWithVariant(container)
+    productId = created.product.id
+    variantId = created.variant.id
+
     await createPlanOfferSeed(container, {
       name: `checkout-${Date.now()}`,
       scope: PlanOfferScope.VARIANT,
@@ -74,7 +97,9 @@ export async function seedSubscriptionCheckoutCart(
     country_code: "us",
   }
 
-  const cart = await cartModule.createCarts({
+  // SAFETY: `createCarts` answers a single created cart at runtime, while the
+  // pinned types declare an array; this narrows it to the id the links need.
+  const cart = (await cartModule.createCarts({
     currency_code: "usd",
     email: customer.email,
     customer_id: customer.id,
@@ -89,7 +114,7 @@ export async function seedSubscriptionCheckoutCart(
         metadata: lineItemMetadata,
       } as never,
     ],
-  } as never)
+  } as never)) as unknown as { id: string }
 
   const paymentCollection = await paymentModule.createPaymentCollections({
     currency_code: "usd",
@@ -100,10 +125,11 @@ export async function seedSubscriptionCheckoutCart(
     provider_id: "pp_system_default",
     currency_code: "usd",
     amount: 18,
-    data: {},
+    data: options?.session_data ?? {},
   } as never)
 
-  const order = await orderModule.createOrders({
+  // SAFETY: same shape as the cart above — one created order, narrowed to its id.
+  const order = (await orderModule.createOrders({
     customer_id: customer.id,
     email: customer.email,
     currency_code: "usd",
@@ -118,7 +144,7 @@ export async function seedSubscriptionCheckoutCart(
       } as never,
     ],
     shipping_address: shippingAddress,
-  } as never)
+  } as never)) as unknown as { id: string }
 
   await link.create([
     {
@@ -140,5 +166,6 @@ export async function seedSubscriptionCheckoutCart(
     variant_id: variantId,
     cart_id: cart.id,
     order_id: order.id,
+    payment_collection_id: paymentCollection.id,
   }
 }

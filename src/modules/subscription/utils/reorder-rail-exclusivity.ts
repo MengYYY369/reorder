@@ -1,11 +1,15 @@
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
 import { SUBSCRIPTION_MODULE } from ".."
 import type SubscriptionModuleService from "../service"
+import { SubscriptionStatus } from "../types"
 import {
   TRACK_OCCUPYING_SUBSCRIPTION_STATUSES,
   isNativeSubscriptionReference,
 } from "./native-subscription"
+import {
+  hasStoredPaymentMethod,
+  readPaymentProviderId,
+} from "./payment-context"
 
 /**
  * The reorder-rail half of the checkout-completion exclusion rule (T8).
@@ -47,6 +51,55 @@ export type ReorderRailRowCandidate = {
   reference: string
   status: string
   product_id: string
+  /**
+   * Read for the checkout gate's subscription-track exception (ticket 12 /
+   * D12). `is_trial` and `payment_context` decide whether a live row is one a
+   * repeat purchase folds into; the occupying-status rule itself never reads
+   * them.
+   */
+  is_trial?: boolean | null
+  payment_context?: Record<string, unknown> | null
+}
+
+/**
+ * Whether the checkout gate may let a subscription-track purchase through onto
+ * this live row instead of refusing it (ticket 12 / D12).
+ *
+ * The predicate is a STRICT SUBSET of `resolveExtendTarget`'s fold set
+ * (`stacking.ts`): that fold takes any non-native ACTIVE row, and this takes
+ * only the two shapes a repeat purchase can actually extend without leaving
+ * undefined billing semantics behind —
+ *
+ * - a card-free trial row (`ACTIVE` + `is_trial` + no stored method), which the
+ *   extend converts to a paid row, and
+ * - a paid live row (`ACTIVE` + not a trial + a stored provider id, i.e. the
+ *   vaulted/epay rails), which the extend stacks onto.
+ *
+ * Everything the fold would take but this refuses keeps the strict exclusion:
+ * a redemption row (no provider id, its free period ends at
+ * `cancel_effective_at`) would extend into undefined billing, a bound auto
+ * trial row would double-charge against the method it already holds, and a
+ * PAUSED row is not `ACTIVE` so the fold would `create` a second live row for
+ * the same product. The subset property is pinned by
+ * `checkout-gate.spec.ts`, so a change to the fold that this predicate does not
+ * follow reddens there rather than at a customer's checkout.
+ */
+export function isFoldableReorderRailRow(
+  row: ReorderRailRowCandidate
+): boolean {
+  if (isNativeSubscriptionReference(row.reference)) {
+    return false
+  }
+
+  if (row.status !== SubscriptionStatus.ACTIVE) {
+    return false
+  }
+
+  if (row.is_trial) {
+    return !hasStoredPaymentMethod(row.payment_context)
+  }
+
+  return readPaymentProviderId(row.payment_context) !== null
 }
 
 /**

@@ -32,6 +32,19 @@ type GateError = {
   data?: { product_id?: string; subscription_id?: string } | null
 }
 
+/**
+ * The one call this spec makes through the test runner's HTTP client. Named
+ * locally because `typeof api` inside the suite closure is a circular type
+ * reference the compiler rejects.
+ */
+type CompleteCartClient = {
+  post: (
+    url: string,
+    body?: unknown,
+    config?: unknown
+  ) => Promise<{ status: number; data: unknown }>
+}
+
 type ApiKeyModule = {
   createApiKeys: (input: {
     title: string
@@ -98,7 +111,7 @@ medusaIntegrationTestRunner({
       }
 
       function postComplete(
-        api: typeof api,
+        api: CompleteCartClient,
         cartId: string,
         headers: Record<string, string>
       ) {
@@ -170,12 +183,20 @@ medusaIntegrationTestRunner({
         expect(body.data ?? null).toBeNull()
       })
 
-      it("blocks a live subscription row on this plugin's own rail, with the reorder-rail message", async () => {
+      it("blocks a live non-foldable subscription row on this plugin's own rail, with the reorder-rail message", async () => {
         // T8 flipped the old "never blocks on this plugin's own subscription
         // row" case: a live non-NATIVE row now occupies the product exactly
         // like a provider recurrence, so the same cart is refused — with the
         // reorder-rail wording, never the native one, so the two directions
         // stay distinguishable in this spec and in the logs.
+        //
+        // Ticket 12 (D12) narrowed that rule for the subscription track: a
+        // foldable live row (a card-free trial, or a paid row with a provider)
+        // no longer blocks a subscription-track cart. This case pins the other
+        // half with a redemption-shaped row — no provider, its free period
+        // ending at `cancel_effective_at` — which the exception must not let
+        // through. The exception's own coverage lives in
+        // `checkout-subscription-exception.spec.ts`.
         const { container, customer, product, variant, checkout, headers } =
           await setup(null)
 
@@ -187,6 +208,14 @@ medusaIntegrationTestRunner({
           variant_id: variant.id,
           reference: `SUB-OWNED-${Date.now()}`,
           status: SubscriptionStatus.ACTIVE,
+          payment_context: {
+            payment_provider_id: null,
+            payment_mode: "auto",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
+          },
         })
 
         const response = await postComplete(api, checkout.cart_id, headers)
