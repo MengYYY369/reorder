@@ -88,10 +88,12 @@ is needed when it lands — the probe flips on its own.
       `apps/backend/medusa-config.ts`, so module options never arrive and the
       module's own client has empty credentials in production — predates
       0.7.0, which introduced a DB settings resolver described as "the only
-      configuration source" with client hot-rebuild on change. Whether the
-      module's own client is now credentialed in production must be verified
-      first; `findPaypalProviderDeclaration` remains the correct fallback
-      route either way. Export
+      configuration source" with client hot-rebuild on change. Re-derived
+      2026-10-01 against 0.7.1: the module service builds its client from
+      `getResolvedPaypalConfig()` (db → providerOptions → pluginOptions), so
+      the admin settings row is authoritative and the capability must use
+      that resolver — not module options, and not the payment module (the
+      module-local container cannot resolve `payment`). Export
       `PAYPAL_VAULT_BINDING_CAPABILITY` from the package root as documentation;
       the duck-type is the mechanism. `store_in_vault: ON_SUCCESS` stays
       exactly as it is.
