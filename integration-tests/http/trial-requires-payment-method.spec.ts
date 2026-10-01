@@ -30,18 +30,15 @@ jest.setTimeout(120 * 1000)
 const VAULT_TOKEN = "tok_trial_vault_token"
 
 /**
- * The refusal `validate-subscription-cart` raises for a trial checkout that is
- * not in auto mode while the offer's `trial_requires_payment_method` rule is on.
- */
-const CHECKOUT_REFUSAL =
-  "This trial requires a payment method on file. Complete the checkout with automatic renewal payments instead of manual payment to start the trial."
-
-/**
- * The refusal `resolve-redemption-code` raises for a trial-enabled code under
- * the same rule. The redemption path refuses the redemption outright (plan
- * Task 15 decision): it has no cart and no way to collect a payment method, and
- * silently degrading the code to a non-trial grant would make the offer's rule
- * a lie. The pin below is that decision.
+ * The refusal `resolve-redemption-code` raises for a trial-enabled BATCH whose
+ * own `trial_requires_payment_method` is on. The redemption path refuses the
+ * redemption outright (plan Task 15 decision): it has no cart and no way to
+ * collect a payment method, and silently degrading the code to a non-trial
+ * grant would make the batch's rule a lie. The pin below is that decision.
+ *
+ * Ticket 13 (D13) removed the checkout half of this rule entirely: an offer's
+ * `trial_*` rules no longer reach the checkout track, so no checkout refusal
+ * exists any more.
  */
 const expectedRedemptionRefusal = (code: string) =>
   `Redemption code ${code} grants a trial that requires a payment method, which redemption codes cannot collect`
@@ -257,8 +254,8 @@ medusaIntegrationTestRunner({
     COOKIE_SECRET: "supersecret",
   },
   testSuite: ({ api, getContainer }) => {
-    describe("trial_requires_payment_method at checkout", () => {
-      it("rejects a manual-mode trial checkout and creates nothing", async () => {
+    describe("the checkout track never mints a trial (D13)", () => {
+      it("does not turn a manual-mode checkout into a trial, whatever the offer rule says", async () => {
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -270,44 +267,20 @@ medusaIntegrationTestRunner({
 
         const { errors } = await runOrderDrivenCheckout(container, seed.order_id)
 
-        expect(errors?.length).toBeGreaterThan(0)
-        expect((errors?.[0]?.error as Error)?.message ?? "").toContain(
-          CHECKOUT_REFUSAL
-        )
-
-        // Nothing created: the guard runs inside the validate step, before the
-        // subscription record, its links and its initial renewal cycle.
-        const rows = await subscriptionModule.listSubscriptions({
-          customer_id: seed.customer_id,
-        })
-        expect(rows).toHaveLength(0)
-      })
-
-      it("allows a manual-mode trial checkout when the rule is off", async () => {
-        const container = getContainer()
-        const subscriptionModule =
-          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
-
-        const seed = await seedTrialCheckout(container, {
-          payment_mode: "manual",
-          trial_requires_payment_method: false,
-        })
-
-        const { errors } = await runOrderDrivenCheckout(container, seed.order_id)
-
+        // The rule used to refuse this checkout. Ticket 13 (D13) pinned the
+        // step's `trial_days` output at 0, so the rule is not read at all and
+        // the purchase completes as an ordinary subscription.
         expect(errors ?? []).toHaveLength(0)
 
         const [row] = await subscriptionModule.listSubscriptions({
           customer_id: seed.customer_id,
         })
-        expect(row.is_trial).toEqual(true)
-        expect(row.trial_ends_at).toBeTruthy()
-        expect(row.payment_context).toMatchObject({
-          payment_mode: "manual",
-        })
+        expect(row.is_trial).toEqual(false)
+        expect(row.trial_ends_at).toBeNull()
+        expect(row.payment_context).toMatchObject({ payment_mode: "manual" })
       })
 
-      it("allows an auto-mode trial checkout when the rule is on — the check is on the mode, not a stored token", async () => {
+      it("does not turn an auto-mode checkout into a trial either", async () => {
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -324,9 +297,8 @@ medusaIntegrationTestRunner({
         const [row] = await subscriptionModule.listSubscriptions({
           customer_id: seed.customer_id,
         })
-        expect(row.is_trial).toEqual(true)
-        // The context holds the session-carried reference; no vault token was
-        // ever stored on the subscription before the capture wrote it.
+        expect(row.is_trial).toEqual(false)
+        expect(row.trial_ends_at).toBeNull()
         expect(row.payment_context).toMatchObject({
           payment_mode: "auto",
           payment_method_reference: VAULT_TOKEN,
@@ -335,7 +307,7 @@ medusaIntegrationTestRunner({
     })
 
     describe("trial_requires_payment_method on the redemption path", () => {
-      it("refuses a trial-enabled redemption outright and consumes nothing", async () => {
+      it("refuses a trial-enabled batch outright and consumes nothing", async () => {
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -349,27 +321,16 @@ medusaIntegrationTestRunner({
         )
         const { variant } = await createProductWithVariant(container)
 
-        await createPlanOfferSeed(container, {
-          name: `RDM-TRIAL-PM-ON-${Date.now()}`,
-          scope: PlanOfferScope.VARIANT,
-          variant_id: variant.id,
-          allowed_frequencies: [
-            { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
-          ],
-          rules: {
-            minimum_cycles: null,
-            trial_enabled: true,
-            trial_days: 7,
-            trial_requires_payment_method: true,
-            stacking_policy: PlanOfferStackingPolicy.ALLOWED,
-          },
-        })
-
+        // Ticket 14 (D14): the BATCH carries the trial config now, not the
+        // variant's offer.
         const batch = await createRedemptionBatch(container, {
           name: `RDM-TRIAL-PM-BATCH-${Date.now()}`,
           variant_id: variant.id,
           free_cycles: 1,
           generated_code_count: 1,
+          trial_enabled: true,
+          trial_days: 7,
+          trial_requires_payment_method: true,
         })
         const code = batch.codes[0]
 
@@ -401,7 +362,7 @@ medusaIntegrationTestRunner({
         expect(persistedCode.redemption_count).toEqual(0)
       })
 
-      it("redeems a trial-enabled code when the rule is off", async () => {
+      it("redeems a trial-enabled batch when the rule is off", async () => {
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -413,27 +374,13 @@ medusaIntegrationTestRunner({
         )
         const { variant } = await createProductWithVariant(container)
 
-        await createPlanOfferSeed(container, {
-          name: `RDM-TRIAL-PM-OFF-${Date.now()}`,
-          scope: PlanOfferScope.VARIANT,
-          variant_id: variant.id,
-          allowed_frequencies: [
-            { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
-          ],
-          rules: {
-            minimum_cycles: null,
-            trial_enabled: true,
-            trial_days: 7,
-            trial_requires_payment_method: false,
-            stacking_policy: PlanOfferStackingPolicy.ALLOWED,
-          },
-        })
-
         const batch = await createRedemptionBatch(container, {
           name: `RDM-TRIAL-PM-OFF-BATCH-${Date.now()}`,
           variant_id: variant.id,
           free_cycles: 1,
           generated_code_count: 1,
+          trial_enabled: true,
+          trial_days: 7,
         })
 
         const redeem = await api.post(

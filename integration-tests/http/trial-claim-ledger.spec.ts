@@ -371,9 +371,10 @@ medusaIntegrationTestRunner({
           SUBSCRIPTION_MODULE
         )
 
-        // Trial door: offer with a trial, no payment method required (the
-        // redemption path cannot collect one and refuses such codes), code of
-        // a batch on the variant.
+        // Trial door: the BATCH enables a trial (ticket 14 / D14 — trial
+        // semantics no longer come from the variant's offer), no payment method
+        // required (the redemption path cannot collect one and refuses such
+        // codes), code of a batch on the variant.
         const trialCustomer = await createCustomer(container)
         const trialHeaders = await createStoreHeadersWithPublishableKey(
           container,
@@ -403,6 +404,8 @@ medusaIntegrationTestRunner({
           variant_id: variant.id,
           free_cycles: 1,
           generated_code_count: 1,
+          trial_enabled: true,
+          trial_days: 7,
         })
 
         const redeem = await api.post(
