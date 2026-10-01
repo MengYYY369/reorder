@@ -1,4 +1,5 @@
 import path from "path"
+import { asValue } from "awilix"
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import { Modules } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
@@ -22,6 +23,11 @@ import {
 jest.setTimeout(120 * 1000)
 
 const TRIAL_DAYS = 7
+/** The bonus the target variant's plan offer carries, used as the fallback. */
+const OFFER_BONUS_DAYS = 3
+/** The batch's own bonus: must win over the offer's on the bind path. */
+const BATCH_BONUS_DAYS = 5
+const DAY_MS = 86_400_000
 
 type ApiKeyModule = {
   createApiKeys: (input: {
@@ -75,6 +81,75 @@ async function redeem(
     })) as { status: number; data: { message?: string } }
 }
 
+async function postBind(
+  api: {
+    post: (url: string, body?: unknown, config?: unknown) => Promise<unknown>
+  },
+  subscriptionId: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>
+): Promise<{ status: number; data: { message?: string; bind?: unknown } }> {
+  return (await api
+    .post(`/store/customers/me/trials/${subscriptionId}/bind`, body, {
+      headers,
+    })
+    .catch((error: AxiosLikeError) => {
+      if (!error.response) {
+        throw error
+      }
+
+      return error.response
+    })) as { status: number; data: { message?: string; bind?: unknown } }
+}
+
+/**
+ * Registers the fake vault capability the way the bind tests do: the resolved
+ * `paypalSubscription` answers both approval methods, and the payment module's
+ * provider declaration carries a PayPal provider. Returns a restore function —
+ * the suite's container is shared by the file's tests.
+ */
+function registerFakeVaultProvider(
+  container: MedusaContainer,
+  input: { setupTokenId: string; approveUrl: string; vaultId: string }
+): { restore: () => void } {
+  container.register({
+    paypalSubscription: asValue({
+      startVaultApproval: jest.fn().mockResolvedValue({
+        setup_token_id: input.setupTokenId,
+        approve_url: input.approveUrl,
+      }),
+      completeVaultApproval: jest.fn().mockResolvedValue({
+        status: "VAULTED",
+        vault_id: input.vaultId,
+        customer_id: null,
+      }),
+    }),
+  })
+
+  const paymentModule = container.resolve(Modules.PAYMENT) as unknown as {
+    moduleDeclaration?: { providers?: Array<Record<string, unknown>> }
+  }
+  const previousDeclaration = paymentModule.moduleDeclaration
+  paymentModule.moduleDeclaration = {
+    ...(previousDeclaration ?? {}),
+    providers: [
+      ...(previousDeclaration?.providers ?? []),
+      {
+        resolve: "@mengyyy369/medusa-paypal/providers/paypal",
+        id: "paypal_test",
+        options: {},
+      },
+    ],
+  }
+
+  return {
+    restore: () => {
+      container.register({ paypalSubscription: asValue(null) })
+      paymentModule.moduleDeclaration = previousDeclaration
+    },
+  }
+}
+
 medusaIntegrationTestRunner({
   medusaConfigFile: path.resolve(process.cwd(), "integration-tests"),
   env: {
@@ -109,6 +184,7 @@ medusaIntegrationTestRunner({
             minimum_cycles: 1,
             trial_enabled: true,
             trial_days: TRIAL_DAYS,
+            trial_bonus_days: OFFER_BONUS_DAYS,
             stacking_policy: PlanOfferStackingPolicy.ALLOWED,
           },
         })
@@ -255,6 +331,88 @@ medusaIntegrationTestRunner({
           customer_id: customer.id,
         })
         expect(rows).toHaveLength(1)
+      })
+
+      it("records the batch's trial bonus on the row and grants it on bind, overriding the offer", async () => {
+        const { container, customer, variant, headers } = await setup()
+
+        // The batch carries its own bonus, different from the offer's so the
+        // bind's source of truth is observable.
+        const batch = await createRedemptionBatch(container, {
+          name: `RDM-BONUS-${Date.now()}`,
+          variant_id: variant.id,
+          free_cycles: 1,
+          generated_code_count: 1,
+          trial_enabled: true,
+          trial_days: TRIAL_DAYS,
+          trial_bonus_days: BATCH_BONUS_DAYS,
+        })
+
+        const response = await redeem(api, batch.codes[0].code, headers)
+        expect(response.status).toEqual(200)
+
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const [row] = await subscriptionModule.listSubscriptions({
+          customer_id: customer.id,
+        })
+
+        expect(row.is_trial).toBe(true)
+        // The batch value lands on the row in the same shape the claim door
+        // writes it (create-trial-subscription), so the bind reads it.
+        expect(row.metadata?.trial_bonus_days).toEqual(BATCH_BONUS_DAYS)
+
+        const setupTokenId = `ST-${Date.now()}`
+        const { restore } = registerFakeVaultProvider(container, {
+          setupTokenId,
+          approveUrl: `https://www.sandbox.paypal.com/vault/setup-tokens/${setupTokenId}`,
+          vaultId: `VAULT-${Date.now()}`,
+        })
+
+        try {
+          const start = await postBind(
+            api,
+            row.id,
+            {
+              action: "start",
+              return_url: "https://storefront.example/subscription/return",
+              cancel_url: "https://storefront.example/subscription/cancel",
+            },
+            headers
+          )
+          expect(start.status).toEqual(200)
+
+          const complete = await postBind(
+            api,
+            row.id,
+            { action: "complete", setup_token_id: setupTokenId },
+            headers
+          )
+          expect(complete.status).toEqual(200)
+
+          // The batch's bonus, not the offer's: the bind prefers the value the
+          // trial recorded at claim time.
+          expect(complete.data.bind).toMatchObject({
+            bonus_days_applied: BATCH_BONUS_DAYS,
+            payment_mode: "auto",
+          })
+
+          const [bound] = await subscriptionModule.listSubscriptions({
+            id: [row.id],
+          })
+          const expectedEndMs =
+            new Date(bound.started_at as unknown as string).getTime() +
+            (TRIAL_DAYS + BATCH_BONUS_DAYS) * DAY_MS
+          expect(
+            Math.abs(
+              new Date(bound.trial_ends_at as unknown as string).getTime() -
+                expectedEndMs
+            )
+          ).toBeLessThan(2000)
+        } finally {
+          restore()
+        }
       })
     })
   },

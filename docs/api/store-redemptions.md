@@ -119,13 +119,18 @@ Response: `{ redemptions: [{ id, batch_id, code_id, outcome, free_cycles_applied
 
 ## Trials
 
-A batch's grant inherits trial semantics from the target variant's effective
-plan-offer rules (the batch itself carries no trial config). When the offer
-enables a trial, the create branch mints a trial subscription
-(`is_trial: true`, `trial_ends_at = started_at + trial_days`, payment-free like
-every redemption-created row) and the redemption writes a **`trial_claim`
-ledger row** for the customer/product pair, with `source: "redemption"`. A
-non-trial grant writes no ledger row. The ledger is the same one the
+A batch carries its **own** trial configuration, set when the batch is created
+(`trial_enabled`, default off, plus `trial_days`, `trial_bonus_days` and
+`trial_requires_payment_method`) — it no longer inherits the target variant's
+effective plan-offer trial rules. When the batch enables a trial, the create
+branch mints a trial subscription (`is_trial: true`,
+`trial_ends_at = started_at + trial_days`, `cancel_effective_at` left null,
+payment-free like every redemption-created row) and the redemption writes a
+**`trial_claim` ledger row** for the customer/product pair, with
+`source: "redemption"`. A `trial_bonus_days` set on the batch is recorded on the
+subscription as `metadata.trial_bonus_days`, so a later vault binding grants
+exactly those extra days (it overrides the offer's `trial_bonus_days` fallback).
+A non-trial grant writes no ledger row. The ledger is the same one the
 self-service claim endpoint writes, so a customer who took a trial through a
 code cannot later claim the same product's trial
 (`store-customer-self-service-tutorial.md`, *Trials*).
@@ -136,7 +141,7 @@ Two refusals protect the trial semantics:
   outright (`Redemption code <code> grants a trial that requires a payment
   method, which redemption codes cannot collect`). The redemption door has no
   cart and no way to collect a payment method, and degrading the grant to a
-  non-trial subscription was rejected: it would make the offer's rule a lie.
+  non-trial subscription was rejected: it would make the batch's rule a lie.
 - **Trial codes are new-user-only** — an existing subscription for the target
   variant, or any prior order containing the variant, refuses with
   `Trial codes are for new users only`.

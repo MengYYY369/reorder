@@ -269,6 +269,21 @@ subscription runs on:
   buying the provider-managed plan of the same product and being charged
   twice for one product.
 
+Ticket 12 (D12) opens exactly **one exception on the reorder rail**: when the
+cart itself runs on the subscription track (`metadata.is_subscription` on a line
+for the colliding product — the same boolean wording `validate-subscription-cart`
+reads), a live row the engine's own `extend` stacking would fold the purchase
+into no longer blocks — a card-free trial row (`status: ACTIVE`, `is_trial`, no
+stored payment method) or a paid ACTIVE row carrying a provider
+(`payment_context.payment_provider_id`). That purchase becomes an `extend` of the
+existing row, not a second subscription. The exception is a **true subset** of the
+stacking fold condition (`isFoldableReorderRailRow`), so it can never let through
+a cart the engine would not fold. Everything else still blocks: a bound (auto)
+trial, a `PAUSED` row, a redemption-shaped row with no provider (its free period
+ends at `cancel_effective_at`, leaving an extension's billing undefined), a native
+recurrence, and any pure one-time purchase — a cart with no subscription signal
+never gets the exception.
+
 Both readers apply the **same occupying status set**, so the two directions
 cannot disagree about what "already subscribed" means. An unauthenticated
 request, a failed read of the customer's rows on either rail, an unreadable

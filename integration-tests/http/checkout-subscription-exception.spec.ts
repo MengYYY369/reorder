@@ -625,6 +625,49 @@ medusaIntegrationTestRunner({
           mechanism: "reorder_auto",
         })
       })
+
+      it("never flips the row to auto when payment.captured lands before the order's extension", async () => {
+        const { container, subscriptionModule, engine, trialId, checkout } =
+          await setupPurchase({
+            sessionDataFor: (customerId) => ({
+              payment_method: VAULT_TOKEN,
+              customer_id: customerId,
+            }),
+          })
+
+        // The out-of-order race: `payment.captured` fires before `order.placed`
+        // reaches create-subscription-from-order. The trial row still carries
+        // its template cart, so the subscriber's cart_id lookup finds no row
+        // and the token is never stored.
+        await runPaymentCapturedSubscriber(
+          container,
+          stubPayment(container, checkout.payment_collection_id)
+        )
+
+        const [beforeOrder] = await subscriptionModule.listSubscriptions({
+          id: [trialId],
+        })
+        expect(beforeOrder.payment_context).toMatchObject({
+          payment_method_reference: null,
+          payment_mode: "manual",
+        })
+
+        // The extension lands afterwards and stamps the purchase cart, but the
+        // one event that carried the vault token has already passed — the row
+        // stays card-free and manual, so the storefront's auto flip can never
+        // succeed. This is the "attribution lands or the row never flips"
+        // boundary ticket 12 requires.
+        await runOrder(engine, checkout.order_id)
+
+        const [row] = await subscriptionModule.listSubscriptions({
+          id: [trialId],
+        })
+        expect(row.payment_context).toMatchObject({
+          payment_method_reference: null,
+          payment_mode: "manual",
+        })
+        expect(row.cart_id).toEqual(checkout.cart_id)
+      })
     })
   },
 })

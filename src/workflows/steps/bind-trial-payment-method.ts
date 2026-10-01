@@ -403,11 +403,12 @@ type BindStepCompensation = {
 }
 
 /**
- * The bonus days the extension grants, as this trial recorded them at claim
+ * The bonus days the extension grants, as the trial recorded them at claim
  * time (`trial_bonus_days` on the subscription's metadata — the value the
- * offer carried when the customer actually claimed). A trial whose metadata
- * predates that write (the redemption door) falls back to the offer's current
- * rule; no recorded value anywhere means no bonus.
+ * offer carried when the customer actually claimed, or the batch's own
+ * configuration on the redemption door). A trial whose metadata predates that
+ * write falls back to the offer's current rule; no recorded value anywhere
+ * means no bonus.
  */
 async function resolveBonusDays(
   container: MedusaContainer,

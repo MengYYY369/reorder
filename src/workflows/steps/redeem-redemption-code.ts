@@ -44,6 +44,13 @@ export type RedemptionGrantSnapshot = {
 export type RedemptionTrialInfo = {
   is_enabled: boolean
   days: number | null
+  /**
+   * The extra days a later vault binding grants on top of `days` (ticket 14 /
+   * D14). Recorded on the trial row's metadata as `trial_bonus_days` — the
+   * same shape the claim door writes — so the bind step reads the batch value
+   * instead of falling back to the target variant's plan-offer rule.
+   */
+  bonus_days: number | null
   requires_payment_method: boolean
 }
 
@@ -52,7 +59,7 @@ export type RedemptionResolution = {
   batch: RedemptionBatchDTO
   code: RedemptionCodeDTO
   grant: RedemptionGrantSnapshot
-  /** Inherited from the batch variant's effective plan-offer rules. */
+  /** Read off the batch's own trial configuration (ticket 14 / D14). */
   trial: RedemptionTrialInfo
   target_subscription_id: string | null
   customer_id: string
@@ -149,6 +156,7 @@ export const resolveRedemptionCodeStep = createStep(
     const trial: RedemptionTrialInfo = {
       is_enabled: !!batch.trial_enabled,
       days: batch.trial_enabled ? batch.trial_days ?? null : null,
+      bonus_days: batch.trial_enabled ? batch.trial_bonus_days ?? null : null,
       requires_payment_method: batch.trial_enabled
         ? batch.trial_requires_payment_method ?? false
         : false,
@@ -429,6 +437,12 @@ export const redeemCreateSubscriptionStep = createStep(
         redemption_batch_id: resolution.batch.id,
         redemption_code_id: resolution.code.id,
         ...(isTrial ? { trial: true } : {}),
+        // Same shape as the claim door (create-trial-subscription): the bonus
+        // is recorded only when the batch set one, so `resolveBonusDays` on
+        // the bind path reads the batch's value and never the offer fallback.
+        ...(isTrial && resolution.trial.bonus_days !== null
+          ? { trial_bonus_days: resolution.trial.bonus_days }
+          : {}),
       },
     } as any)
 

@@ -189,8 +189,8 @@ webhook-loss recovery:
 - `order.cart.currency_code`, `order.cart.items[].unit_price`,
   `order.cart.items[].quantity`
 - subscription snapshot `id`, `reference`, `status`, `frequencyInterval`,
-  `frequencyValue`, `nextRenewalAt`, `cancelEffectiveAt`, `paymentMode`,
-  `hasPaymentMethod`, `orderId`
+  `frequencyValue`, `nextRenewalAt`, `cancelEffectiveAt`, `isTrial`,
+  `trialEndsAt`, `paymentMode`, `hasPaymentMethod`, `orderId`
 - `customer_id` queries return `{ subscriptions: [ ...snapshots ] }` (an empty
   list means the customer genuinely has no subscriptions; a customer belonging
   to another tenant, or an unknown id, answers **404** instead — this endpoint

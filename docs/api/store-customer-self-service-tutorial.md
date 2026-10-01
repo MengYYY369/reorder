@@ -130,6 +130,9 @@ Returns the customer's subscriptions, newest first.
       "frequency_value": 1,
       "next_renewal_at": "2026-10-01T10:00:00.000Z",
       "effective_next_renewal_at": "2026-11-01T10:00:00.000Z",
+      "cancel_effective_at": null,
+      "is_trial": false,
+      "trial_ends_at": null,
       "payment_mode": "auto",
       "has_payment_method": true,
       "active_cancellation_case": null
@@ -141,6 +144,12 @@ Returns the customer's subscriptions, newest first.
 - `effective_next_renewal_at` is the projected renewal date the customer
   experiences: when `skip_next_cycle` is set, this is the date after the
   skipped period while `next_renewal_at` stays the technical billing anchor.
+- `cancel_effective_at` is the scheduled termination of a redemption-created
+  free-period subscription (`null` for every other row).
+- `is_trial` is `true` for a trial row (a self-service claim, or a
+  trial-enabled redemption batch).
+- `trial_ends_at` is the trial's end date when `is_trial` is `true`, otherwise
+  `null`.
 - `payment_mode` is `"auto"` or `"manual"` (`null` only for rows created
   before the field existed).
 - `has_payment_method` says whether a chargeable payment method is on file.

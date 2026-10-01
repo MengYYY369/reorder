@@ -38,7 +38,7 @@ Each layer has a clear responsibility:
 
 The `redemption` custom module owns three models:
 
-- `redemption_batch` — the campaign: name, target `variant_id`, grant configuration (`frequency_interval`, `frequency_value`, `free_cycles`), status, validity window, `max_redemptions_per_code`, `code_prefix`
+- `redemption_batch` — the campaign: name, target `variant_id`, grant configuration (`frequency_interval`, `frequency_value`, `free_cycles`), its own trial configuration (`trial_enabled` default false, `trial_days`, `trial_bonus_days`, `trial_requires_payment_method`), status, validity window, `max_redemptions_per_code`, `code_prefix`
 - `redemption_code` — belongs to a batch; `code` (unique case-insensitively, stored uppercase), status, `max_redemptions`, `redemption_count`
 - `redemption_record` — one per redemption; outcome (`subscription_created` | `subscription_extended`), `free_cycles_applied`, frequency snapshot; unique index on (`code_id`, `customer_id`) enforcing one redemption per customer per code
 
@@ -72,7 +72,7 @@ Redemption-created subscriptions are payment-free and terminate on schedule:
 - `free_cycles_remaining = free_cycles`
 - `cancel_effective_at = started_at + N cadences`
 - `metadata.source = "redemption"` — the origin marker
-- `is_trial` is always false
+- `is_trial` is `false` — this is the free-period path. A batch that enables its own trial configuration instead mints a trial row (`is_trial: true`, `trial_ends_at = started_at + trial_days`, `cancel_effective_at` left null), and a `trial_bonus_days` on the batch is recorded on the row's metadata for a later vault binding
 - `payment_context.payment_mode = "auto"` keeps the cycles inside the scheduler's due set; the free branch never builds an order or touches payment
 
 The renewal engine's skip branch is generalized: a due cycle succeeds without order/payment when `skip_next_cycle` is set OR `free_cycles_remaining > 0`; the counter decrements and `next_renewal_at` advances one cadence. When the counter reaches zero, no further cycle is pre-created because `scheduled_for` would meet or exceed `cancel_effective_at` (existing scheduling exclusion). This yields exactly N auditable SUCCEEDED cycle records with no off-by-one at the boundary.
@@ -90,7 +90,7 @@ Batch lifecycle is not subscription-scoped and is intentionally not written to t
 ## 6. Admin UI
 
 - Batches list page with search, status badges, and code/redemption counts
-- Create modal: grant config, quantity, per-code limit, validity window, generated and custom codes
+- Create modal: grant config, trial config (`trial_enabled` off by default, plus `trial_days`, `trial_bonus_days`, `trial_requires_payment_method`), quantity, per-code limit, validity window, generated and custom codes
 - Batch detail: configuration summary, codes table (status, usage, disable action), redemption records table (customer, outcome, free cycles, subscription, timestamp)
 - en + zhCN i18n under the `redemptions` namespace
 
