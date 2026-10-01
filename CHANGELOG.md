@@ -1,3 +1,66 @@
+## [1.8.0] - 2026-10-01
+
+The repeat-purchase and trial-lifecycle release. The checkout gate learns the
+subscription track's one exception, a repeat purchase now converts a live trial
+row into a paid one instead of leaving it to be cancelled at its own trial end,
+and the offer's trial rules stop leaking into the checkout: they describe what
+the claim endpoint may grant, and a redemption batch carries its own trial
+configuration. The store-facing subscription reads also expose the trial state
+the storefront needs to tell a card-free trial from a paid manual row.
+
+**One migration ships with this release — run `medusa db:migrate` on upgrade**
+(the redemption batch's own trial columns).
+
+### Behavior changes
+
+- **checkout gate: the subscription track may buy again.** A cart that carries
+the subscription signal is no longer refused when the colliding live row is one
+a repeat purchase actually folds into: a card-free trial row, or a paid row with
+a stored provider (the vaulted and epay rails). A pure one-time purchase of the
+same product, a native recurrence, a bound auto trial row, a PAUSED row, and a
+redemption row (no provider, its free period ending at `cancel_effective_at`)
+are still refused, and the exception's predicate is a strict subset of the
+stacking fold so a checkout it lets through always has a row to extend.
+- **a repeat purchase converts a trial row.** Extending a live trial row now
+  clears `is_trial`/`trial_ends_at`, so the row's own trial-end cycle no longer
+  cancels the paid period the purchase just bought at the old `trial_ends_at`;
+  the new period ends one cadence past the trial's end. The row's `cart_id` is
+  re-pointed at the purchase cart and, when the row holds no payment method, the
+  purchase's `payment_provider_id` is stamped onto its context — that is what
+  lets the `payment.captured` subscriber match the purchase's session and store
+  its vault token. The extension's compensation restores the trial state, the
+  cart id and the payment context together.
+- **the offer's trial rules only reach the claim channel.** `trial_enabled` /
+  `trial_days` on a plan offer no longer turn an ordinary subscription purchase
+  into a trial row: a manual purchase used to end after `trial_days`, and an
+  auto purchase was charged once for the trial period and again at the first
+  real renewal. `validate-subscription-cart` pins its `trial_days` output at 0;
+  the claim endpoint (`POST /store/customers/me/trials`) is unchanged.
+- **redemption batches carry their own trial configuration (default off).**
+  `redemption_batch` gains `trial_enabled`, `trial_days`, `trial_bonus_days`
+  and `trial_requires_payment_method`; trial semantics used to be inherited
+  from the target variant's plan-offer rules, which made every code batch on a
+trial-enabled variant a new-user-only trial grant. A normal batch and a trial
+offer can now live on the same variant. A normal batch refuses to extend a live
+trial row outright (the grant would be voided at `trial_ends_at`), and the admin
+create-batch modal and validators expose the new fields.
+- **the store subscription reads expose the trial state.** The list DTO adds
+  `is_trial`, `trial_ends_at` and `cancel_effective_at`, and the SaaS reconcile
+  snapshot adds the camelCase `isTrial`/`trialEndsAt` (next to the existing
+  `cancelEffectiveAt`).
+
+### Features
+
+- **store: subscription-list and snapshot trial fields.** A storefront can
+  tell a card-free trial from a paid manual row — and read a redemption grant's
+  boundary — without inferring either from the payment context.
+
+### Fixes
+
+- **a repeat purchase no longer leaves a trial to expire.** See the behavior
+  changes above: the trial state is cleared on extend, the row is converted and
+  its card attribution follows the purchase.
+
 ## [1.7.0] - 2026-09-29
 
 The billing-engine hardening release. A failed renewal stops retrying forever
