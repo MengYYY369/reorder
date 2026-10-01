@@ -31,7 +31,7 @@ authorization, as with the money-basis switch — granted and used on
 
 | # | Workstream | Lives in | Depends on |
 |---|------------|----------|------------|
-| A | PayPal plugin: the vault-binding capability (P1 → P2 → P5) | `D:\Projects\medusa-paypal` (0.7.1 → **0.8.0**) | nothing |
+| A | PayPal plugin: the vault-binding capability (P1 → P2 → P4 re-run → P5) | `D:\Projects\medusa-paypal` (0.7.1 → **0.8.0**) | nothing |
 | B | Host storefront and host config: trial CTA, vaulted-rail cancel button, event whitelist, dependency bumps | `D:\Projects\medusa-saas` | B4a done (with D); B's bound half needs A + C |
 | C | PayPal LIVE account gates (pre-launch checklist) | owner's PayPal account | production access (owner) |
 | D | Production release of the reorder plugin | deploy pipeline + prod | **done 2026-09-29** |
@@ -61,7 +61,7 @@ the reorder repo; copy it into `medusa-paypal` when work starts — its version
 line and line references were refreshed against 0.7.1 on 2026-10-01). The plan's
 own Execution Handoff recommends subagent-driven execution; the sandbox
 verification (its Task P4) **already passed on 2026-09-28**, so the sequence is
-P1 → P2 → P5, with P4 reduced to a re-run.
+P1 → P2 → P4 (the re-run through the real client methods) → P5.
 
 The reorder side already consumes this capability and is waiting:
 `src/workflows/utils/paypal-vault-binding.ts` probes the resolved
@@ -266,8 +266,9 @@ no production test access. They gate the **bound** path only.
 1. ~~**D**~~ — **done 2026-09-29**: 1.7.0 published, host bumped, image
    `0.4.35` deployed. The money-safety core is live 20 days before the
    2026-10-18 deadline; D3's observation items continue.
-2. **A** — medusa-paypal P1 → P2 → P5 (can start immediately, in parallel).
-   Re-derive the A2 credential premise against 0.7.x first.
+2. **A** — medusa-paypal P1 → P2 → P4 (re-run) → P5 (can start immediately, in
+   parallel). The A2 credential premise was re-derived against 0.7.1 on
+   2026-10-01 — nothing to re-check before starting.
 3. **C** — the owner checks the LIVE gates (any time before enabling the bound
    path).
 4. **B1/B2/B3** — storefront trial CTA, vaulted-rail cancel button, event
