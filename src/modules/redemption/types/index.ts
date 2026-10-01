@@ -36,6 +36,15 @@ export interface CreateRedemptionBatchInput {
   expires_at?: Date | null
   generated_code_count?: number
   custom_codes?: string[]
+  /**
+   * The batch's own trial configuration (ticket 14 / D14). Defaults to off, so
+   * a normal code batch on a trial-enabled variant keeps the create/extend
+   * semantics; when on, the code grants a trial through the claim-shaped path.
+   */
+  trial_enabled?: boolean
+  trial_days?: number | null
+  trial_bonus_days?: number | null
+  trial_requires_payment_method?: boolean
   metadata?: Record<string, unknown> | null
 }
 
@@ -49,6 +58,10 @@ export interface RedemptionBatchDTO {
   status: RedemptionBatchStatus
   code_prefix: string
   max_redemptions_per_code: number
+  trial_enabled: boolean
+  trial_days: number | null
+  trial_bonus_days: number | null
+  trial_requires_payment_method: boolean
   starts_at: Date | null
   expires_at: Date | null
   metadata: Record<string, unknown> | null

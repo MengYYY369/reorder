@@ -61,4 +61,9 @@ export const redemptionErrors = {
       "invalid_data",
       `Redemption code ${code} grants a trial that requires a payment method, which redemption codes cannot collect`
     ),
+  trialSubscriptionNotExtendable: (variantId: string) =>
+    new RedemptionError(
+      "invalid_data",
+      `Redemption cannot extend the trial subscription of variant ${variantId}: a code grant on a trial row would leave its billing undefined`
+    ),
 }

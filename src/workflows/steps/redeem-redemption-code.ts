@@ -8,7 +8,6 @@ import {
 } from "../../modules/redemption/types"
 import { redemptionErrors } from "../../modules/redemption/utils/errors"
 import { normalizeRedemptionCode } from "../../modules/redemption/utils/code-generator"
-import { resolveProductSubscriptionConfig } from "../../modules/plan-offer/utils/effective-config"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
@@ -141,23 +140,18 @@ export const resolveRedemptionCodeStep = createStep(
       throw redemptionErrors.batchNotFound(batch.id)
     }
 
-    // Trial semantics are inherited from the batch variant's effective
-    // plan-offer rules (batch itself carries no trial config). Batch creation
-    // already requires an enabled plan-offer on the target variant, so the
-    // config resolves; a defensive null fallback disables trial if absent.
-    const effectiveConfig = await resolveProductSubscriptionConfig(container, {
-      product_id: variant.product.id,
-      variant_id: variant.id,
-    }).catch(() => null)
+    // Ticket 14 (D14): the batch carries its own trial configuration, default
+    // off. Trial semantics used to be inherited from the batch variant's
+    // plan-offer rules, which turned every code batch on a trial-enabled variant
+    // into a new-user-only trial grant and put a normal batch and a trial offer
+    // in direct conflict on one variant. The plan-offer read is gone; the batch
+    // row is the only source.
     const trial: RedemptionTrialInfo = {
-      is_enabled:
-        !!effectiveConfig?.is_enabled &&
-        !!effectiveConfig.rules?.trial_enabled,
-      days: effectiveConfig?.rules?.trial_enabled
-        ? effectiveConfig.rules.trial_days ?? null
-        : null,
-      requires_payment_method:
-        effectiveConfig?.rules?.trial_requires_payment_method ?? false,
+      is_enabled: !!batch.trial_enabled,
+      days: batch.trial_enabled ? batch.trial_days ?? null : null,
+      requires_payment_method: batch.trial_enabled
+        ? batch.trial_requires_payment_method ?? false
+        : false,
     }
 
     // `trial_requires_payment_method` is enforced here by REFUSING the
@@ -228,6 +222,8 @@ export const resolveRedemptionCodeStep = createStep(
         fields: ["id", "items.variant_id"],
         filters: { customer_id: input.customer_id },
       })
+      // SAFETY: the projection above is exactly the shape asserted here; the
+      // graph API types its rows as `unknown`.
       const hasVariantOrder = (
         customerOrders as unknown as Array<{
           items?: Array<{ variant_id?: string | null }>
@@ -242,6 +238,17 @@ export const resolveRedemptionCodeStep = createStep(
 
     let targetSubscriptionId: string | null = null
     let kind: "create" | "extend" = "create"
+
+    // Ticket 14 (D14): a code grant must never extend a trial row. The extend
+    // branch only adds `free_cycles_remaining` and leaves `next_renewal_at`
+    // alone, while a trial row ends its own cycle at `trial_ends_at` — so the
+    // grant would be voided. Refusing outright is also what keeps target
+    // resolution honest: dropping the row from `extendable` instead would fall
+    // through to `kind: "create"` and mint a second subscription for the same
+    // product.
+    if (extendable.some((subscription) => subscription.is_trial)) {
+      throw redemptionErrors.trialSubscriptionNotExtendable(batch.variant_id)
+    }
 
     if (extendable.length > 0) {
       kind = "extend"
@@ -261,6 +268,8 @@ export const resolveRedemptionCodeStep = createStep(
       variant_id: variant.id,
       variant_title: variant.title ?? "Unknown variant",
       sku: variant.sku ?? null,
+      // SAFETY: the batch column is stored as the same enum the subscription
+      // domain reads; the module types it as the redemption module's own copy.
       frequency_interval: batch.frequency_interval as unknown as SubscriptionFrequencyInterval,
       frequency_value: batch.frequency_value,
       free_cycles: batch.free_cycles,

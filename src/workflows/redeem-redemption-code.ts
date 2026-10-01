@@ -111,6 +111,13 @@ export const REDEEM_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
       /^Redemption code \S+ grants a trial that requires a payment method, which redemption codes cannot collect$/,
   },
   {
+    // Ticket 14 (D14): a normal batch must not extend a live trial row.
+    step: RESOLVE_CODE_STEP,
+    type: MedusaError.Types.INVALID_DATA,
+    copy:
+      /^Redemption cannot extend the trial subscription of variant \S+: a code grant on a trial row would leave its billing undefined$/,
+  },
+  {
     step: RESOLVE_CODE_STEP,
     type: MedusaError.Types.INVALID_DATA,
     copy: /^Multiple matching subscriptions found; pass subscription_id to disambiguate$/,

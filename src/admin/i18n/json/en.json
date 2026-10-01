@@ -1162,7 +1162,13 @@
       "validityWindowHint": "Codes only redeem inside the window.",
       "startsAt": "Starts at",
       "expiresAt": "Expires at",
-      "frequencyValue": "Frequency value"
+      "frequencyValue": "Frequency value",
+      "trialEnabled": "Grant a trial",
+      "trialEnabledHint": "Codes from this batch grant a trial instead of free cycles. Off by default.",
+      "trialDays": "Trial days",
+      "trialBonusDays": "Bonus days on binding",
+      "trialRequiresPaymentMethod": "Requires a payment method",
+      "trialRequiresPaymentMethodHint": "Refuses a card-free redemption; the customer must bind a payment method."
     },
     "columns": {
       "name": "Name",
@@ -1222,7 +1228,8 @@
       "atLeastOneCode": "Add at least one generated or custom code",
       "windowOrder": "Start must be before expiry",
       "customCodeFormat": "Letters, digits and inner hyphens only (min 2 characters)",
-      "codePrefixFormat": "1-8 letters or digits"
+      "codePrefixFormat": "1-8 letters or digits",
+      "trialDaysRequired": "Enter a trial length of at least 1 day"
     },
     "records": {
       "title": "Redemption records",

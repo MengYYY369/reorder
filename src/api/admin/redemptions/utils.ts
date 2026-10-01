@@ -24,6 +24,10 @@ export type AdminRedemptionBatchSummary = {
   status: string
   code_prefix: string
   max_redemptions_per_code: number
+  trial_enabled: boolean
+  trial_days: number | null
+  trial_bonus_days: number | null
+  trial_requires_payment_method: boolean
   starts_at: string | null
   expires_at: string | null
   code_count: number
@@ -46,6 +50,11 @@ function toBatchSummary(
     status: batch.status,
     code_prefix: batch.code_prefix,
     max_redemptions_per_code: batch.max_redemptions_per_code,
+    trial_enabled: batch.trial_enabled ?? false,
+    trial_days: batch.trial_days ?? null,
+    trial_bonus_days: batch.trial_bonus_days ?? null,
+    trial_requires_payment_method:
+      batch.trial_requires_payment_method ?? false,
     starts_at: batch.starts_at ? new Date(batch.starts_at).toISOString() : null,
     expires_at: batch.expires_at
       ? new Date(batch.expires_at).toISOString()

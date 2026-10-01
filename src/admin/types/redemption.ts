@@ -34,6 +34,10 @@ export type AdminRedemptionBatchSummary = {
   status: RedemptionBatchStatus
   code_prefix: string
   max_redemptions_per_code: number
+  trial_enabled: boolean
+  trial_days: number | null
+  trial_bonus_days: number | null
+  trial_requires_payment_method: boolean
   starts_at: string | null
   expires_at: string | null
   code_count: number
@@ -62,6 +66,10 @@ export type CreateRedemptionBatchAdminRequest = {
   free_cycles: number
   code_prefix?: string
   max_redemptions_per_code?: number
+  trial_enabled?: boolean
+  trial_days?: number | null
+  trial_bonus_days?: number | null
+  trial_requires_payment_method?: boolean
   starts_at?: string | null
   expires_at?: string | null
   generated_code_count?: number

@@ -2,7 +2,6 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { Plus, Trash } from "@medusajs/icons"
 import {
   Button,
-  Container,
   FocusModal,
   Heading,
   Input,
@@ -51,6 +50,10 @@ const createBatchSchema = z
       .regex(/^[A-Z0-9]{1,8}$/i, "redemptions.validation.codePrefixFormat")
       .optional(),
     max_redemptions_per_code: z.number().int().positive(),
+    trial_enabled: z.boolean(),
+    trial_days: z.number().int().positive(),
+    trial_bonus_days: z.number().int().nonnegative(),
+    trial_requires_payment_method: z.boolean(),
     has_window: z.boolean(),
     starts_at: z.string().trim().optional(),
     expires_at: z.string().trim().optional(),
@@ -78,6 +81,14 @@ const createBatchSchema = z
         path: ["starts_at"],
       })
     }
+
+    if (values.trial_enabled && values.trial_days < 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "redemptions.validation.trialDaysRequired",
+        path: ["trial_days"],
+      })
+    }
   })
 
 type CreateBatchFormValues = z.infer<typeof createBatchSchema>
@@ -96,6 +107,10 @@ const defaultValues: CreateBatchFormValues = {
   free_cycles: 1,
   code_prefix: "RDM",
   max_redemptions_per_code: 1,
+  trial_enabled: false,
+  trial_days: 7,
+  trial_bonus_days: 0,
+  trial_requires_payment_method: false,
   has_window: false,
   starts_at: "",
   expires_at: "",
@@ -117,13 +132,21 @@ export const CreateBatchModal = ({ open, onOpenChange }: CreateBatchModalProps) 
     defaultValues,
   })
 
-  const { fields, append, remove } = useFieldArray({
+  // SAFETY: react-hook-form 7.83's `FieldArrayPath` excludes arrays of
+  // primitives — `string[]` resolves to `never` — so the props are asserted
+  // through `unknown` to the generic default, which accepts a plain field name.
+  // The runtime contract (a string array field) is exactly what the schema
+  // declares; the object-array field arrays elsewhere in the admin do not need
+  // this because their element type is not primitive.
+  const customCodesFieldArray = {
     control: form.control,
     name: "custom_codes",
-  })
+  } as unknown as Parameters<typeof useFieldArray>[0]
+  const { fields, append, remove } = useFieldArray(customCodesFieldArray)
 
   const productId = form.watch("variant_id")
   const hasWindow = form.watch("has_window")
+  const trialEnabled = form.watch("trial_enabled")
 
   useEffect(() => {
     if (open) {
@@ -168,6 +191,14 @@ export const CreateBatchModal = ({ open, onOpenChange }: CreateBatchModalProps) 
       free_cycles: values.free_cycles,
       code_prefix: values.code_prefix || undefined,
       max_redemptions_per_code: values.max_redemptions_per_code,
+      trial_enabled: values.trial_enabled,
+      trial_days: values.trial_enabled ? values.trial_days : null,
+      trial_bonus_days:
+        values.trial_enabled && values.trial_bonus_days > 0
+          ? values.trial_bonus_days
+          : null,
+      trial_requires_payment_method:
+        values.trial_enabled && values.trial_requires_payment_method,
       starts_at: values.has_window && values.starts_at
         ? new Date(values.starts_at).toISOString()
         : null,
@@ -363,6 +394,91 @@ export const CreateBatchModal = ({ open, onOpenChange }: CreateBatchModalProps) 
                       {t("redemptions.fields.expiresAt")}
                     </Label>
                     <Input id="batch-expires-at" type="date" {...form.register("expires_at")} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col gap-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <Label weight="plus" htmlFor="batch-trial-enabled">
+                    {t("redemptions.fields.trialEnabled")}
+                  </Label>
+                  <Text size="small" className="text-ui-fg-subtle">
+                    {t("redemptions.fields.trialEnabledHint")}
+                  </Text>
+                </div>
+                <Controller
+                  control={form.control}
+                  name="trial_enabled"
+                  render={({ field }) => (
+                    <Switch
+                      id="batch-trial-enabled"
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  )}
+                />
+              </div>
+
+              {trialEnabled ? (
+                <div className="flex flex-col gap-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-y-2">
+                      <Label htmlFor="batch-trial-days" weight="plus">
+                        {t("redemptions.fields.trialDays")}
+                      </Label>
+                      <Input
+                        id="batch-trial-days"
+                        type="number"
+                        min={1}
+                        {...form.register("trial_days", {
+                          valueAsNumber: true,
+                        })}
+                      />
+                      {form.formState.errors.trial_days ? (
+                        <Text size="small" className="text-ui-fg-error">
+                          {t("redemptions.validation.trialDaysRequired")}
+                        </Text>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-col gap-y-2">
+                      <Label htmlFor="batch-trial-bonus-days" weight="plus">
+                        {t("redemptions.fields.trialBonusDays")}
+                      </Label>
+                      <Input
+                        id="batch-trial-bonus-days"
+                        type="number"
+                        min={0}
+                        {...form.register("trial_bonus_days", {
+                          valueAsNumber: true,
+                        })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <Label weight="plus" htmlFor="batch-trial-requires-method">
+                        {t("redemptions.fields.trialRequiresPaymentMethod")}
+                      </Label>
+                      <Text size="small" className="text-ui-fg-subtle">
+                        {t("redemptions.fields.trialRequiresPaymentMethodHint")}
+                      </Text>
+                    </div>
+                    <Controller
+                      control={form.control}
+                      name="trial_requires_payment_method"
+                      render={({ field }) => (
+                        <Switch
+                          id="batch-trial-requires-method"
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      )}
+                    />
                   </div>
                 </div>
               ) : null}

@@ -45,6 +45,14 @@ export const PostAdminCreateRedemptionBatchSchema = z
       .transform((value) => value.toUpperCase())
       .optional(),
     max_redemptions_per_code: z.number().int().positive().optional(),
+    /**
+     * The batch's own trial configuration (ticket 14 / D14). Default off: a
+     * batch that does not enable a trial stores none of these fields.
+     */
+    trial_enabled: z.boolean().optional(),
+    trial_days: z.number().int().positive().optional().nullable(),
+    trial_bonus_days: z.number().int().nonnegative().optional().nullable(),
+    trial_requires_payment_method: z.boolean().optional(),
     starts_at: z.coerce.date().optional().nullable(),
     expires_at: z.coerce.date().optional().nullable(),
     generated_code_count: z.number().int().min(0).max(10000).optional(),
@@ -68,6 +76,17 @@ export const PostAdminCreateRedemptionBatchSchema = z
         code: z.ZodIssueCode.custom,
         message: "'starts_at' must be before 'expires_at'",
         path: ["starts_at"],
+      })
+    }
+
+    if (
+      data.trial_enabled &&
+      (data.trial_days === undefined || data.trial_days === null)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "'trial_days' is required when 'trial_enabled' is true",
+        path: ["trial_days"],
       })
     }
   })

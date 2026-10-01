@@ -1162,7 +1162,13 @@
       "validityWindowHint": "码仅在有效期窗口内可兑换。",
       "startsAt": "开始时间",
       "expiresAt": "结束时间",
-      "frequencyValue": "频率值"
+      "frequencyValue": "频率值",
+      "trialEnabled": "授予试用",
+      "trialEnabledHint": "本批次的码授予试用而非免费周期。默认关闭。",
+      "trialDays": "试用天数",
+      "trialBonusDays": "绑定后赠送天数",
+      "trialRequiresPaymentMethod": "需要支付方式",
+      "trialRequiresPaymentMethodHint": "拒绝无卡兑换；客户必须先绑定支付方式。"
     },
     "columns": {
       "name": "名称",
@@ -1222,7 +1228,8 @@
       "atLeastOneCode": "至少添加一个生成码或自定义码",
       "windowOrder": "开始时间必须早于结束时间",
       "customCodeFormat": "仅限字母、数字和中间连字符（至少 2 个字符）",
-      "codePrefixFormat": "1-8 位字母或数字"
+      "codePrefixFormat": "1-8 位字母或数字",
+      "trialDaysRequired": "请输入至少 1 天的试用时长"
     },
     "records": {
       "title": "兑换记录",

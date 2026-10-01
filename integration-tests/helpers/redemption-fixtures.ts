@@ -16,6 +16,11 @@ export type RedemptionBatchSeedInput = {
   max_redemptions_per_code?: number
   generated_code_count?: number
   custom_codes?: string[]
+  /** The batch's own trial config (ticket 14 / D14); default off. */
+  trial_enabled?: boolean
+  trial_days?: number | null
+  trial_bonus_days?: number | null
+  trial_requires_payment_method?: boolean
   starts_at?: Date
   expires_at?: Date
 }
@@ -42,6 +47,10 @@ export async function createRedemptionBatch(
     max_redemptions_per_code: input.max_redemptions_per_code,
     generated_code_count: input.generated_code_count ?? 1,
     custom_codes: input.custom_codes,
+    trial_enabled: input.trial_enabled,
+    trial_days: input.trial_days,
+    trial_bonus_days: input.trial_bonus_days,
+    trial_requires_payment_method: input.trial_requires_payment_method,
     starts_at: input.starts_at,
     expires_at: input.expires_at,
   })

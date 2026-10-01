@@ -132,16 +132,17 @@ const RENEWAL_ABANDONED_EVENT = "renewal.abandoned"
 const RENEWAL_AWAITING_MANUAL_RESOLUTION_EVENT = "renewal.awaiting_manual_resolution"
 
 /**
- * The measured migration inventory: 27 migrations across the 10 module
+ * The measured migration inventory: 28 migrations across the 10 module
  * directories that ship them (`saas-bridge` ships none). Task 12 of the billing
  * hardening plan added the third one (the two operational renewal event types
  * on the `subscription_log` check constraint) and Task 13 the fourth (the two
  * lookahead event types on the same constraint); Task 20's `trial_claim` table
- * took the inventory to 27. A floor like "more than 20" would still pass
- * if three directories were skipped, so the cases compare against the exact set
- * discovered on disk instead.
+ * took the inventory to 27, and ticket 14's redemption-batch trial columns
+ * (`Migration20261001120000`) to 28. A floor like "more than 20" would still
+ * pass if three directories were skipped, so the cases compare against the exact
+ * set discovered on disk instead.
  */
-const EXPECTED_MIGRATION_COUNT = 27
+const EXPECTED_MIGRATION_COUNT = 28
 
 function migrationDirOf(moduleName: string): string {
   return path.join(MODULES_ROOT, moduleName, "migrations")

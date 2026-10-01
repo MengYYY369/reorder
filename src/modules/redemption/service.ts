@@ -77,6 +77,22 @@ function assertValidGrantConfig(input: CreateRedemptionBatchInput): void {
       "A batch requires at least one code (generated_code_count or custom_codes)",
     )
   }
+  if (input.trial_enabled) {
+    if (!Number.isInteger(input.trial_days) || (input.trial_days ?? 0) < 1) {
+      throw new InvalidRedemptionBatchError(
+        "trial_days must be an integer >= 1 when trial_enabled is true",
+      )
+    }
+    if (
+      input.trial_bonus_days !== undefined &&
+      input.trial_bonus_days !== null &&
+      (!Number.isInteger(input.trial_bonus_days) || input.trial_bonus_days < 0)
+    ) {
+      throw new InvalidRedemptionBatchError(
+        "trial_bonus_days must be an integer >= 0",
+      )
+    }
+  }
 }
 
 function normalizeWindow(
@@ -168,6 +184,16 @@ class RedemptionModuleService extends MedusaService({
       status: RedemptionBatchStatus.ACTIVE,
       code_prefix: prefix,
       max_redemptions_per_code: maxRedemptions,
+      // The batch's own trial config (ticket 14 / D14), default off; a batch
+      // that does not enable it stores no trial fields at all.
+      trial_enabled: input.trial_enabled ?? false,
+      trial_days: input.trial_enabled ? input.trial_days ?? null : null,
+      trial_bonus_days: input.trial_enabled
+        ? input.trial_bonus_days ?? null
+        : null,
+      trial_requires_payment_method: input.trial_enabled
+        ? input.trial_requires_payment_method ?? false
+        : false,
       starts_at: startsAt,
       expires_at: expiresAt,
       metadata: input.metadata ?? null,
@@ -185,6 +211,9 @@ class RedemptionModuleService extends MedusaService({
       })) as any
     )
 
+    // SAFETY: the generated create methods answer the persisted rows, whose
+    // columns are exactly the DTO field set (including the trial columns this
+    // write supplies).
     return {
       batch: batch as unknown as RedemptionBatchDTO,
       codes: codes as unknown as RedemptionCodeDTO[],
