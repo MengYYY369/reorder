@@ -12,6 +12,14 @@
 > Workstream D for the record. What remains lives in `D:\Projects\medusa-paypal`
 > (Workstream A), in `D:\Projects\medusa-saas` (Workstream B, owner's repo),
 > in the owner's PayPal account (Workstream C), or in post-deploy observation.
+>
+> **Update (2026-10-02).** Workstream A is complete: `medusa-paypal` shipped
+> **0.8.0** (the three Vault v3 calls, the two service methods, the reduced
+> verification re-run) and then **0.9.0** (the vault customer-id listing fix).
+> A1–A4 below are ticked accordingly. What remains: **B2** (vaulted-rail cancel
+> button), **B3** (host event whitelist), **B4b** (the host's
+> `@mengyyy369/medusa-paypal` pin is still `^0.7.1` — bump it to `^0.9.0`),
+> **C1–C3** (owner's live PayPal gates), and **D3** (post-deploy observation).
 
 **Deadline that ordered the work.** The earliest production renewal cycle is
 **2026-10-18 08:28:48 UTC** and the scheduler runs every five minutes. The
@@ -70,7 +78,7 @@ The reorder side already consumes this capability and is waiting:
 reports `trial.binding.supported: false` until A2 ships. No reorder-side change
 is needed when it lands — the probe flips on its own.
 
-- [ ] **A1 — Task P1: the three Vault v3 calls on `PaypalService`**
+- [x] **A1 — Task P1: the three Vault v3 calls on `PaypalService`**
       (`createVaultSetupToken` / `getVaultSetupToken` /
       `createVaultPaymentToken` in `src/providers/paypal/paypal-core/`).
       Two sandbox facts are settled and must not be re-litigated: `returnUrl`
@@ -79,7 +87,7 @@ is needed when it lands — the probe flips on its own.
       treat `APPROVED` / `VAULTED` / `TOKENIZED` as exchangeable. The pinned
       `@paypal/paypal-server-sdk@1.0.0` exposes all three
       (`vaultController.d.ts`), so this is glue, not SDK work.
-- [ ] **A2 — Task P2: `startVaultApproval` / `completeVaultApproval` on the
+- [x] **A2 — Task P2: `startVaultApproval` / `completeVaultApproval` on the
       module service**, with the client built from the module's own
       `getResolvedPaypalConfig()` (the plan's Task P2 Step 1; the module-local
       container cannot resolve `payment`, and the payment-module route
@@ -98,13 +106,13 @@ is needed when it lands — the probe flips on its own.
       `PAYPAL_VAULT_BINDING_CAPABILITY` from the package root as documentation;
       the duck-type is the mechanism. `store_in_vault: ON_SUCCESS` stays
       exactly as it is.
-- [ ] **A3 — Task P4, reduced: re-run the setup-token verification script**
+- [x] **A3 — Task P4, reduced: re-run the setup-token verification script**
       through the real client methods once A1/A2 exist. Optional stronger
       test: the Medusa-hosted charge in `D:\Projects\medusa-e2e` (a real
       payment session dispatching `authorizePayment` / `capturePayment`). If
       it disagrees with the client-level result, the disagreement is the
       finding.
-- [ ] **A4 — Task P5: release 0.8.0** — version, CHANGELOG (naming the two
+- [x] **A4 — Task P5: release 0.8.0** — version, CHANGELOG (naming the two
       methods and that `ON_SUCCESS` is unchanged), README (method signatures,
       the duck-type idiom, the sandbox `403 NOT_AUTHORIZED` failure signature,
       and a note that the four account gates are already documented at
@@ -170,9 +178,10 @@ eligibility reason.
       1.7.0 (commit `ca959e7`). This bump is a **prerequisite of every
       backend image build**, not a follow-up.
 - [ ] **B4b — the medusa-paypal dependency bump.** Bump
-      `@mengyyy369/medusa-paypal` to 0.8.0 once A4 publishes and the vault
-      path is wanted live. The current declaration is `^0.7.1`, and a 0.x
-      caret does not accept 0.8.0, so this bump is mandatory, not cosmetic.
+      `@mengyyy369/medusa-paypal` to **0.9.0** (0.8.0 published 2026-10-02;
+      0.9.0 carries the vault customer-id listing fix) once the vault path is
+      wanted live. The current declaration is `^0.7.1`, and a 0.x caret does
+      not accept 0.8.0 or 0.9.0, so this bump is mandatory, not cosmetic.
 - [ ] **Note, not a task — RDA (uncertainty U3) stays open.** The host
       storefront passes no explicit risk data on any PayPal flow today (read
       2026-09-28). If PayPal turns out to enforce RDA on vault-without-purchase
