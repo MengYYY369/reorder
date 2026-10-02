@@ -1,3 +1,24 @@
+## [1.8.1] - 2026-10-02
+
+The cancellation hand-off release. Native mirror rows are billed by PayPal
+itself, so a local status change alone left the provider agreement charging a
+customer the engine no longer tracks - including one whose account was just
+deleted. The cancel step now asks the provider to cancel first, records the
+outcome on the row, and still completes the local cancellation when the
+provider call fails.
+
+- **Provider cancel on the cancel path.** `cancelSubscriptionStep` calls the
+  payment provider's subscription capability (duck-typed and optional: a
+  provider without it is skipped, not an error) before flipping the local row,
+  and writes `metadata.cancel_context.provider_cancel`
+  (`skipped` / `cancelled` / `failed` plus the provider's error). A failed
+  remote cancel warns and leaves the local cancellation intact - the PayPal
+  dashboard remains the manual retry path.
+- Account deletion (medusa-better-auth 0.8.6) runs this workflow per active
+  row, so deleting an account now stops the PayPal-side charging too.
+
+**No migration.**
+
 ## [1.8.0] - 2026-10-01
 
 The repeat-purchase and trial-lifecycle release. The checkout gate learns the
