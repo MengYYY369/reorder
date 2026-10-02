@@ -1,4 +1,5 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
+import { asValue } from "awilix"
 import path from "path"
 import {
   getAdminSubscriptionDetail,
@@ -27,6 +28,8 @@ import {
   SubscriptionFrequencyInterval,
   SubscriptionStatus,
 } from "../../src/modules/subscription/types"
+import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
+import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import { ACTIVITY_LOG_MODULE } from "../../src/modules/activity-log"
 import type ActivityLogModuleService from "../../src/modules/activity-log/service"
 import {
@@ -299,6 +302,139 @@ medusaIntegrationTestRunner({
             status: SubscriptionStatus.CANCELLED,
           })
         )
+      })
+
+      it("cancels the provider-side subscription for a native mirror row", async () => {
+        const container = getContainer()
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const calls: Array<{ id: string; action: string }> = []
+
+        container.register({
+          paypalSubscription: asValue({
+            listSubscriptions: jest.fn(async () => [
+              [{ id: "prow_native_1", paypal_subscription_id: "I-NATIVE-1" }],
+              1,
+            ]),
+            requestLifecycleAction: jest.fn(
+              async (id: string, action: string) => {
+                calls.push({ id, action })
+
+                return { id, status: "CANCELLED" }
+              }
+            ),
+          }),
+        })
+
+        try {
+          const subscription = await createSubscriptionSeed(container, {
+            reference: "NATIVE-I-NATIVE-1",
+            status: SubscriptionStatus.ACTIVE,
+          })
+
+          const { result } = await cancelSubscriptionWorkflow(container).run({
+            input: { id: subscription.id, effective_at: "immediately" },
+          })
+
+          expect(result.subscription.status).toEqual(
+            SubscriptionStatus.CANCELLED
+          )
+          expect(calls).toEqual([{ id: "prow_native_1", action: "cancel" }])
+
+          const stored = await subscriptionModule.retrieveSubscription(
+            subscription.id
+          )
+          expect(stored.metadata?.cancel_context).toMatchObject({
+            provider_cancel: {
+              status: "cancelled",
+              paypal_subscription_id: "I-NATIVE-1",
+              provider_row_id: "prow_native_1",
+            },
+          })
+        } finally {
+          container.register({ paypalSubscription: asValue(null) })
+        }
+      })
+
+      it("still cancels locally and records the failure when the provider cancel fails", async () => {
+        const container = getContainer()
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+
+        container.register({
+          paypalSubscription: asValue({
+            listSubscriptions: jest.fn(async () => [
+              [{ id: "prow_native_2" }],
+              1,
+            ]),
+            requestLifecycleAction: jest.fn(async () => {
+              throw new Error("paypal rejected cancel: HTTP 500")
+            }),
+          }),
+        })
+
+        try {
+          const subscription = await createSubscriptionSeed(container, {
+            reference: "NATIVE-I-NATIVE-2",
+            status: SubscriptionStatus.ACTIVE,
+          })
+
+          const { result } = await cancelSubscriptionWorkflow(container).run({
+            input: { id: subscription.id, effective_at: "immediately" },
+          })
+
+          expect(result.subscription.status).toEqual(
+            SubscriptionStatus.CANCELLED
+          )
+
+          const stored = await subscriptionModule.retrieveSubscription(
+            subscription.id
+          )
+          expect(stored.metadata?.cancel_context).toMatchObject({
+            provider_cancel: {
+              status: "failed",
+              error: expect.stringContaining("HTTP 500"),
+            },
+          })
+        } finally {
+          container.register({ paypalSubscription: asValue(null) })
+        }
+      })
+
+      it("skips the provider cancel for non-native rows", async () => {
+        const container = getContainer()
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const listSubscriptions = jest.fn(async () => [[], 0])
+
+        container.register({
+          paypalSubscription: asValue({
+            listSubscriptions,
+            requestLifecycleAction: jest.fn(),
+          }),
+        })
+
+        try {
+          const subscription = await createSubscriptionSeed(container, {
+            reference: "SUB-WF-NATIVE-SKIP",
+            status: SubscriptionStatus.ACTIVE,
+          })
+
+          await cancelSubscriptionWorkflow(container).run({
+            input: { id: subscription.id, effective_at: "immediately" },
+          })
+
+          expect(listSubscriptions).not.toHaveBeenCalled()
+
+          const stored = await subscriptionModule.retrieveSubscription(
+            subscription.id
+          )
+          expect(stored.metadata?.cancel_context).toMatchObject({
+            provider_cancel: { status: "skipped", reason: "not_native" },
+          })
+        } finally {
+          container.register({ paypalSubscription: asValue(null) })
+        }
       })
 
       it("schedules a plan change with a real variant", async () => {
