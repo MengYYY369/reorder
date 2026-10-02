@@ -60,9 +60,15 @@ const STORE_FINALIZE_FAILURE_COPY: StepFailureCopy = {
 
 /**
  * Finalizes the customer's own open cancellation case (Phase 15, the exit on
- * the vault rail): the subscription becomes `cancelled` immediately, the
- * pending renewal cycle is deleted by the workflow, and the case is closed as
- * `canceled`.
+ * the vault rail): the subscription is marked `cancelled`, the pending renewal
+ * cycle is deleted by the workflow, and the case is closed as `canceled`.
+ *
+ * Self-service cancellations keep the paid period: the route always passes
+ * `effective_at: "end_of_cycle"`, so `cancel_effective_at` lands on the
+ * subscription's `next_renewal_at` and entitlement survives until then. The
+ * workflow's default (`immediately`) is deliberately left alone — the admin
+ * route passes the caller's own `effective_at` through, and an admin who asks
+ * for an immediate cancellation must still get one.
  *
  * Ownership is decided before the workflow runs: the subscription must belong
  * to the authenticated customer (`retrieveOwnedSubscription`, the same helper
@@ -103,6 +109,7 @@ export const POST = async (
     input: {
       cancellation_case_id: openCase.id,
       finalized_by: req.auth_context?.actor_id ?? null,
+      effective_at: "end_of_cycle",
     },
     throwOnError: false,
   })

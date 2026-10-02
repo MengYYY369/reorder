@@ -1,3 +1,15 @@
+## [1.9.1] - 2026-10-02
+
+- **Store-path cancellations keep the paid period (T08).** The storefront
+  finalize route now passes `effective_at: "end_of_cycle"`, so a customer
+  cancellation lands on the subscription's `next_renewal_at` instead of the
+  cancel instant and the paid period stays usable. The admin route keeps
+  forwarding whatever `effective_at` the operator chose and the step's default
+  branch is untouched, so an explicit `immediately` still cancels at once.
+  Integration coverage added for both paths.
+
+**No migration.**
+
 ## [1.9.0] - 2026-10-02
 
 The Discord gate release. A deployment can require guild membership before a

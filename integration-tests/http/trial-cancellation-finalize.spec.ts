@@ -382,6 +382,60 @@ medusaIntegrationTestRunner({
         expect(busEventsWithName(emitSpy, "renewal.failed")).toHaveLength(0)
       })
 
+      it("keeps the paid period on self-service finalize: cancel_effective_at lands on the pre-cancel next_renewal_at", async () => {
+        const container = getContainer()
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const customer = await createCustomer(container, {
+          email: `finalize-eoc-${runId}@medusa.test`,
+        })
+
+        const trialEndsAt = new Date(Date.now() + 7 * 86_400_000)
+        const trial = await seedClaimedTrial(container, {
+          customer,
+          reference: `SUB-FIN-EOC-${runId}`,
+          trialEndsAt,
+          withLedgerRow: false,
+        })
+
+        const before = await subscriptionModule.retrieveSubscription(
+          trial.subscriptionId
+        )
+        expect(before.next_renewal_at?.toISOString()).toEqual(
+          trialEndsAt.toISOString()
+        )
+
+        await openCancellationCase(trial.headers, trial.subscriptionId)
+
+        const response = await api.post(
+          `/store/customers/me/subscriptions/${trial.subscriptionId}/cancellation/finalize`,
+          undefined,
+          { headers: trial.headers }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(
+          new Date(
+            response.data.cancellation_case.cancellation_effective_at as string
+          ).toISOString()
+        ).toEqual(trialEndsAt.toISOString())
+
+        // The route passes `end_of_cycle`, so the subscription keeps its paid
+        // period: the effective date is the pre-cancel renewal anchor, not the
+        // cancellation instant.
+        const after = await subscriptionModule.retrieveSubscription(
+          trial.subscriptionId
+        )
+        expect(after.status).toEqual(SubscriptionStatus.CANCELLED)
+        expect(after.cancelled_at).toBeTruthy()
+        expect(after.cancel_effective_at?.toISOString()).toEqual(
+          trialEndsAt.toISOString()
+        )
+        expect(after.cancel_effective_at!.getTime()).toBeGreaterThan(
+          after.cancelled_at!.getTime()
+        )
+      })
+
       it("a customer who cancelled during the trial cannot claim the trial again (the ledger row survives)", async () => {
         const container = getContainer()
         const subscriptionModule =

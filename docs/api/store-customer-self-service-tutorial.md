@@ -421,9 +421,14 @@ workflow the Admin route uses.
 }
 ```
 
-The subscription becomes `cancelled` immediately (this is not a scheduled
-cancellation), `next_renewal_at` is cleared, and the pending renewal cycle is
-deleted — no further charge and no `renewal.failed` event. Errors:
+The subscription status flips to `cancelled` now, but the paid period is
+kept: the route always finalizes with `effective_at: "end_of_cycle"`, so
+`cancellation_effective_at` is the subscription's `next_renewal_at` (a future
+timestamp, unless the subscription had no `next_renewal_at`) and entitlement
+survives until then. `next_renewal_at` is cleared and the pending renewal
+cycle is deleted — no further charge and no `renewal.failed` event. An
+operator who needs the cancellation to take effect at once can still do so
+through the Admin route's `effective_at: "immediately"`. Errors:
 
 - `401` — no customer identity.
 - `404` — the subscription is unknown or not owned, **or** it has no open

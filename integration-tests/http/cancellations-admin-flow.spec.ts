@@ -8,6 +8,8 @@ import {
   RetentionOfferType,
 } from "../../src/modules/cancellation/types"
 import { SubscriptionStatus } from "../../src/modules/subscription/types"
+import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
+import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import {
   createAdminAuthHeaders,
   createCancellationCaseSeed,
@@ -233,6 +235,52 @@ medusaIntegrationTestRunner({
             }),
           ])
         )
+      })
+      it("finalize with effective_at immediately keeps the cancel instant (the store end_of_cycle fix does not leak here)", async () => {
+        const container = getContainer()
+        const subscriptionModule =
+          container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const headers = await createAdminAuthHeaders(container)
+        const nextRenewalAt = new Date("2026-04-25T12:00:00.000Z")
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-CAN-ADMIN-IMMEDIATE-001",
+          status: SubscriptionStatus.ACTIVE,
+          next_renewal_at: nextRenewalAt,
+        })
+        const cancellationCase = await createCancellationCaseSeed(container, {
+          subscription_id: subscription.id,
+          status: CancellationCaseStatus.REQUESTED,
+          reason: "Operator forced immediate cancellation",
+          reason_category: CancellationReasonCategory.OTHER,
+        })
+
+        const finalizeResponse = await api.post(
+          `/admin/cancellations/${cancellationCase.id}/finalize`,
+          {
+            reason: "Operator forced immediate cancellation",
+            reason_category: CancellationReasonCategory.OTHER,
+            effective_at: "immediately",
+          },
+          { headers }
+        )
+
+        expect(finalizeResponse.status).toEqual(200)
+
+        const after = await subscriptionModule.retrieveSubscription(
+          subscription.id
+        )
+        expect(after.status).toEqual(SubscriptionStatus.CANCELLED)
+        expect(after.cancelled_at).toBeTruthy()
+        // The admin asked for `immediately`: the effective date stays the
+        // cancel instant and never lands on the future renewal anchor, which
+        // is what the store route's `end_of_cycle` must not change.
+        expect(after.cancel_effective_at?.toISOString()).toEqual(
+          after.cancelled_at?.toISOString()
+        )
+        expect(after.cancel_effective_at?.toISOString()).not.toEqual(
+          nextRenewalAt.toISOString()
+        )
+        expect(after.next_renewal_at).toBeNull()
       })
     })
   },
