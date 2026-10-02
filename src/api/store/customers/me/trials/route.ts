@@ -14,6 +14,7 @@ import {
   type StepFailureCopy,
   type StepFailureLogger,
 } from "../../../../../workflows/utils/store-step-failure"
+import { assertDiscordMembership } from "../../../../../workflows/utils/discord-gate"
 
 /**
  * The refusals the claim workflow authors for the caller, each with its exact
@@ -90,6 +91,11 @@ export const POST = async (
       "Customer authentication is required."
     )
   }
+
+  // T13（2026-10-02 走查）：Discord 服务器门槛的权威校验——店面侧只是提示，
+  // 绕过店面直调本端点也过不去（读插件 ba_discord_membership 的哨兵行 + 客户行；
+  // 门槛未配置/表缺失一律放行，契约见 discord-gate.ts 头注）。
+  await assertDiscordMembership(req.scope, customerId)
 
   const { result, errors } = await createTrialSubscriptionWorkflow(
     req.scope

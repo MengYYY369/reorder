@@ -1,3 +1,22 @@
+## [1.9.0] - 2026-10-02
+
+The Discord gate release. A deployment can require guild membership before a
+free trial is claimed, and the engine enforces it itself - the storefront's
+copy is a hint, not the boundary.
+
+- **Discord membership gate on the claim path (T13).** `POST
+  /store/customers/me/trials` calls `assertDiscordMembership` before running
+  the claim workflow. It reads the plugin's `ba_discord_membership` table
+  (same database): the `__gate__` sentinel row carries the gate guild and the
+  customer's row carries the last membership verdict. Fail-open by contract -
+  a missing table (plugin not installed), a missing sentinel (gate not
+  configured) or a database error all allow the claim; the gate refuses only
+  when it is configured and the customer is a checked non-member, or was never
+  checked at all (a direct API call). No second configuration, no
+  cross-plugin HTTP.
+
+**No migration.**
+
 ## [1.8.1] - 2026-10-02
 
 The cancellation hand-off release. Native mirror rows are billed by PayPal
