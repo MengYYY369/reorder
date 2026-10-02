@@ -553,6 +553,169 @@ medusaIntegrationTestRunner({
         )
       })
 
+      /**
+       * T03 (2026-10-02 walkthrough plan): seeds a subscription directly so
+       * the guard's product scope can be asserted without a full claim.
+       * Mirrors the seed the eligibility test inlines.
+       */
+      const seedSubscriptionFor = async (
+        subscriptionModule: SubscriptionModuleService,
+        customer: { id: string; email?: string | null },
+        product: { id: string },
+        variant: { id: string },
+        status: "active" | "cancelled"
+      ) => {
+        await subscriptionModule.createSubscriptions({
+          reference: `SUB-TRIAL-SCOPE-${Date.now()}`,
+          status,
+          customer_id: customer.id,
+          cart_id: null,
+          product_id: product.id,
+          variant_id: variant.id,
+          frequency_interval: "month",
+          frequency_value: 1,
+          started_at: new Date(),
+          next_renewal_at: new Date(Date.now() + 86_400_000),
+          last_renewal_at: null,
+          paused_at: null,
+          cancelled_at: status === "cancelled" ? new Date() : null,
+          cancel_effective_at: null,
+          skip_next_cycle: false,
+          free_cycles_remaining: 0,
+          is_trial: false,
+          trial_ends_at: null,
+          customer_snapshot: { email: customer.email ?? "", full_name: null },
+          product_snapshot: {
+            product_id: product.id,
+            product_title: "P",
+            variant_id: variant.id,
+            variant_title: "V",
+            sku: null,
+          },
+          pricing_snapshot: null,
+          shipping_address: {
+            first_name: "T",
+            last_name: "T",
+            company: null,
+            address_1: "T",
+            address_2: null,
+            city: "T",
+            postal_code: "00000",
+            province: null,
+            country_code: "us",
+            phone: null,
+          },
+          payment_context: {
+            payment_mode: "auto",
+            mechanism: "vault",
+            payment_provider_id: null,
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
+          },
+          pending_update_data: null,
+          metadata: null,
+        } as never)
+      }
+
+      it("keeps the trial scope per product: another product's subscription does not block", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const { product, variant } = await createProductWithVariant(container)
+        const other = await createProductWithVariant(container)
+        const customer = await createCustomer(container)
+        const region = await createRegion(container, "usd")
+        await attachPrice(container, variant.id, "usd")
+        await createPlanOfferSeed(container, {
+          scope: PlanOfferScope.PRODUCT,
+          product_id: product.id,
+          rules: {
+            minimum_cycles: 1,
+            trial_enabled: true,
+            trial_days: 7,
+            trial_requires_payment_method: false,
+            stacking_policy: PlanOfferStackingPolicy.ALLOWED,
+            trial_bonus_days: 7,
+          },
+        })
+
+        const productModule = container.resolve<any>(Modules.PRODUCT)
+        await productModule.updateProducts(product.id, { status: "published" })
+
+        // An active subscription on ANOTHER product is out of scope for this
+        // product's trial (the 2026-10-02 walkthrough defect was the opposite:
+        // rows stranded on a deleted product were invisible to the guard).
+        await seedSubscriptionFor(
+          subscriptionModule,
+          customer,
+          other.product,
+          other.variant,
+          "active"
+        )
+
+        const headers = await createStoreHeadersWithPublishableKey(
+          container,
+          customer
+        )
+        const offer = await api.get(
+          `/store/products/${product.id}/subscription-offer`,
+          { headers }
+        )
+        expect(offer.data.subscription_offer.trial.eligible).toEqual(true)
+      })
+
+      it("still refuses when the product's only subscription is cancelled", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const { product, variant } = await createProductWithVariant(container)
+        const customer = await createCustomer(container)
+        const region = await createRegion(container, "usd")
+        await attachPrice(container, variant.id, "usd")
+        await createPlanOfferSeed(container, {
+          scope: PlanOfferScope.PRODUCT,
+          product_id: product.id,
+          rules: {
+            minimum_cycles: 1,
+            trial_enabled: true,
+            trial_days: 7,
+            trial_requires_payment_method: false,
+            stacking_policy: PlanOfferStackingPolicy.ALLOWED,
+            trial_bonus_days: 7,
+          },
+        })
+
+        const productModule = container.resolve<any>(Modules.PRODUCT)
+        await productModule.updateProducts(product.id, { status: "published" })
+
+        // The migration end state: the row is cancelled but keeps its
+        // product_id, and the guard counts any status.
+        await seedSubscriptionFor(
+          subscriptionModule,
+          customer,
+          product,
+          variant,
+          "cancelled"
+        )
+
+        const headers = await createStoreHeadersWithPublishableKey(
+          container,
+          customer
+        )
+        const offer = await api.get(
+          `/store/products/${product.id}/subscription-offer`,
+          { headers }
+        )
+        expect(offer.data.subscription_offer.trial.eligible).toEqual(false)
+        expect(offer.data.subscription_offer.trial.reason).toEqual(
+          "already_claimed_or_subscribed"
+        )
+      })
+
       it("refuses the claim without authentication", async () => {
         const container = getContainer()
         const { product, variant } = await createProductWithVariant(container)
