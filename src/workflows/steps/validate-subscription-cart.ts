@@ -1,5 +1,5 @@
-import type { IPaymentModuleService, MedusaContainer } from "@medusajs/framework/types"
-import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import type { MedusaContainer } from "@medusajs/framework/types"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import type { PlanOfferDiscountPerFrequency } from "../../modules/plan-offer/types"
 import { resolveProductSubscriptionConfig } from "../../modules/plan-offer/utils/effective-config"
@@ -8,7 +8,6 @@ import {
   SubscriptionFrequencyInterval,
   type SubscriptionPaymentContext,
   type SubscriptionPaymentMechanism,
-  type SubscriptionPaymentMethodRecord,
   type SubscriptionPaymentMode,
   type SubscriptionPricingSnapshot,
   type SubscriptionProductSnapshot,
@@ -25,10 +24,7 @@ import {
   type StackingDecision,
 } from "../../modules/subscription/utils/stacking"
 import { resolveShippingAddress } from "../../modules/subscription/utils/shipping-address"
-import {
-  sortPaymentMethodSummaries,
-  toPaymentMethodSummary,
-} from "../../modules/subscription/utils/payment-methods"
+import { listCustomerPaymentMethods } from "../../modules/subscription/utils/payment-methods"
 
 export type ValidateSubscriptionCartStepInput = {
   cart_id: string
@@ -627,21 +623,13 @@ async function resolveSavedPaymentMethodReference(
     )
   }
 
-  const paymentModule =
-    container.resolve<IPaymentModuleService>(Modules.PAYMENT)
-  const paymentMethods = (await paymentModule.listPaymentMethods({
-    provider_id: providerId,
-    context: {
-      account_holder: {
-        ...accountHolder,
-        data: accountHolder.data ?? {},
-      },
-    },
-  })) as SubscriptionPaymentMethodRecord[]
-  const latestPaymentMethod = sortPaymentMethodSummaries(
-    (paymentMethods ?? [])
-      .filter((paymentMethod) => !!paymentMethod?.id)
-      .map((paymentMethod) => toPaymentMethodSummary(paymentMethod, providerId))
+  // The list itself belongs to the payment-methods plugin; the cart's own
+  // account holder above is what keeps the refusal messages specific.
+  const latestPaymentMethod = (
+    await listCustomerPaymentMethods(container, {
+      customer_id: customer.id,
+      provider_id: providerId,
+    })
   )[0]
 
   if (!latestPaymentMethod?.id) {

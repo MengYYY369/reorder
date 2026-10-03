@@ -37,6 +37,7 @@ import {
   SubscriptionStatus,
 } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
+import { resolveRenewalPaymentContext } from "../../modules/subscription/utils/preferred-payment-method"
 import { finalizeRenewalPeriod } from "./finalize-renewal-period"
 import { startDunningWorkflow } from "../start-dunning"
 import { DUNNING_MODULE } from "../../modules/dunning"
@@ -573,9 +574,24 @@ async function createRenewalOrder(
   // unchargeable and a loud refusal is the intended outcome.
   const paymentContext = subscription.payment_context
 
+  // The method this renewal charges with (D10): the customer's preferred
+  // method for the subscription's product when the payment-methods plugin has
+  // one, else the subscription row's own reference. Resolved once, before the
+  // guards, so a row that stores no reference but has a preference is still
+  // chargeable. Reads only, and fail-open: no plugin, no preference or a failed
+  // read all leave the row's own context untouched.
+  const renewalPaymentContext = await resolveRenewalPaymentContext(container, {
+    customerId: subscription.customer_id,
+    scope: subscription.product_id,
+    fallback: {
+      payment_provider_id: paymentContext?.payment_provider_id ?? null,
+      payment_method_reference:
+        paymentContext?.payment_method_reference ?? null,
+    },
+  })
+
   if (
-    (!paymentContext?.payment_provider_id ||
-      !paymentContext.payment_method_reference) &&
+    (!renewalPaymentContext.providerId || !renewalPaymentContext.reference) &&
     cartCarriesPricedLineAfterSwap(cart, subscription, appliedPendingChanges)
   ) {
     throw renewalErrors.renewalOrderCreationFailed(
@@ -610,16 +626,11 @@ async function createRenewalOrder(
   )
 
   if (total > 0) {
-    const paymentContext = subscription.payment_context
-
     // Authoritative payment-context check: this one reads the order's real
     // total, which the hoisted pre-order guard cannot know. It stays the
     // check of record; the pre-order guard only narrows when an order is
     // minted at all.
-    if (
-      !paymentContext?.payment_provider_id ||
-      !paymentContext.payment_method_reference
-    ) {
+    if (!renewalPaymentContext.providerId || !renewalPaymentContext.reference) {
       throw renewalErrors.renewalOrderCreationFailed(
         cycle.id,
         `Subscription '${subscription.id}' is missing renewal payment context`
@@ -648,10 +659,10 @@ async function createRenewalOrder(
       paymentSessionResult = await createPaymentSessionsWorkflow(container).run({
         input: {
           payment_collection_id: paymentCollection.id,
-          provider_id: paymentContext.payment_provider_id,
+          provider_id: renewalPaymentContext.providerId,
           customer_id: subscription.customer_id,
           data: {
-            payment_method: paymentContext.payment_method_reference,
+            payment_method: renewalPaymentContext.reference,
             off_session: true,
             confirm: true,
             capture_method: "automatic",

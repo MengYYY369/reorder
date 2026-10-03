@@ -1,3 +1,41 @@
+## [1.10.0] - 2026-10-03
+
+The payment-methods release. reorder stops owning its copy of the
+payment-method list and parse, publishes the site adapter
+`@mengyyy369/medusa-payment-methods` calls, and charges renewals with the
+customer's preferred method when that plugin has one.
+
+- **Site adapter (`@mengyyy369/reorder/adapter`).** New subpath exporting
+  `reorderSiteAdapter` (also the default export) for the host's plugin options
+  (`adapter: reorderSiteAdapter`). It answers the plugin's three questions from
+  the `subscription` table: `listScopes` from the products the customer holds a
+  live subscription for, `listExtraRows` from the native rail (PayPal-managed
+  recurrences, `canUnbind: false`), and `isInUse` from live subscriptions that
+  still reference a provider-side method — the gate in front of the plugin's
+  only irreversible operation. The subscription module service hands the adapter
+  its own module container at boot (`src/adapter/container.ts`).
+- **The payment-method list and parse live in the plugin.**
+  `src/modules/subscription/utils/payment-methods.ts` now delegates to
+  `@mengyyy369/medusa-payment-methods` (a hard dependency) and only maps the
+  plugin's vaulted row onto the flat summary reorder's Store/Admin responses
+  already publish, `created_at` included. Callers — the store route,
+  `admin-query.ts`, `update-subscription-payment-method` and
+  `validate-subscription-cart` — keep their behaviour and their error text. No
+  second implementation is left behind.
+- **Renewals charge the preferred method (D10).** The renewal and dunning-retry
+  charge paths resolve the provider/reference pair as *the plugin's preferred
+  method for the subscription's product, else the row's own
+  `payment_context.payment_method_reference`*. Fail-open by construction: an
+  unregistered plugin module, a failing read or an unset preference all fall
+  back to the row, so a payment-methods outage can never stop a charge from
+  being attempted. Read-only — nothing is written and no event is emitted.
+- **Store payment-method list degrades instead of failing.**
+  `GET /store/customers/me/subscriptions/:id/payment-methods` answers an empty
+  list (with the provider id it already resolved) and logs one warning when the
+  payment-methods module is not registered in the host.
+
+**No migration.**
+
 ## [1.9.1] - 2026-10-02
 
 - **Store-path cancellations keep the paid period (T08).** The storefront

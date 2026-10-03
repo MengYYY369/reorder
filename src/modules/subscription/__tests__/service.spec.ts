@@ -1,5 +1,6 @@
 import { moduleIntegrationTestRunner } from "@medusajs/test-utils"
 import { SUBSCRIPTION_MODULE } from ".."
+import { getSiteAdapterContainer } from "../../../adapter/container"
 import Subscription from "../models/subscription"
 import SubscriptionModuleService from "../service"
 import {
@@ -13,6 +14,14 @@ moduleIntegrationTestRunner<SubscriptionModuleService>({
   resolve: "./src/modules/subscription",
   testSuite: ({ service }) => {
     describe("SubscriptionModuleService", () => {
+      it("captures the module container the site adapter reads subscriptions from", () => {
+        const container = getSiteAdapterContainer() as unknown as {
+          subscriptionService?: { list?: unknown }
+        }
+
+        expect(typeof container.subscriptionService?.list).toEqual("function")
+      })
+
       it("creates and retrieves a subscription", async () => {
         const created = await service.createSubscriptions({
           reference: "SUB-MODULE-001",

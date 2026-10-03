@@ -25,6 +25,7 @@ import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
+import { resolveRenewalPaymentContext } from "../../modules/subscription/utils/preferred-payment-method"
 import { RENEWAL_MODULE } from "../../modules/renewal"
 import type RenewalModuleService from "../../modules/renewal/service"
 import {
@@ -48,6 +49,7 @@ type SubscriptionRecord = {
   reference: string
   status: SubscriptionStatus
   customer_id: string
+  product_id: string
   customer_snapshot: { full_name?: string | null } | null
   product_snapshot: {
     product_title?: string | null
@@ -700,10 +702,20 @@ async function executePaymentRetry(
       }
     }
 
-    if (
-      !paymentContext?.payment_provider_id ||
-      !paymentContext.payment_method_reference
-    ) {
+    // The method this retry charges with (D10): the customer's preferred
+    // method for the subscription's product when the payment-methods plugin has
+    // one, else the subscription row's own reference. Fail-open, read-only.
+    const renewalPaymentContext = await resolveRenewalPaymentContext(container, {
+      customerId: subscription.customer_id,
+      scope: subscription.product_id,
+      fallback: {
+        payment_provider_id: paymentContext?.payment_provider_id ?? null,
+        payment_method_reference:
+          paymentContext?.payment_method_reference ?? null,
+      },
+    })
+
+    if (!renewalPaymentContext.providerId || !renewalPaymentContext.reference) {
       throw dunningErrors.invalidData(
         `Subscription '${subscription.id}' is missing payment retry context`
       )
@@ -729,10 +741,10 @@ async function executePaymentRetry(
     const paymentSessionResult = await createPaymentSessionsWorkflow(container).run({
       input: {
         payment_collection_id: paymentCollection.id,
-        provider_id: paymentContext.payment_provider_id,
+        provider_id: renewalPaymentContext.providerId,
         customer_id: subscription.customer_id,
         data: {
-          payment_method: paymentContext.payment_method_reference,
+          payment_method: renewalPaymentContext.reference,
           off_session: true,
           confirm: true,
           capture_method: "automatic",

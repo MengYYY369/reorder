@@ -4334,6 +4334,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mengyyy369/medusa-payment-methods@npm:^0.1.0":
+  version: 0.1.0
+  resolution: "@mengyyy369/medusa-payment-methods@npm:0.1.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40mengyyy369%2Fmedusa-payment-methods%2F0.1.0%2Fc106b394762936fe92037f09fd58d98d251aa749"
+  peerDependencies:
+    "@medusajs/admin-sdk": ^2.20.0
+    "@medusajs/framework": ^2.20.0
+    "@medusajs/icons": ^2.20.0
+    "@medusajs/js-sdk": ^2.20.0
+    "@medusajs/medusa": ^2.20.0
+    "@medusajs/ui": ^4.2.2
+    "@tanstack/react-query": ^5.64.2
+    react: ^18.3.1
+    react-dom: ^18.3.1
+    react-router-dom: ^7.18.2
+  checksum: 10c0/105457389062cb38183ab880a1f9704f1637dab46292b26124c24547bce9b2c1ce1f506ac4e17f159a8e130f7ddf0c8b7a53e30ea493540598e0a4a63cdbeaa9
+  languageName: node
+  linkType: hard
+
 "@mengyyy369/reorder@workspace:.":
   version: 0.0.0-use.local
   resolution: "@mengyyy369/reorder@workspace:."
@@ -4345,6 +4363,7 @@ __metadata:
     "@medusajs/medusa": "npm:2.20.0"
     "@medusajs/test-utils": "npm:2.20.0"
     "@medusajs/ui": "npm:4.2.2"
+    "@mengyyy369/medusa-payment-methods": "npm:^0.1.0"
     "@playwright/test": "npm:^1.62.1"
     "@swc/core": "npm:^1.7.28"
     "@swc/jest": "npm:^0.2.39"
@@ -4373,6 +4392,7 @@ __metadata:
     "@mengyyy369/medusa-webhooks": ^1.3.0
     react: ^18.2.0
     react-dom: ^18.2.0
+    react-i18next: 13.5.0
   peerDependenciesMeta:
     "@mengyyy369/medusa-webhooks":
       optional: true

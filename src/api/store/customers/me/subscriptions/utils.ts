@@ -22,6 +22,7 @@ import {
   listCustomerPaymentMethods,
   resolveCustomerPaymentMethod,
 } from "../../../../../modules/subscription/utils/payment-methods"
+import { isPaymentMethodsModuleRegistered } from "../../../../../modules/subscription/utils/preferred-payment-method"
 import { serializeStoreSubscriptionListItem } from "../../../../../modules/subscription/utils/store-list-serialization"
 import { isPaypalVaultBindingSupported } from "../../../../../workflows/utils/paypal-vault-binding"
 
@@ -30,6 +31,11 @@ const ACTIVE_CANCELLATION_STATUSES = [
   CancellationCaseStatus.EVALUATING_RETENTION,
   CancellationCaseStatus.RETENTION_OFFERED,
 ] as const
+
+/** Exactly what the payment-methods gate needs from the request logger. */
+type GateLogger = {
+  warn: (message: string) => void
+}
 
 type SubscriptionStoreListItem = {
   id: string
@@ -460,6 +466,23 @@ export async function getStoreSubscriptionPaymentMethodsResponse(
   if (!providerId) {
     return {
       payment_provider_id: null,
+      payment_methods: [],
+    }
+  }
+
+  // The payment-methods module is an optional runtime registration even though
+  // its package is a hard dependency. Without it the preference layer does not
+  // exist, so the profile page is answered with an empty list and one warning
+  // instead of failing the request.
+  if (!isPaymentMethodsModuleRegistered(scope)) {
+    scope
+      .resolve<GateLogger>(ContainerRegistrationKeys.LOGGER)
+      .warn(
+        "payment-methods: the 'paymentMethods' module is not registered; answering the subscription payment-method list with an empty list"
+      )
+
+    return {
+      payment_provider_id: providerId,
       payment_methods: [],
     }
   }

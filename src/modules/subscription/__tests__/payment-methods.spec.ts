@@ -3,7 +3,6 @@ import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import {
   listCustomerPaymentMethods,
   resolveCustomerPaymentMethod,
-  toPaymentMethodSummary,
 } from "../utils/payment-methods"
 import type { SubscriptionAccountHolderRecord } from "../types"
 
@@ -54,95 +53,11 @@ const stripeAccountHolder: SubscriptionAccountHolderRecord = {
   data: { id: "cus_stripe_1" },
 }
 
-describe("toPaymentMethodSummary", () => {
-  it("normalizes card details exposed by the provider", () => {
-    const summary = toPaymentMethodSummary(
-      {
-        id: "pm_1",
-        data: {
-          type: "card",
-          created: 1_700_000_000,
-          card: {
-            brand: "visa",
-            last4: "4242",
-            exp_month: 4,
-            exp_year: 2030,
-          },
-        },
-      },
-      "pp_stripe_stripe"
-    )
-
-    expect(summary).toEqual({
-      id: "pm_1",
-      provider_id: "pp_stripe_stripe",
-      type: "card",
-      brand: "visa",
-      last4: "4242",
-      exp_month: 4,
-      exp_year: 2030,
-      created_at: 1_700_000_000,
-    })
-  })
-
-  it("degrades to null fields for providers that expose no card metadata", () => {
-    const summary = toPaymentMethodSummary({ id: "pm_2" }, "pp_system_default")
-
-    expect(summary).toEqual({
-      id: "pm_2",
-      provider_id: "pp_system_default",
-      type: null,
-      brand: null,
-      last4: null,
-      exp_month: null,
-      exp_year: null,
-      created_at: null,
-    })
-  })
-
-  it("parses numeric card fields returned as strings", () => {
-    const summary = toPaymentMethodSummary(
-      {
-        id: "pm_3",
-        data: {
-          card: {
-            exp_month: "07",
-            exp_year: "2031",
-          },
-        },
-      },
-      "pp_stripe_stripe"
-    )
-
-    expect(summary.exp_month).toEqual(7)
-    expect(summary.exp_year).toEqual(2031)
-  })
-
-  it("surfaces the PayPal wallet type without card fields", () => {
-    const summary = toPaymentMethodSummary(
-      {
-        id: "vault-token-1",
-        data: {
-          type: "paypal",
-          email: "buyer@example.com",
-        },
-      },
-      "pp_paypal_paypal"
-    )
-
-    expect(summary).toEqual({
-      id: "vault-token-1",
-      provider_id: "pp_paypal_paypal",
-      type: "paypal",
-      brand: null,
-      last4: null,
-      exp_month: null,
-      exp_year: null,
-      created_at: null,
-    })
-  })
-})
-
+/**
+ * The list and the parse live in `@mengyyy369/medusa-payment-methods` now; these
+ * tests hold reorder's own contract in front of them — the flat summary shape
+ * the Store/Admin responses publish, and the ownership errors.
+ */
 describe("listCustomerPaymentMethods", () => {
   it("returns the customer's saved payment methods newest first", async () => {
     const { container } = buildContainer({
@@ -163,6 +78,138 @@ describe("listCustomerPaymentMethods", () => {
     expect(summaries.map((summary) => summary.id)).toEqual([
       "pm_new",
       "pm_old",
+    ])
+  })
+
+  it("maps a card record onto the flat summary", async () => {
+    const { container } = buildContainer({
+      accountHolders: [stripeAccountHolder],
+      paymentMethodsByProvider: {
+        pp_stripe_stripe: [
+          {
+            id: "pm_1",
+            data: {
+              type: "card",
+              created: 1_700_000_000,
+              card: {
+                brand: "visa",
+                last4: "4242",
+                exp_month: 4,
+                exp_year: 2030,
+              },
+            },
+          },
+        ],
+      },
+    })
+
+    const summaries = await listCustomerPaymentMethods(container, {
+      customer_id: "cus_1",
+      provider_id: "pp_stripe_stripe",
+    })
+
+    expect(summaries).toEqual([
+      {
+        id: "pm_1",
+        provider_id: "pp_stripe_stripe",
+        type: "card",
+        brand: "visa",
+        last4: "4242",
+        exp_month: 4,
+        exp_year: 2030,
+        created_at: 1_700_000_000,
+      },
+    ])
+  })
+
+  it("degrades to null fields for providers that expose no card metadata", async () => {
+    const { container } = buildContainer({
+      accountHolders: [
+        { id: "acch_default", provider_id: "pp_system_default" },
+      ],
+      paymentMethodsByProvider: {
+        pp_system_default: [{ id: "pm_2" }],
+      },
+    })
+
+    const summaries = await listCustomerPaymentMethods(container, {
+      customer_id: "cus_1",
+      provider_id: "pp_system_default",
+    })
+
+    expect(summaries).toEqual([
+      {
+        id: "pm_2",
+        provider_id: "pp_system_default",
+        type: null,
+        brand: null,
+        last4: null,
+        exp_month: null,
+        exp_year: null,
+        created_at: null,
+      },
+    ])
+  })
+
+  it("parses numeric card fields returned as strings", async () => {
+    const { container } = buildContainer({
+      accountHolders: [stripeAccountHolder],
+      paymentMethodsByProvider: {
+        pp_stripe_stripe: [
+          {
+            id: "pm_3",
+            data: {
+              card: {
+                exp_month: "07",
+                exp_year: "2031",
+              },
+            },
+          },
+        ],
+      },
+    })
+
+    const [summary] = await listCustomerPaymentMethods(container, {
+      customer_id: "cus_1",
+      provider_id: "pp_stripe_stripe",
+    })
+
+    expect(summary.exp_month).toEqual(7)
+    expect(summary.exp_year).toEqual(2031)
+  })
+
+  it("surfaces the PayPal wallet type without card fields or the payer email", async () => {
+    const { container } = buildContainer({
+      accountHolders: [{ id: "acch_pp", provider_id: "pp_paypal_paypal" }],
+      paymentMethodsByProvider: {
+        pp_paypal_paypal: [
+          {
+            id: "vault-token-1",
+            data: {
+              type: "paypal",
+              email: "buyer@example.com",
+            },
+          },
+        ],
+      },
+    })
+
+    const summaries = await listCustomerPaymentMethods(container, {
+      customer_id: "cus_1",
+      provider_id: "pp_paypal_paypal",
+    })
+
+    expect(summaries).toEqual([
+      {
+        id: "vault-token-1",
+        provider_id: "pp_paypal_paypal",
+        type: "paypal",
+        brand: null,
+        last4: null,
+        exp_month: null,
+        exp_year: null,
+        created_at: null,
+      },
     ])
   })
 
