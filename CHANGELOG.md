@@ -1,3 +1,32 @@
+## [1.10.1] - 2026-10-04
+
+Account-holder registration on the two vault writers (2026-10-04 production
+walkthrough, ticket 09A; plan `2026-10-04-walkthrough-fixes.md`).
+
+The trial-bound and checkout-bound vault references live on the subscription,
+but the payment-methods page lists a customer's vaulted methods **through the
+payment module's account holder + the `customer_account_holder` link**. Nothing
+ever wrote them, so a bound trial showed an empty payment-methods page (item 9)
+and the binding flow could not verify ownership (item 13).
+
+- Trial bind completion (`bind-trial-payment-method`) and the checkout vault
+  subscriber (`payment-captured-save-payment-method`) now call
+  `ensureCustomerAccountHolder` from `@mengyyy369/medusa-payment-methods`
+  (bumped to ^0.1.3 — the helper also writes the link row). The call is
+  deliberately **non-blocking**: the binding itself has already succeeded and
+  the renewal engine reads the subscription's payment context, so a failure
+  only logs a warning.
+- Why the link matters: Medusa core's `createPaymentSessionsWorkflow` looks up
+  `customer.account_holders.*` before creating one, and the unique
+  `(provider_id, external_id)` index kills a second blind create — the renewal
+  charge used to be the only writer, which is exactly why a bound trial was
+  invisible until renewal (and why the renewal could then conflict).
+
+Gates: typecheck (src) clean; `trial-payment-method-binding`,
+`checkout-trial-decoupled`, `consent-to-auto-flip`, `manual-renewal` HTTP
+suites pass (20 tests) against Postgres 5433.
+
+
 ## [1.10.0] - 2026-10-03
 
 The payment-methods release. reorder stops owning its copy of the

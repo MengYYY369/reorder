@@ -3,6 +3,7 @@ import type {
   SubscriberConfig,
 } from "@medusajs/framework"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import { ensureCustomerAccountHolder } from "@mengyyy369/medusa-payment-methods"
 import type {
   IPaymentModuleService,
   RemoteQueryFunction,
@@ -187,6 +188,23 @@ export default async function paymentCapturedSavePaymentMethodHandler({
       id: subscription.id,
       payment_context: paymentContext,
     })
+
+    // 2026-10-04（走查 09A）：结账落定的 vault 同样要登记到账户持有人上（幂等、
+    // 非阻断）——否则支付方式页看不到它。provider_id 复用上面已解析的值。
+    if (typeof providerId === "string" && providerId !== "") {
+      try {
+        await ensureCustomerAccountHolder(container, {
+          customer_id: subscription.customer_id,
+          provider_id: providerId,
+        })
+      } catch (error) {
+        logger.warn(
+          `[reorder] capture vault: could not register the payment account holder for customer '${subscription.customer_id}': ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      }
+    }
 
     logger.info(
       `[reorder] saved payment method on subscription '${subscription.id}' (cart '${cartId}'); ` +

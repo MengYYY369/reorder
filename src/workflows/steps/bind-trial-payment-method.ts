@@ -4,6 +4,7 @@ import {
   Modules,
 } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
+import { ensureCustomerAccountHolder } from "@mengyyy369/medusa-payment-methods"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import SubscriptionModuleService from "../../modules/subscription/service"
 import {
@@ -515,6 +516,25 @@ export const bindTrialPaymentMethodStep = createStep(
       next_renewal_at: extendedTrialEndsAt,
       metadata: nextMetadata,
     } as never)
+
+    // 2026-10-04（走查 09A）：把刚绑的 vault 登记到 payment 模块的账户持有人上——
+    // 支付方式页从 account holder 出发列 vault，不登记就永远看不到（item 9）。
+    // 非阻断：绑定本身已完成（引擎扣款读订阅上下文），登记失败只告警。
+    try {
+      await ensureCustomerAccountHolder(container, {
+        customer_id: subscription.customer_id,
+        provider_id: providerId,
+      })
+    } catch (error) {
+      const logger = container.resolve("logger") as {
+        warn: (message: string) => void
+      }
+      logger.warn(
+        `[reorder] trial bind: could not register the payment account holder for customer '${subscription.customer_id}': ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    }
 
     return new StepResponse<BindTrialPaymentMethodStepOutput, BindStepCompensation>(
       {
