@@ -6,6 +6,7 @@ import {
   Pause,
   PencilSquare,
   Plus,
+  Trash,
   XMarkMini,
 } from "@medusajs/icons";
 import {
@@ -258,6 +259,36 @@ const PlansOffersPage = () => {
     ? toggleMutation.variables?.id
     : undefined;
 
+  const deleteMutation = useMutation({
+    mutationFn: async (input: { id: string }) =>
+      sdk.client.fetch(`/admin/subscription-offers/${input.id}/delete`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: async (_response, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: adminPlanOffersQueryKeys.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: adminPlanOffersQueryKeys.detail(variables.id),
+        }),
+      ]);
+      toast.success(t("planOffers.toast.deleted"));
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error
+          ? mutationError.message
+          : t("planOffers.errors.deleteFailed")
+      );
+    },
+  });
+
+  const pendingDeleteId = deleteMutation.isPending
+    ? deleteMutation.variables?.id
+    : undefined;
+
   const selectedProduct = useMemo(() => {
     if (!productIdFilterValue || !productTitleFilterValue) {
       return null;
@@ -302,6 +333,23 @@ const PlansOffersPage = () => {
     await toggleMutation.mutateAsync({
       id: planOffer.id,
       is_enabled: nextEnabled,
+    });
+  };
+
+  const handleDelete = async (planOffer: PlanOfferAdminListItem) => {
+    const confirmed = await prompt({
+      title: t("planOffers.prompt.deleteTitle"),
+      description: t("planOffers.prompt.deleteDescription"),
+      confirmText: t("planOffers.actions.delete"),
+      cancelText: t("common.actions.cancel"),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteMutation.mutateAsync({
+      id: planOffer.id,
     });
   };
 
@@ -410,6 +458,7 @@ const PlansOffersPage = () => {
         actions: ({ row }) => {
           const planOffer = row.original;
           const isPending = pendingToggleId === planOffer.id;
+          const isDeletePending = pendingDeleteId === planOffer.id;
 
           return [
             [
@@ -440,11 +489,30 @@ const PlansOffersPage = () => {
                 },
               },
             ],
+            ...(planOffer.is_enabled
+              ? []
+              : [
+                  [
+                    {
+                      label: isDeletePending
+                        ? t("planOffers.actions.deleting")
+                        : t("planOffers.actions.delete"),
+                      icon: <Trash />,
+                      onClick: () => {
+                        if (isDeletePending) {
+                          return;
+                        }
+
+                        void handleDelete(planOffer);
+                      },
+                    },
+                  ],
+                ]),
           ];
         },
       }),
     ];
-  }, [pendingToggleId, t]);
+  }, [pendingToggleId, pendingDeleteId, t]);
 
   const table = useDataTable({
     columns,

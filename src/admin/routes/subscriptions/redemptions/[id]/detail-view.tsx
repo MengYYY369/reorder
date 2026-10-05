@@ -11,6 +11,7 @@ import {
   usePrompt,
 } from "@medusajs/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { sdk } from "../../../../lib/client";
 import {
@@ -59,6 +60,7 @@ export const RedemptionBatchDetailPageView = ({
 }) => {
   const { t } = useTranslation("reorder");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const prompt = usePrompt();
 
   const {
@@ -108,6 +110,28 @@ export const RedemptionBatchDetailPageView = ({
         mutationError instanceof Error
           ? mutationError.message
           : t("redemptions.errors.disableFailed")
+      );
+    },
+  });
+
+  const deleteBatchMutation = useMutation({
+    mutationFn: async () =>
+      sdk.client.fetch(`/admin/redemptions/batches/${id}/delete`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: adminRedemptionsQueryKeys.all,
+      });
+      toast.success(t("redemptions.toast.batchDeleted"));
+      navigate("/subscriptions/redemptions");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error
+          ? mutationError.message
+          : t("redemptions.errors.deleteFailed")
       );
     },
   });
@@ -170,6 +194,27 @@ export const RedemptionBatchDetailPageView = ({
     await disableCodeMutation.mutateAsync(code.id);
   };
 
+  const handleDeleteBatch = async () => {
+    const recordCount = recordsQuery.data?.count ?? 0;
+    const confirmed = await prompt({
+      title: t("redemptions.prompt.deleteBatchTitle"),
+      description:
+        recordCount > 0
+          ? t("redemptions.prompt.deleteBatchWithRecordsDescription", {
+              count: recordCount,
+            })
+          : t("redemptions.prompt.deleteBatchDescription"),
+      confirmText: t("redemptions.actions.deleteBatch"),
+      cancelText: t("common.actions.cancel"),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteBatchMutation.mutateAsync();
+  };
+
   return (
     <div className="flex flex-col gap-y-4">
       <Container className="divide-y p-0">
@@ -201,7 +246,17 @@ export const RedemptionBatchDetailPageView = ({
             >
               {t("redemptions.actions.disableBatch")}
             </Button>
-          ) : null}
+          ) : (
+            <Button
+              size="small"
+              variant="danger"
+              type="button"
+              isLoading={deleteBatchMutation.isPending}
+              onClick={handleDeleteBatch}
+            >
+              {t("redemptions.actions.deleteBatch")}
+            </Button>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4 px-6 py-4 md:grid-cols-4">
@@ -236,8 +291,8 @@ export const RedemptionBatchDetailPageView = ({
             <Text size="small" weight="plus">
               {batch.starts_at || batch.expires_at
                 ? [
-                    formatDateTime(batch.starts_at) ?? "—",
-                    formatDateTime(batch.expires_at) ?? "—",
+                    formatDateTime(batch.starts_at) ?? "-",
+                    formatDateTime(batch.expires_at) ?? "-",
                   ].join(" → ")
                 : t("redemptions.detail.noWindow")}
             </Text>

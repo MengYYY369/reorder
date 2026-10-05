@@ -43,6 +43,7 @@ import {
   Link,
   UIMatch,
   useLoaderData,
+  useNavigate,
   useParams,
 } from "react-router-dom";
 import {
@@ -129,6 +130,7 @@ type ShippingAddressFormState = {
 const SubscriptionDetailPage = () => {
   const { t } = useTranslation("reorder");
   const { id } = useParams();
+  const navigate = useNavigate();
   const loaderData = useLoaderData() as Awaited<ReturnType<typeof loader>>;
   const queryClient = useQueryClient();
   const prompt = usePrompt();
@@ -380,6 +382,26 @@ const SubscriptionDetailPage = () => {
         mutationError instanceof Error
           ? mutationError.message
           : t("subscriptions.errors.cancelFailed"),
+      );
+    },
+  });
+
+  const deleteSubscriptionMutation = useMutation({
+    mutationFn: async () =>
+      sdk.client.fetch(`/admin/subscriptions/${id}/delete`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: async () => {
+      await invalidateSubscriptionDetailQueries(queryClient, undefined, undefined);
+      toast.success(t("subscriptions.toast.deleted"));
+      navigate("/subscriptions");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error
+          ? mutationError.message
+          : t("subscriptions.errors.deleteFailed"),
       );
     },
   });
@@ -677,12 +699,14 @@ const SubscriptionDetailPage = () => {
   const canPause = subscription.status === SubscriptionAdminStatus.ACTIVE;
   const canResume = subscription.status === SubscriptionAdminStatus.PAUSED;
   const canCancel = subscription.status !== SubscriptionAdminStatus.CANCELLED;
+  const canDelete = subscription.status === SubscriptionAdminStatus.CANCELLED;
   const isActionPending =
     pauseMutation.isPending ||
     resumeMutation.isPending ||
     cancelMutation.isPending ||
     planChangeMutation.isPending ||
-    updateShippingAddressMutation.isPending;
+    updateShippingAddressMutation.isPending ||
+    deleteSubscriptionMutation.isPending;
 
   const handleSubscriptionAction = async (action: SubscriptionActionType) => {
     const confirmed = await prompt(getSubscriptionActionPromptConfig(action, t));
@@ -702,6 +726,21 @@ const SubscriptionDetailPage = () => {
         await cancelMutation.mutateAsync();
         break;
     }
+  };
+
+  const handleDeleteSubscription = async () => {
+    const confirmed = await prompt({
+      title: t("subscriptions.detail.prompt.deleteTitle"),
+      description: t("subscriptions.detail.prompt.deleteDescription"),
+      confirmText: t("subscriptions.detail.actions.deleteSubscription"),
+      cancelText: t("common.actions.cancel"),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteSubscriptionMutation.mutateAsync();
   };
 
   const handleSubmit = async () => {
@@ -864,6 +903,22 @@ const SubscriptionDetailPage = () => {
                       </span>
                     </DropdownMenu.Item>
                   </>
+                ) : null}
+                {canDelete ? (
+                  <DropdownMenu.Item
+                    className="flex items-center gap-x-2"
+                    disabled={isActionPending}
+                    onClick={() => {
+                      void handleDeleteSubscription();
+                    }}
+                  >
+                    <Trash className="text-ui-fg-subtle" />
+                    <span>
+                      {deleteSubscriptionMutation.isPending
+                        ? t("subscriptions.detail.actions.deleting")
+                        : t("subscriptions.detail.actions.deleteSubscription")}
+                    </span>
+                  </DropdownMenu.Item>
                 ) : null}
               </DropdownMenu.Content>
             </DropdownMenu>

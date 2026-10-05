@@ -23,12 +23,13 @@ import {
   EllipsisHorizontal,
   ShoppingBag,
   Spinner,
+  Trash,
   TriangleRightMini,
   XCircle,
 } from "@medusajs/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ReactNode, useMemo, useState } from "react";
-import { Link, UIMatch, useParams } from "react-router-dom";
+import { Link, UIMatch, useNavigate, useParams } from "react-router-dom";
 import { sdk } from "../../../../lib/client";
 import {
   invalidateAdminRenewalsQueries,
@@ -59,6 +60,19 @@ const forceableStatuses = new Set<RenewalCycleAdminStatus>([
 const stuckResolvableStatuses = new Set<RenewalCycleAdminStatus>([
   RenewalCycleAdminStatus.PROCESSING,
   RenewalCycleAdminStatus.AWAITING_MANUAL_RESOLUTION,
+]);
+
+// Cycles nothing will ever run again for; mirrors the delete workflow's own
+// accepted statuses. Attempts are deletable on the same split.
+const deletableStatuses = new Set<RenewalCycleAdminStatus>([
+  RenewalCycleAdminStatus.SUCCEEDED,
+  RenewalCycleAdminStatus.FAILED,
+  RenewalCycleAdminStatus.ABANDONED,
+]);
+
+const deletableAttemptStatuses = new Set<RenewalAttemptAdminStatus>([
+  RenewalAttemptAdminStatus.SUCCEEDED,
+  RenewalAttemptAdminStatus.FAILED,
 ]);
 
 const STUCK_RESOLUTION_OUTCOME_KEYS: Record<
@@ -104,6 +118,7 @@ const RENEWAL_INTERVAL_KEYS: Record<string, string> = {
 const RenewalDetailPage = () => {
   const { t } = useTranslation("reorder");
   const { id } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const prompt = usePrompt();
   const [decisionDrawerOpen, setDecisionDrawerOpen] = useState(false);
@@ -237,6 +252,51 @@ const RenewalDetailPage = () => {
     },
   });
 
+  const deleteCycleMutation = useMutation({
+    mutationFn: async () =>
+      sdk.client.fetch(`/admin/renewals/${id}/delete`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: async () => {
+      await invalidateAdminRenewalsQueries(queryClient);
+      toast.success(t("renewals.detail.toast.deleted"));
+      navigate("/subscriptions/renewals");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        getAdminErrorMessage(
+          mutationError,
+          t("renewals.detail.errors.deleteFailed")
+        )
+      );
+    },
+  });
+
+  const deleteAttemptMutation = useMutation({
+    mutationFn: async (attemptId: string) =>
+      sdk.client.fetch(`/admin/renewals/${id}/attempts/${attemptId}/delete`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: async () => {
+      await invalidateAdminRenewalsQueries(
+        queryClient,
+        id,
+        renewal?.subscription.subscription_id
+      );
+      toast.success(t("renewals.detail.toast.attemptDeleted"));
+    },
+    onError: (mutationError) => {
+      toast.error(
+        getAdminErrorMessage(
+          mutationError,
+          t("renewals.detail.errors.attemptDeleteFailed")
+        )
+      );
+    },
+  });
+
   const canForce = renewal ? forceableStatuses.has(renewal.status) : false;
   const canResolveStuck = renewal
     ? stuckResolvableStatuses.has(renewal.status)
@@ -245,11 +305,14 @@ const RenewalDetailPage = () => {
     ? renewal.approval.required &&
       renewal.approval.status === RenewalApprovalStatus.PENDING
     : false;
+  const canDeleteCycle = renewal ? deletableStatuses.has(renewal.status) : false;
   const isActionPending =
     forceMutation.isPending ||
     approveMutation.isPending ||
     rejectMutation.isPending ||
-    resolveStuckMutation.isPending;
+    resolveStuckMutation.isPending ||
+    deleteCycleMutation.isPending ||
+    deleteAttemptMutation.isPending;
 
   const metadataRows = useMemo(() => {
     if (!renewal?.metadata) {
@@ -278,6 +341,36 @@ const RenewalDetailPage = () => {
     await forceMutation.mutateAsync({
       reason: undefined,
     });
+  };
+
+  const handleDeleteCycle = async () => {
+    const confirmed = await prompt({
+      title: t("renewals.detail.prompt.deleteTitle"),
+      description: t("renewals.detail.prompt.deleteDescription"),
+      confirmText: t("renewals.detail.actions.deleteCycle"),
+      cancelText: t("common.actions.cancel"),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteCycleMutation.mutateAsync();
+  };
+
+  const handleDeleteAttempt = async (attemptId: string) => {
+    const confirmed = await prompt({
+      title: t("renewals.detail.prompt.attemptDeleteTitle"),
+      description: t("renewals.detail.prompt.attemptDeleteDescription"),
+      confirmText: t("renewals.detail.actions.deleteAttempt"),
+      cancelText: t("common.actions.cancel"),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteAttemptMutation.mutateAsync(attemptId);
   };
 
   const openDecisionDrawer = (mode: DecisionDrawerMode) => {
@@ -486,6 +579,25 @@ const RenewalDetailPage = () => {
                     <span>{t("renewals.detail.actions.rejectChanges")}</span>
                   </DropdownMenu.Item>
                 ) : null}
+                {canDeleteCycle ? (
+                  <>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item
+                      className="flex items-center gap-x-2"
+                      disabled={isActionPending}
+                      onClick={() => {
+                        void handleDeleteCycle();
+                      }}
+                    >
+                      <Trash className="text-ui-fg-subtle" />
+                      <span>
+                        {deleteCycleMutation.isPending
+                          ? t("renewals.detail.actions.deleting")
+                          : t("renewals.detail.actions.deleteCycle")}
+                      </span>
+                    </DropdownMenu.Item>
+                  </>
+                ) : null}
               </DropdownMenu.Content>
             </DropdownMenu>
           </div>
@@ -653,6 +765,7 @@ const RenewalDetailPage = () => {
                       <Table.HeaderCell>
                         {t("renewals.detail.fields.order")}
                       </Table.HeaderCell>
+                      {canDeleteCycle ? <Table.HeaderCell /> : null}
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -698,6 +811,26 @@ const RenewalDetailPage = () => {
                         <Table.Cell>
                           {attempt.order_id || t("common.empty.noValue")}
                         </Table.Cell>
+                        {canDeleteCycle ? (
+                          <Table.Cell>
+                            {deletableAttemptStatuses.has(attempt.status) ? (
+                              <Button
+                                size="small"
+                                variant="danger"
+                                type="button"
+                                isLoading={
+                                  deleteAttemptMutation.isPending &&
+                                  deleteAttemptMutation.variables === attempt.id
+                                }
+                                onClick={() => {
+                                  void handleDeleteAttempt(attempt.id);
+                                }}
+                              >
+                                {t("renewals.detail.actions.deleteAttempt")}
+                              </Button>
+                            ) : null}
+                          </Table.Cell>
+                        ) : null}
                       </Table.Row>
                     ))}
                   </Table.Body>
