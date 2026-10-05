@@ -1,3 +1,49 @@
+## [1.11.0] - 2026-10-06
+
+Trial bind delegation (B6), the auto-renew bind flow, renew-now, the
+customer.deleted cascade, and the redemption row-mode fix (plan
+`2026-10-04-0.9.3-trial-bind-plugin-and-p2-hardening.md`; requires
+`@mengyyy369/medusa-payment-methods` 0.2.0 and `@mengyyy369/medusa-paypal`
+0.9.5).
+
+- **Trial bind delegates to the plugin (ticket 01, B6)**: the two-phase
+  endpoint keeps its external contract; internally start/complete call the
+  payment-methods plugin's binding surface with the plugin-owned `trial`
+  scope. The plugin's session gate owns ownership (a state issued to another
+  customer is a 409 and PayPal is never called), completion is idempotent,
+  and the ledger's method reference — no longer a raw setup-token/vault id —
+  lands on the trial row. Pre-delegation rows keep their stored references.
+- **Unbind ruling (§1.3-1)**: the site adapter answers the reserved
+  `active_trial` reason for methods referenced by an in-progress trial; the
+  plugin turns that into a 422 (cancel the trial first, unbind after
+  conversion).
+- **Auto-renew by binding (ticket 01③, user ruling Q8/Q13)**: enabling
+  auto-renewal on a cardless subscription runs the same two-phase plugin
+  bind (`POST /store/customers/me/subscriptions/:id/auto-renew/bind`); the
+  mode flips only after the binding completes, through the toggle's own
+  guards — an overdue row keeps the surprise-charge protection even though
+  the binding itself succeeded.
+- **Renew now (ticket 01④, user item 8)**: `POST
+  /store/customers/me/subscriptions/:id/renew-now` charges off-session
+  through the engine's own `process-renewal-cycle` when the customer has a
+  usable method, and falls back to the PayPal-approval manual renewal link
+  when they do not. No parallel ledger.
+- **customer.deleted cascade (ticket 13)**: a subscriber hard-deletes every
+  subscription chain the customer owns (renewals, dunning, cancellations,
+  logs, metrics, trial claims), cancels live provider-owned recurrences at
+  the provider first (best-effort), then removes vault tokens and the
+  holder links. Contained failures, idempotent on replay.
+- **Redemption grants are manual rows (ticket 14, user item 9)**:
+  `payment_mode` is written `manual` (the panel no longer reads
+  自动续费开启); the renewal disposition keeps the free-period cycles of a
+  manual row processable, and the auto-renew overdue guard exempts rows
+  with no stored method reference.
+- **Test ride (ticket 05)**: the trial-bind integration spec now exercises
+  the real 0.2.0 binding contract — the fake is a pair of plain async
+  functions because the resolver reads arity as the version gate and a
+  `jest.fn()` mock always reports length 0. 8/8 green plus the new
+  cascade and store-flow specs (30 integration tests total).
+
 ## [1.10.1] - 2026-10-04
 
 Account-holder registration on the two vault writers (2026-10-04 production
