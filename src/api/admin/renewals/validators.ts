@@ -99,3 +99,15 @@ export const PostAdminResolveStuckRenewalSchema = z.object({
 export type PostAdminResolveStuckRenewalSchemaType = z.infer<
   typeof PostAdminResolveStuckRenewalSchema
 >
+
+export const PostAdminDeleteRenewalCycleSchema = z.object({}).strict()
+
+export type PostAdminDeleteRenewalCycleSchemaType = z.infer<
+  typeof PostAdminDeleteRenewalCycleSchema
+>
+
+export const PostAdminDeleteRenewalAttemptSchema = z.object({}).strict()
+
+export type PostAdminDeleteRenewalAttemptSchemaType = z.infer<
+  typeof PostAdminDeleteRenewalAttemptSchema
+>

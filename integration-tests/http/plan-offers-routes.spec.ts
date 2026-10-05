@@ -484,6 +484,59 @@ medusaIntegrationTestRunner({
           }),
         })
       })
+
+      it("refuses to delete an enabled plan offer", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+
+        const planOffer = await createPlanOfferSeed(container, {
+          name: "PLAN-API-DELETE-ENABLED",
+          is_enabled: true,
+        })
+
+        await expect(
+          api.post(
+            `/admin/subscription-offers/${planOffer.id}/delete`,
+            {},
+            { headers }
+          )
+        ).rejects.toMatchObject({
+          response: { status: 409 },
+        })
+
+        const detailResponse = await api.get(
+          `/admin/subscription-offers/${planOffer.id}`,
+          { headers }
+        )
+        expect(detailResponse.status).toEqual(200)
+      })
+
+      it("deletes a disabled plan offer", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+
+        const planOffer = await createPlanOfferSeed(container, {
+          name: "PLAN-API-DELETE-DISABLED",
+          is_enabled: false,
+        })
+
+        const deleteResponse = await api.post(
+          `/admin/subscription-offers/${planOffer.id}/delete`,
+          {},
+          { headers }
+        )
+        expect(deleteResponse.status).toEqual(200)
+        expect(deleteResponse.data).toMatchObject({
+          id: planOffer.id,
+          deleted: true,
+        })
+
+        await expect(
+          api.get(`/admin/subscription-offers/${planOffer.id}`, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 404 },
+        })
+      })
     })
   },
 })

@@ -20,3 +20,9 @@ export const GetAdminTrialClaimsSchema = createFindParams({
 export type GetAdminTrialClaimsSchemaType = z.infer<
   typeof GetAdminTrialClaimsSchema
 >
+
+export const PostAdminDeleteTrialClaimSchema = z.object({}).strict()
+
+export type PostAdminDeleteTrialClaimSchemaType = z.infer<
+  typeof PostAdminDeleteTrialClaimSchema
+>

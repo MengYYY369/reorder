@@ -165,3 +165,9 @@ export const PostAdminToggleSubscriptionOfferSchema = z.object({
 export type PostAdminToggleSubscriptionOfferSchemaType = z.infer<
   typeof PostAdminToggleSubscriptionOfferSchema
 >
+
+export const PostAdminDeleteSubscriptionOfferSchema = z.object({}).strict()
+
+export type PostAdminDeleteSubscriptionOfferSchemaType = z.infer<
+  typeof PostAdminDeleteSubscriptionOfferSchema
+>

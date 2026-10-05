@@ -313,6 +313,109 @@ medusaIntegrationTestRunner({
           },
         })
       })
+
+      it("refuses to delete a subscription that is not cancelled", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-API-DELETE-ACTIVE",
+          status: SubscriptionStatus.ACTIVE,
+        })
+
+        await expect(
+          api.post(`/admin/subscriptions/${subscription.id}/delete`, {}, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 409 },
+        })
+
+        const detailResponse = await api.get(
+          `/admin/subscriptions/${subscription.id}`,
+          { headers }
+        )
+        expect(detailResponse.status).toEqual(200)
+      })
+
+      it("deletes a cancelled subscription with its full chain", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-API-DELETE-CANCELLED",
+          status: SubscriptionStatus.CANCELLED,
+        })
+
+        const renewalModule = container.resolve("renewal") as any
+        const cycle = await renewalModule.createRenewalCycles({
+          subscription_id: subscription.id,
+          scheduled_for: new Date(),
+          status: "succeeded",
+        } as any)
+        const attempt = await renewalModule.createRenewalAttempts({
+          renewal_cycle_id: cycle.id,
+          attempt_no: 1,
+          started_at: new Date(),
+          status: "succeeded",
+        } as any)
+
+        const trialClaimModule = container.resolve("trialClaim") as any
+        const claim = await trialClaimModule.createTrialClaims({
+          customer_id: subscription.customer_id,
+          product_id: subscription.product_id,
+          variant_id: subscription.variant_id,
+          claimed_at: new Date(),
+          source: "self_service",
+          subscription_id: subscription.id,
+          binding_method: "none",
+        } as any)
+
+        const activityLogModule = container.resolve("activityLog") as any
+        const log = await activityLogModule.createSubscriptionLogs({
+          subscription_id: subscription.id,
+          customer_id: subscription.customer_id,
+          event_type: "subscription.created",
+          actor_type: "system",
+          dedupe_key: `delete-chain-${subscription.id}`,
+        } as any)
+
+        const cancellationModule = container.resolve("cancellation") as any
+        const cancellationCase = await cancellationModule.createCancellationCases({
+          subscription_id: subscription.id,
+          status: "canceled",
+        } as any)
+
+        const deleteResponse = await api.post(
+          `/admin/subscriptions/${subscription.id}/delete`,
+          {},
+          { headers }
+        )
+        expect(deleteResponse.status).toEqual(200)
+        expect(deleteResponse.data).toMatchObject({
+          id: subscription.id,
+          deleted: true,
+          counts: {
+            subscription: 1,
+            renewal_cycles: 1,
+            renewal_attempts: 1,
+            subscription_logs: 1,
+            trial_claims: 1,
+            cancellation_cases: 1,
+          },
+        })
+
+        await expect(
+          api.get(`/admin/subscriptions/${subscription.id}`, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 404 },
+        })
+
+        expect(await renewalModule.listRenewalCycles({ id: cycle.id })).toHaveLength(0)
+        expect(await renewalModule.listRenewalAttempts({ id: attempt.id })).toHaveLength(0)
+        expect(await trialClaimModule.listTrialClaims({ id: claim.id })).toHaveLength(0)
+        expect(await activityLogModule.listSubscriptionLogs({ id: log.id })).toHaveLength(0)
+        expect(
+          await cancellationModule.listCancellationCases({ id: cancellationCase.id })
+        ).toHaveLength(0)
+      })
     })
   },
 })

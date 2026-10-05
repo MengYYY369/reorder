@@ -7,6 +7,7 @@ import {
   GetAdminSubscriptionOfferSchema,
   GetAdminSubscriptionOffersSchema,
   PostAdminCreateSubscriptionOfferSchema,
+  PostAdminDeleteSubscriptionOfferSchema,
   PostAdminToggleSubscriptionOfferSchema,
   PostAdminUpdateSubscriptionOfferSchema,
 } from "./validators"
@@ -61,5 +62,12 @@ export const adminSubscriptionOffersMiddlewares: MiddlewareRoute[] = [
     matcher: "/admin/subscription-offers/:id/toggle",
     method: "POST",
     middlewares: [validateAndTransformBody(PostAdminToggleSubscriptionOfferSchema)],
+  },
+  {
+    matcher: "/admin/subscription-offers/:id/delete",
+    method: "POST",
+    middlewares: [
+      validateAndTransformBody(PostAdminDeleteSubscriptionOfferSchema),
+    ],
   },
 ]

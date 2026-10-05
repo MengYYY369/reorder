@@ -246,6 +246,150 @@ medusaIntegrationTestRunner({
           },
         })
       })
+
+      it("refuses to delete a cycle that is not terminal", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-REN-API-009",
+          skip_next_cycle: true,
+        })
+        const scheduledCycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+
+        await expect(
+          api.post(`/admin/renewals/${scheduledCycle.id}/delete`, {}, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 409 },
+        })
+
+        const awaitingCycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.AWAITING_MANUAL_RESOLUTION,
+        })
+
+        await expect(
+          api.post(`/admin/renewals/${awaitingCycle.id}/delete`, {}, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 409 },
+        })
+
+        const detailResponse = await api.get(
+          `/admin/renewals/${scheduledCycle.id}`,
+          { headers }
+        )
+        expect(detailResponse.status).toEqual(200)
+      })
+
+      it("deletes a terminal cycle with its attempts", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-REN-API-010",
+          skip_next_cycle: true,
+        })
+        const cycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.FAILED,
+          attempt_count: 2,
+        })
+        const firstAttempt = await createRenewalAttemptSeed(container, {
+          renewal_cycle_id: cycle.id,
+          attempt_no: 1,
+          status: RenewalAttemptStatus.FAILED,
+        })
+        const secondAttempt = await createRenewalAttemptSeed(container, {
+          renewal_cycle_id: cycle.id,
+          attempt_no: 2,
+          status: RenewalAttemptStatus.FAILED,
+        })
+
+        const deleteResponse = await api.post(
+          `/admin/renewals/${cycle.id}/delete`,
+          {},
+          { headers }
+        )
+        expect(deleteResponse.status).toEqual(200)
+        expect(deleteResponse.data).toMatchObject({
+          id: cycle.id,
+          deleted: true,
+          deleted_attempts: 2,
+        })
+
+        await expect(
+          api.get(`/admin/renewals/${cycle.id}`, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 404 },
+        })
+
+        const renewalModule = container.resolve("renewal") as any
+        expect(
+          await renewalModule.listRenewalAttempts({
+            id: [firstAttempt.id, secondAttempt.id],
+          })
+        ).toHaveLength(0)
+      })
+
+      it("deletes a single terminal attempt of a terminal cycle and refuses mismatches", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+
+        const subscription = await createSubscriptionSeed(container, {
+          reference: "SUB-REN-API-011",
+          skip_next_cycle: true,
+        })
+        const terminalCycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.ABANDONED,
+        })
+        const attempt = await createRenewalAttemptSeed(container, {
+          renewal_cycle_id: terminalCycle.id,
+          attempt_no: 1,
+          status: RenewalAttemptStatus.FAILED,
+        })
+
+        const scheduledCycle = await createRenewalCycleSeed(container, {
+          subscription_id: subscription.id,
+          status: RenewalCycleStatus.SCHEDULED,
+        })
+        const attemptOnScheduled = await createRenewalAttemptSeed(container, {
+          renewal_cycle_id: scheduledCycle.id,
+          attempt_no: 1,
+          status: RenewalAttemptStatus.FAILED,
+        })
+
+        // A terminal attempt on a non-terminal cycle is refused.
+        await expect(
+          api.post(
+            `/admin/renewals/${scheduledCycle.id}/attempts/${attemptOnScheduled.id}/delete`,
+            {},
+            { headers }
+          )
+        ).rejects.toMatchObject({
+          response: { status: 409 },
+        })
+
+        const deleteResponse = await api.post(
+          `/admin/renewals/${terminalCycle.id}/attempts/${attempt.id}/delete`,
+          {},
+          { headers }
+        )
+        expect(deleteResponse.status).toEqual(200)
+        expect(deleteResponse.data).toMatchObject({
+          id: attempt.id,
+          renewal_cycle_id: terminalCycle.id,
+          deleted: true,
+        })
+
+        const renewalModule = container.resolve("renewal") as any
+        expect(
+          await renewalModule.listRenewalAttempts({ id: attempt.id })
+        ).toHaveLength(0)
+      })
     })
   },
 })

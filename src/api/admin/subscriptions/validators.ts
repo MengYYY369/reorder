@@ -121,3 +121,9 @@ export const PostAdminUpdateSubscriptionPaymentMethodSchema = z.object({
 export type PostAdminUpdateSubscriptionPaymentMethodSchemaType = z.infer<
   typeof PostAdminUpdateSubscriptionPaymentMethodSchema
 >
+
+export const PostAdminDeleteSubscriptionSchema = z.object({}).strict()
+
+export type PostAdminDeleteSubscriptionSchemaType = z.infer<
+  typeof PostAdminDeleteSubscriptionSchema
+>

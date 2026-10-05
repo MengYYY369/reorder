@@ -1,5 +1,12 @@
-import { MiddlewareRoute, validateAndTransformQuery } from "@medusajs/framework/http"
-import { GetAdminTrialClaimsSchema } from "./validators"
+import {
+  MiddlewareRoute,
+  validateAndTransformBody,
+  validateAndTransformQuery,
+} from "@medusajs/framework/http"
+import {
+  GetAdminTrialClaimsSchema,
+  PostAdminDeleteTrialClaimSchema,
+} from "./validators"
 
 export const adminTrialClaimsMiddlewares: MiddlewareRoute[] = [
   {
@@ -21,5 +28,10 @@ export const adminTrialClaimsMiddlewares: MiddlewareRoute[] = [
         isList: true,
       }),
     ],
+  },
+  {
+    matcher: "/admin/trial-claims/:id/delete",
+    method: "POST",
+    middlewares: [validateAndTransformBody(PostAdminDeleteTrialClaimSchema)],
   },
 ]

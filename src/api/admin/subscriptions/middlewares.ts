@@ -7,6 +7,7 @@ import {
   GetAdminSubscriptionSchema,
   GetAdminSubscriptionsSchema,
   PostAdminCancelSubscriptionSchema,
+  PostAdminDeleteSubscriptionSchema,
   PostAdminPauseSubscriptionSchema,
   PostAdminResumeSubscriptionSchema,
   PostAdminScheduleSubscriptionPlanChangeSchema,
@@ -71,6 +72,11 @@ export const adminSubscriptionsMiddlewares: MiddlewareRoute[] = [
     matcher: "/admin/subscriptions/:id/cancel",
     method: "POST",
     middlewares: [validateAndTransformBody(PostAdminCancelSubscriptionSchema)],
+  },
+  {
+    matcher: "/admin/subscriptions/:id/delete",
+    method: "POST",
+    middlewares: [validateAndTransformBody(PostAdminDeleteSubscriptionSchema)],
   },
   {
     matcher: "/admin/subscriptions/:id/schedule-plan-change",

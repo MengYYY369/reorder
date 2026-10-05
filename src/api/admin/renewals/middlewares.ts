@@ -7,6 +7,8 @@ import {
   GetAdminRenewalSchema,
   GetAdminRenewalsSchema,
   PostAdminApproveRenewalChangesSchema,
+  PostAdminDeleteRenewalAttemptSchema,
+  PostAdminDeleteRenewalCycleSchema,
   PostAdminForceRenewalSchema,
   PostAdminRejectRenewalChangesSchema,
   PostAdminResolveStuckRenewalSchema,
@@ -70,5 +72,17 @@ export const adminRenewalsMiddlewares: MiddlewareRoute[] = [
     matcher: "/admin/renewals/:id/resolve-stuck",
     method: "POST",
     middlewares: [validateAndTransformBody(PostAdminResolveStuckRenewalSchema)],
+  },
+  {
+    matcher: "/admin/renewals/:id/delete",
+    method: "POST",
+    middlewares: [validateAndTransformBody(PostAdminDeleteRenewalCycleSchema)],
+  },
+  {
+    matcher: "/admin/renewals/:id/attempts/:attempt_id/delete",
+    method: "POST",
+    middlewares: [
+      validateAndTransformBody(PostAdminDeleteRenewalAttemptSchema),
+    ],
   },
 ]
