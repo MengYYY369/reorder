@@ -263,3 +263,99 @@ export function logUnquotedStepFailure(
     failure.raw
   )
 }
+
+/**
+ * The serialized copy of a *typed* failure the engine reported, found by the
+ * `name` `serializeError` preserved. Returns its own message — the one text a
+ * typed operational error is allowed to quote, because the type's author wrote
+ * that message for the operator — or `null` when no such failure is in the
+ * array.
+ *
+ * Consumer: medusa-paypal 0.9.5's `PaypalCredentialEnvironmentMismatchError`
+ * (ticket 03, #18). Without this lookup the mismatch would collapse into the
+ * route's generic 500 text — a fail-fast the operator must be able to read,
+ * never a generic "binding failed" with the cause in a log line.
+ */
+export function findSerializedErrorMessageByName(
+  errors: unknown,
+  errorName: string
+): string | null {
+  const entries = Array.isArray(errors) ? errors : []
+
+  for (const entry of entries) {
+    const raw = (entry as SerializedStepFailure | null)?.error
+
+    if (!raw || typeof raw !== "object") {
+      continue
+    }
+
+    const candidate = raw as Record<string, unknown>
+
+    if (candidate.name === errorName && typeof candidate.message === "string") {
+      return candidate.message
+    }
+  }
+
+  return null
+}
+
+/**
+ * Maps a `PaymentMethodsError`'s own serialized `status` onto the core
+ * `MedusaError` type with the same HTTP semantics, so a plugin-authored
+ * refusal keeps the status the plugin contract promises when a reorder route
+ * rethrows it. Core's error handler maps by type; the plugin's machine codes
+ * (`already_bound`, `binding_not_verified`, `in_use`, …) are not core types
+ * and would otherwise collapse to a 500.
+ */
+export function coreTypeForPaymentMethodsStatus(status: unknown): string | null {
+  switch (status) {
+    case 400:
+    case 422:
+      // The plugin's 422s ("names something this customer cannot own") are
+      // input refusals; core carries that class as `invalid_data` (400).
+      return MedusaError.Types.INVALID_DATA
+    case 401:
+      return MedusaError.Types.UNAUTHORIZED
+    case 404:
+      return MedusaError.Types.NOT_FOUND
+    case 409:
+      return MedusaError.Types.CONFLICT
+    default:
+      return null
+  }
+}
+
+/**
+ * The first serialized `PaymentMethodsError` in the engine's errors array, as
+ * `{ status, message }` — the plugin's error class carries both as own
+ * properties, which survive `serializeError`. `null` when the failure was not
+ * one of the plugin's.
+ */
+export function findSerializedPaymentMethodsFailure(
+  errors: unknown
+): { status: number; message: string } | null {
+  const entries = Array.isArray(errors) ? errors : []
+
+  for (const entry of entries) {
+    const raw = (entry as SerializedStepFailure | null)?.error
+
+    if (!raw || typeof raw !== "object") {
+      continue
+    }
+
+    const candidate = raw as Record<string, unknown>
+
+    if (candidate.name !== "PaymentMethodsError") {
+      continue
+    }
+
+    if (
+      typeof candidate.status === "number" &&
+      typeof candidate.message === "string"
+    ) {
+      return { status: candidate.status, message: candidate.message }
+    }
+  }
+
+  return null
+}

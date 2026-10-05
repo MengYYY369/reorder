@@ -4,6 +4,7 @@ import {
   validateAndTransformBody,
 } from "@medusajs/framework/http"
 import {
+  PostStoreAutoRenewBindSchema,
   PostStoreChangeSubscriptionAddressSchema,
   PostStoreChangeSubscriptionFrequencySchema,
   PostStorePauseSubscriptionSchema,
@@ -63,6 +64,11 @@ export const storeCustomerSubscriptionsMiddlewares: MiddlewareRoute[] = [
     middlewares: [
       validateAndTransformBody(PostStoreRetrySubscriptionPaymentSchema),
     ],
+  },
+  {
+    matcher: "/store/customers/me/subscriptions/:id/auto-renew/bind",
+    method: "POST",
+    middlewares: [validateAndTransformBody(PostStoreAutoRenewBindSchema)],
   },
   {
     matcher: "/store/customers/me/subscriptions/:id/swap-product",

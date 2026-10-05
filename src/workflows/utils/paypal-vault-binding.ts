@@ -1,6 +1,6 @@
 /**
  * The runtime contract with medusa-paypal's vault-binding capability (Phase 14,
- * plan Task 22), and the two lookups every consumer of that capability needs.
+ * plan Task 22), and the support probe every consumer of that capability needs.
  *
  * **The contract is consumed by duck-typing, on purpose.** This plugin has no
  * dependency on medusa-paypal — no SDK, no client, no credentials, nothing
@@ -18,12 +18,12 @@
  * exported `PAYPAL_VAULT_BINDING_CAPABILITY` constant is documentation, this
  * duck-type is the mechanism (that plan's Task P2 Step 3 says the same).
  *
- * The sandbox verification of 2026-09-28 (medusa-paypal
- * `.scratch/paypal-subscriptions/issues/07-sandbox-verification-and-docs.md`)
- * proved the whole chain works off-session and corrected one detail this side
- * must honor: after the buyer approves, the setup token reads back
- * **`VAULTED`**, not `APPROVED` — so the accepted post-approval statuses are
- * `APPROVED`, `VAULTED` and `TOKENIZED`, treated as exchangeable.
+ * Since 0.9.3 (B6, plan ticket 01) the trial bind no longer calls this
+ * capability directly — the payment-methods plugin drives the provider through
+ * its own binder (see `payment-method-binding.ts`). What survives here is
+ * `isPaypalVaultBindingSupported`, the store offer DTO's
+ * `trial.binding.supported` probe: an installed medusa-paypal that predates
+ * the capability answers `false`, and the storefront hides the bind entry.
  */
 
 /** The container key medusa-paypal registers its subscription module under. */
@@ -66,24 +66,6 @@ export type PaypalVaultBindingCapability = {
   completeVaultApproval: (
     input: PaypalVaultCompleteApprovalInput
   ) => Promise<PaypalVaultCompleteApprovalResult>
-}
-
-/**
- * The setup-token statuses that mean "the buyer approved; exchange it now".
- * The sandbox measured `VAULTED` after a real approval (`APPROVED` was never
- * observed), and the provider plan's Task P1 Step 3 was corrected to treat the
- * three as exchangeable — waiting for `APPROVED` alone stalls after every
- * real approval.
- */
-export const APPROVED_VAULT_STATUSES = ["APPROVED", "VAULTED", "TOKENIZED"] as const
-
-export type ApprovedVaultStatus = (typeof APPROVED_VAULT_STATUSES)[number]
-
-export function isApprovedVaultStatus(status: unknown): status is ApprovedVaultStatus {
-  return (
-    typeof status === "string" &&
-    (APPROVED_VAULT_STATUSES as readonly string[]).includes(status)
-  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -143,63 +125,4 @@ export function isPaypalVaultBindingSupported(scope: {
   resolve: (key: string) => unknown
 }): boolean {
   return resolvePaypalVaultBindingCapability(scope) !== null
-}
-
-/**
- * The payment provider id the bound method must be charged through later.
- *
- * Read from the **payment module's own provider declaration**, the way
- * medusa-paypal's `findPaypalProviderDeclaration` does — not from a hardcoded
- * literal. `native-mirror-sync.ts` writes `"pp_paypal_paypal"` and that
- * literal is exactly what this function must not copy: a host that registers
- * the provider with a different declaration `id` gets a different registration
- * key, and a guessed one charges nothing (or fails the payment session).
- *
- * The key shape is Medusa's own: the payment module loader registers each
- * provider under `` `pp_${klass.identifier}${id ? `_${id}` : ""}` ``
- * (`@medusajs/payment/dist/loaders/providers.js:45`), and the PayPal provider's
- * service class carries the static identifier `paypal` — which is why the
- * reference derivation in medusa-paypal (`src/api/lib/paypal.ts`,
- * `findPaypalProviderDeclaration`) builds `pp_paypal` plus the declaration's
- * `id`. The same two facts are reproduced here, from the declaration the
- * running app actually loaded: in tests the fake provider's declaration is the
- * truth, in production the host's `medusa-config.ts` is.
- *
- * Returns `null` when the payment module declares no PayPal-shaped provider
- * (`id === "paypal"` or a `resolve` path containing "paypal", the same
- * predicate the reference implementation uses).
- */
-export function findPaypalPaymentProviderId(paymentModule: unknown): string | null {
-  if (!isRecord(paymentModule) || !isRecord(paymentModule.moduleDeclaration)) {
-    return null
-  }
-
-  const providers = paymentModule.moduleDeclaration.providers
-
-  if (!Array.isArray(providers)) {
-    return null
-  }
-
-  for (const provider of providers) {
-    if (!isRecord(provider)) {
-      continue
-    }
-
-    const declarationId =
-      typeof provider.id === "string" && provider.id.length > 0
-        ? provider.id
-        : undefined
-    const resolvePath =
-      typeof provider.resolve === "string"
-        ? provider.resolve.toLowerCase()
-        : ""
-
-    const isPaypal = declarationId === "paypal" || resolvePath.includes("paypal")
-
-    if (isPaypal) {
-      return `pp_paypal${declarationId ? `_${declarationId}` : ""}`
-    }
-  }
-
-  return null
 }

@@ -88,3 +88,22 @@ export const PostStoreUpdateSubscriptionPaymentMethodSchema = z.object({
 export type PostStoreUpdateSubscriptionPaymentMethodSchemaType = z.infer<
   typeof PostStoreUpdateSubscriptionPaymentMethodSchema
 >
+
+/**
+ * The two phases of binding a payment method in order to enable auto-renewal
+ * (0.9.3, ticket 01③): `start` sends the customer to PayPal with the
+ * caller-owned return and cancel routes; `complete` runs when the customer
+ * comes back and carries the setup token id the plugin's session gate
+ * verifies. The per-action requirements are guarded in the route so the same
+ * schema serves both phases.
+ */
+export const PostStoreAutoRenewBindSchema = z.object({
+  action: z.enum(["start", "complete"]),
+  return_url: z.string().trim().url().optional(),
+  cancel_url: z.string().trim().url().optional(),
+  setup_token_id: z.string().trim().min(1).optional(),
+})
+
+export type PostStoreAutoRenewBindSchemaType = z.infer<
+  typeof PostStoreAutoRenewBindSchema
+>

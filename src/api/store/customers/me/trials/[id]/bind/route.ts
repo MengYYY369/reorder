@@ -13,12 +13,14 @@ import {
 } from "../../../../../../../workflows/bind-trial-payment-method"
 import {
   completeTrialVaultApprovalStep,
-  bindTrialPaymentMethodStep,
   resolveTrialBindContextStep,
   startTrialVaultApprovalStep,
 } from "../../../../../../../workflows/steps/bind-trial-payment-method"
 import {
   classifyStepFailure,
+  findSerializedErrorMessageByName,
+  findSerializedPaymentMethodsFailure,
+  coreTypeForPaymentMethodsStatus,
   logUnquotedStepFailure,
   type StepFailureCopy,
   type StepFailureLogger,
@@ -30,17 +32,16 @@ import {
  * route that discloses a failure must not be the place that decides which
  * step may speak. They cover the bind context guard (ownership is the same
  * 404 every /store/customers/me/* route answers), the capability guard (the
- * installed provider predates the vault capability — nothing is created), the
- * not-yet-approved status the sandbox flow actually produces, and the missing
- * provider declaration that would leave a bound method unchargeable.
+ * installed payment-methods module predates the binding capability — nothing
+ * is created), the not-yet-approved status the sandbox flow actually produces
+ * (surfaced from the plugin's binder), and the pending-approval mismatches.
  */
 const CONTEXT_STEP = resolveTrialBindContextStep.__step__
 const START_STEP = startTrialVaultApprovalStep.__step__
 const COMPLETE_STEP = completeTrialVaultApprovalStep.__step__
-const BIND_STEP = bindTrialPaymentMethodStep.__step__
 
 const CAPABILITY_REFUSAL_COPY =
-  /^Binding a payment method is not supported: the installed PayPal provider does not provide the vault approval capability\. Update the medusa-paypal plugin and try again\.$/
+  /^Binding a payment method is not supported: the installed payment-methods module does not provide the binding capability\. Update @mengyyy369\/medusa-payment-methods and try again\.$/
 
 export const TRIAL_BIND_CUSTOMER_REFUSALS = [
   {
@@ -92,17 +93,13 @@ export const TRIAL_BIND_CUSTOMER_REFUSALS = [
     copy: CAPABILITY_REFUSAL_COPY,
   },
   {
-    // The sandbox's normal pending case: the buyer has not approved yet.
+    // The sandbox's normal pending case: the buyer has not approved yet. The
+    // plugin's binder (medusa-paypal) authors this refusal; the delegated
+    // step carries it under the complete step's name.
     step: COMPLETE_STEP,
     type: MedusaError.Types.INVALID_DATA,
     copy:
-      /^The payment method approval is not complete yet \(status '[^']*'\)\. Approve the setup token in PayPal and try again\.$/,
-  },
-  {
-    step: BIND_STEP,
-    type: MedusaError.Types.NOT_ALLOWED,
-    copy:
-      /^The PayPal payment provider is not declared on the payment module, so the bound method could never be charged\. Register the PayPal provider and try again\.$/,
+      /^PayPal setup token is not approved \(status: [^)]*\)$/,
   },
 ] as const
 
@@ -113,17 +110,20 @@ const TRIAL_BIND_FAILURE_COPY: StepFailureCopy = {
 }
 
 /**
- * The two-phase binding endpoint (Phase 14, plan Task 22):
+ * The two-phase binding endpoint (Phase 14, plan Task 22; since 0.9.3 the
+ * provider half is delegated to the payment-methods plugin — B6, plan
+ * ticket 01 — with the external request/response shape unchanged):
  *
  * `POST /store/customers/me/trials/:id/bind { action: "start", return_url,
- * cancel_url }` — starts a PayPal setup-token approval and returns the
- * `approve_url` the customer must visit. The pending binding is stored on the
- * subscription; nothing chargeable changes.
+ * cancel_url }` — starts the binding through the plugin (scope "trial") and
+ * returns the `approve_url` the customer must visit. The pending session is
+ * stored on the subscription; nothing chargeable changes.
  *
  * `POST /store/customers/me/trials/:id/bind { action: "complete",
- * setup_token_id }` — the customer returned from PayPal; the setup token is
- * exchanged for a vault id, the trial is bound and extended (anchored on its
- * own `started_at`), and the pending renewal cycle is re-pointed.
+ * setup_token_id }` — the customer returned from PayPal; the plugin exchanges
+ * the approval session for its ledger method, the trial is bound and extended
+ * (anchored on its own `started_at`), and the pending renewal cycle is
+ * re-pointed. The stored reference is the plugin ledger's method reference.
  *
  * The subscription is resolved by id under the authenticated customer — never
  * from the body. `trial_requires_payment_method` needs nothing further here:
@@ -236,11 +236,33 @@ export const POST = async (
  * One disclosure path for both phases: declared refusals keep their text and
  * status, everything else is logged exactly as the engine serialized it and
  * answered with the route's fixed texts.
+ *
+ * Two typed escapes run before the fixed-text fallback:
+ *
+ * - the plugin's own `PaymentMethodsError` (the delegated start/complete
+ *   raise them) — its class carries the contract status and a message the
+ *   plugin authors as customer copy (`already_bound`, `binding_not_verified`,
+ *   …), so it is rethrown under the core type with the same HTTP semantics
+ *   instead of collapsing into the route's generic 500;
+ * - medusa-paypal's `PaypalCredentialEnvironmentMismatchError` (ticket 03,
+ *   #18) — the fail-fast the operator must be able to read; it keeps its own
+ *   message as a 500 (`unexpected_state`), never swallowed into
+ *   "payment method binding failed".
  */
 function throwClassified(
   req: AuthenticatedMedusaRequest<PostStoreTrialBindSchemaType>,
   errors: unknown
 ) {
+  console.error("TRIAL_BIND_DEBUG", JSON.stringify(errors))
+  const mismatchMessage = findSerializedErrorMessageByName(
+    errors,
+    "PaypalCredentialEnvironmentMismatchError"
+  )
+
+  if (mismatchMessage) {
+    throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, mismatchMessage)
+  }
+
   const failure = classifyStepFailure({
     errors,
     refusals: TRIAL_BIND_CUSTOMER_REFUSALS,
@@ -248,13 +270,25 @@ function throwClassified(
     preserveQuotedStatus: true,
   })
 
-  if (!failure.quoted) {
-    logUnquotedStepFailure(
-      req.scope.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
-      "trial-bind",
-      failure
-    )
+  if (failure.quoted) {
+    throw new MedusaError(failure.type, failure.message)
   }
+
+  const pluginFailure = findSerializedPaymentMethodsFailure(errors)
+
+  if (pluginFailure) {
+    const coreType = coreTypeForPaymentMethodsStatus(pluginFailure.status)
+
+    if (coreType) {
+      throw new MedusaError(coreType, pluginFailure.message)
+    }
+  }
+
+  logUnquotedStepFailure(
+    req.scope.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
+    "trial-bind",
+    failure
+  )
 
   throw new MedusaError(failure.type, failure.message)
 }

@@ -116,6 +116,7 @@ export const bindTrialPaymentMethodWorkflow = createWorkflow(
       context,
       setup_token_id: input.setup_token_id,
       vault_id: approval.vault_id,
+      provider_id: approval.provider_id,
     })
 
     // Runs after the subscription write: the step reconciles against the row's

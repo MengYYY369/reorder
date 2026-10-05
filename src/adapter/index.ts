@@ -27,7 +27,10 @@ import { getSiteAdapterContainer } from "./container"
  * - `isInUse`: whether a provider-side method is still referenced by a live
  *   subscription. This gates the plugin's only irreversible operation (deleting
  *   the wallet at the provider), so it is answered from the same live status set
- *   the renewal path charges.
+ *   the renewal path charges. A method an **active trial** references answers
+ *   the reserved `active_trial` reason (0.9.3 unbind ruling: the plugin turns
+ *   that into a 422 forbidding the unbind until the trial is cancelled or
+ *   converts).
  */
 
 /**
@@ -50,6 +53,7 @@ type SubscriptionAdapterRow = {
   status: string
   customer_id: string
   product_id: string
+  is_trial?: boolean | null
   product_snapshot?: { product_title?: string | null } | null
   payment_context?: {
     payment_provider_id?: string | null
@@ -160,14 +164,26 @@ export const reorderSiteAdapter: SiteAdapter = {
     }
 
     const rows = await listLiveSubscriptions(customerId)
-    const inUse = rows.some(
+    const referencing = rows.filter(
       (row) =>
         readNonEmpty(row.payment_context?.payment_method_reference) === reference
     )
 
+    if (!referencing.length) {
+      return { inUse: false }
+    }
+
+    // 0.9.3 解绑裁决（B6, plan §1.3-1）：被「进行中的试用」引用的方式禁止解绑。
+    // The trial reason is a reserved value in the plugin contract
+    // (`ACTIVE_TRIAL_IN_USE_REASON`, medusa-payment-methods 0.2.0): the plugin
+    // answers it with 422 and the "cancel the trial first / unbind after
+    // conversion" copy instead of the generic 409 in-use answer. A trial row
+    // wins over a plain live subscription because it is the stricter ruling.
+    const activeTrial = referencing.some((row) => row.is_trial === true)
+
     return {
-      inUse,
-      reason: inUse ? "active_subscription" : undefined,
+      inUse: true,
+      reason: activeTrial ? "active_trial" : "active_subscription",
     }
   },
 }

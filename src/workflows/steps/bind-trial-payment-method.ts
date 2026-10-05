@@ -1,8 +1,5 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
-import {
-  MedusaError,
-  Modules,
-} from "@medusajs/framework/utils"
+import { MedusaError } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
 import { ensureCustomerAccountHolder } from "@mengyyy369/medusa-payment-methods"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
@@ -18,31 +15,33 @@ import { TrialClaimBindingMethod } from "../../modules/trial-claim/types"
 import { resolveProductSubscriptionConfig } from "../../modules/plan-offer/utils/effective-config"
 import { buildPaymentModeFields } from "../utils/payment-mode-mechanism"
 import {
-  findPaypalPaymentProviderId,
-  isApprovedVaultStatus,
-  resolvePaypalVaultBindingCapability,
-} from "../utils/paypal-vault-binding"
+  resolvePaymentMethodBindingCapability,
+  PLUGIN_TRIAL_PAYMENT_SCOPE,
+} from "../utils/payment-method-binding"
 
 /**
- * Phase 14, plan Task 22: binding a payment method to a claimed trial without
- * charging anything. The PayPal Vault v3 calls themselves are medusa-paypal's
- * work (Tasks P1–P2 of `.agents/specs/2026-09-28-paypal-vault-binding-plan.md`)
- * and are only consumed here, through the duck-typed capability in
- * `src/workflows/utils/paypal-vault-binding.ts`.
+ * Phase 14, plan Task 22 — binding a payment method to a claimed trial
+ * without charging anything — since 0.9.3 (B6, plan ticket 01) **delegates the
+ * provider half to the payment-methods plugin**. The endpoint's external
+ * request/response shape is unchanged; internally:
  *
- * Two phases, because the customer leaves for PayPal and comes back:
- * - **start** — `startVaultApproval` returns the payer-approval link; the
- *   setup token id is stored as a *pending binding* on the subscription's
- *   metadata and the approve_url goes back to the caller. Nothing chargeable
- *   is created or changed.
- * - **complete** — the customer returns from PayPal; the approval is exchanged
- *   for a vault id, and the reorder-side binding lands in one pass: a real
- *   `payment_provider_id` + `payment_method_reference` (both, per T7's charge
- *   gate), `payment_mode: auto`, the trial extended **anchored on
- *   `started_at`**, `next_renewal_at` kept equal to the new `trial_ends_at`,
- *   and the ledger's `binding_method` flipped to `vault`. The open scheduled
- *   cycle is moved by `ensureNextRenewalCycleStep`, never by a direct
- *   `scheduled_for` write — the workflow after this step runs it.
+ * - **start** calls the plugin's `startBinding` with the plugin-owned
+ *   `trial` scope and returns the approval URL. The plugin records the
+ *   binding-session ledger row (`bind.start`), which is the ownership anchor
+ *   the completion verifies; reorder parks the returned `state` on the
+ *   subscription's metadata as the *pending binding*. Nothing chargeable is
+ *   created or changed.
+ * - **complete** calls the plugin's `completeBinding` with the same scope.
+ *   The plugin only accepts a state it issued to the calling customer (a
+ *   cross-customer state is a 409 and the provider is never called), replays
+ *   an already-completed session idempotently, and returns the ledger method
+ *   whose `id` — the plugin's own reference, no longer a raw PayPal
+ *   setup-token/vault id living outside the ledger — lands in the trial row's
+ *   `payment_context.payment_method_reference`. The scope also makes the
+ *   fresh method the trial scope's preferred method.
+ *
+ * Trial rows bound before the delegation keep their setup-token references
+ * and their read-side behavior; nothing is backfilled.
  */
 
 export type TrialBindAction = "start" | "complete"
@@ -51,13 +50,14 @@ export type ResolveTrialBindContextStepInput = {
   action: TrialBindAction
   subscription_id: string
   customer_id: string
-  /** The complete phase only: the setup token id the customer returned with. */
+  /** The complete phase only: the state (setup token id) the caller carried back. */
   setup_token_id?: string
 }
 
 /** The pending binding stored on the subscription's metadata at start. */
 export type PendingTrialBinding = {
-  setup_token_id: string
+  /** The plugin's approval-session handle (PayPal: the setup token id). */
+  state: string
   approval_started_at: string
 }
 
@@ -71,6 +71,13 @@ export type TrialBindContext = {
   trial_ends_at: string
   payment_context: Partial<SubscriptionPaymentContext>
   metadata: Record<string, unknown>
+  /**
+   * True when the trial is already bound and the complete call has no pending
+   * approval: the request passes through to the plugin, whose session gate
+   * replays the completed session (200) or refuses an unknown state (409).
+   * This is what makes a repeated complete idempotent.
+   */
+  replay: boolean
 }
 
 const TRIAL_BINDING_METADATA_KEY = "trial_binding"
@@ -100,14 +107,21 @@ function readPendingBinding(metadata: Record<string, unknown>): PendingTrialBind
 
   if (
     !isRecord(pending) ||
-    typeof pending.setup_token_id !== "string" ||
-    typeof pending.approval_started_at !== "string"
+    typeof pending.approval_started_at !== "string" ||
+    (typeof pending.state !== "string" &&
+      // Rows whose pending approval was stored by the pre-delegation flow
+      // carry the raw setup token id instead of `state`; it is the same
+      // handle the completion carries back, so it is honoured as the state.
+      typeof pending.setup_token_id !== "string")
   ) {
     return null
   }
 
   return {
-    setup_token_id: pending.setup_token_id,
+    state:
+      typeof pending.state === "string"
+        ? pending.state
+        : (pending.setup_token_id as string),
     approval_started_at: pending.approval_started_at,
   }
 }
@@ -162,35 +176,43 @@ export const resolveTrialBindContextStep = createStep(
 
     const metadata = readStoredMetadata(subscription.metadata)
     const paymentContext = readStoredPaymentContext(subscription.payment_context)
+    const alreadyBound =
+      typeof paymentContext.payment_method_reference === "string"
 
     if (input.action === "start") {
-      if (typeof paymentContext.payment_method_reference === "string") {
+      if (alreadyBound) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
           "This trial already has a bound payment method."
         )
       }
       // A pending approval may be replaced: a customer who abandons PayPal and
-      // starts again gets a fresh setup token, and the newest one wins. The
-      // bound state above is the only state that locks the trial.
+      // starts again gets a fresh session, and the newest one wins. The bound
+      // state above is the only state that locks the trial.
     } else {
       const pending = readPendingBinding(metadata)
 
-      if (!pending) {
+      if (pending) {
+        // The state was minted by this trial's own start call; a value the
+        // caller produced elsewhere is not this approval's return.
+        if (
+          !input.setup_token_id ||
+          pending.state !== input.setup_token_id
+        ) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            "The setup token does not match the pending approval for this trial. Start the binding again."
+          )
+        }
+      } else if (!alreadyBound) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
           "This trial has no pending payment-method approval. Start the binding first."
         )
       }
-
-      // The token id was minted by this trial's own start call; a value the
-      // caller produced elsewhere is not this approval's return.
-      if (!input.setup_token_id || pending.setup_token_id !== input.setup_token_id) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          "The setup token does not match the pending approval for this trial. Start the binding again."
-        )
-      }
+      // No pending approval but an already-bound trial: a repeated complete.
+      // The request passes through and the plugin's session gate answers —
+      // a replay of the same session (200) or a refusal for anything else.
     }
 
     if (!subscription.started_at) {
@@ -216,6 +238,7 @@ export const resolveTrialBindContextStep = createStep(
       trial_ends_at: new Date(subscription.trial_ends_at).toISOString(),
       payment_context: paymentContext,
       metadata,
+      replay: input.action === "complete" && alreadyBound,
     }
 
     // The step decides; it writes nothing, so there is nothing to compensate.
@@ -224,15 +247,16 @@ export const resolveTrialBindContextStep = createStep(
 )
 
 export type StartTrialVaultApprovalStepOutput = {
+  /** The plugin's approval-session handle (PayPal: the setup token id). */
   setup_token_id: string
   approve_url: string
 }
 
 /**
- * Phase (a): call the provider's `startVaultApproval` and park the setup token
- * id on the subscription as the pending binding. When the installed provider
- * predates the capability, the step refuses before anything is stored — the
- * trial stays exactly as the claim created it.
+ * Phase (a): the plugin starts the binding (session ledger row, provider
+ * approval URL) and reorder parks the returned state as the pending binding.
+ * A missing or outdated payment-methods module refuses before anything is
+ * stored — the trial stays exactly as the claim created it.
  */
 export const startTrialVaultApprovalStep = createStep(
   "start-trial-vault-approval",
@@ -244,28 +268,29 @@ export const startTrialVaultApprovalStep = createStep(
     },
     { container }
   ) {
-    const capability = resolvePaypalVaultBindingCapability(container)
+    const capability = resolvePaymentMethodBindingCapability(container)
 
     if (!capability) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "Binding a payment method is not supported: the installed PayPal provider does not provide the vault approval capability. Update the medusa-paypal plugin and try again."
+        "Binding a payment method is not supported: the installed payment-methods module does not provide the binding capability. Update @mengyyy369/medusa-payment-methods and try again."
       )
     }
 
-    const approval = await capability.startVaultApproval({
-      customer_id: input.context.customer_id,
-      return_url: input.return_url,
-      cancel_url: input.cancel_url,
+    const approval = await capability.startBinding(container, {
+      customerId: input.context.customer_id,
+      returnUrl: input.return_url,
+      cancelUrl: input.cancel_url,
+      scope: PLUGIN_TRIAL_PAYMENT_SCOPE,
     })
 
     if (
-      typeof approval?.setup_token_id !== "string" ||
-      typeof approval?.approve_url !== "string"
+      typeof approval?.approvalUrl !== "string" ||
+      typeof approval?.state !== "string"
     ) {
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
-        "The PayPal provider returned an incomplete vault approval."
+        "The payment-methods module returned an incomplete binding session."
       )
     }
 
@@ -280,7 +305,7 @@ export const startTrialVaultApprovalStep = createStep(
     const nextMetadata: Record<string, unknown> = {
       ...previousMetadata,
       [TRIAL_BINDING_METADATA_KEY]: {
-        setup_token_id: approval.setup_token_id,
+        state: approval.state,
         approval_started_at: new Date().toISOString(),
       } satisfies PendingTrialBinding,
     }
@@ -295,8 +320,8 @@ export const startTrialVaultApprovalStep = createStep(
       { subscription_id: string; previous_metadata: Record<string, unknown> } | null
     >(
       {
-        setup_token_id: approval.setup_token_id,
-        approve_url: approval.approve_url,
+        setup_token_id: approval.state,
+        approve_url: approval.approvalUrl,
       },
       {
         subscription_id: input.context.subscription_id,
@@ -313,6 +338,8 @@ export const startTrialVaultApprovalStep = createStep(
       container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
 
     // Drop the pending binding the start wrote; the trial is card-free again.
+    // The plugin's bind.start ledger row stays — it is the audit of an
+    // approval that was offered, and the session gate makes it harmless.
     await subscriptionModule.updateSubscriptions({
       id: compensation.subscription_id,
       metadata: {
@@ -328,16 +355,19 @@ export const startTrialVaultApprovalStep = createStep(
 )
 
 export type CompleteTrialVaultApprovalStepOutput = {
-  status: string
+  /** The plugin ledger's method reference (the authoritative vault id). */
   vault_id: string
+  /** The provider registration key the method was bound under. */
+  provider_id: string
 }
 
 /**
- * Phase (b), provider half: exchange the approved setup token for a vault id.
- * Accepts `APPROVED`, `VAULTED` **and** `TOKENIZED` — the sandbox measured
- * `VAULTED` after a real approval, and the provider plan's Task P1 Step 3 was
- * corrected for exactly this. A not-yet-approved status is a caller's error
- * (try again later), never a bind.
+ * Phase (b), provider half: the plugin exchanges the approved session for its
+ * ledger method. Ownership is proven by the plugin's own session ledger, so a
+ * state issued to another customer is a 409 and the provider is never called;
+ * a repeated complete of the same approval session replays the existing
+ * method. A not-yet-approved status surfaces as the binder's own
+ * `invalid_data` refusal (try again later), never a bind.
  */
 export const completeTrialVaultApprovalStep = createStep(
   "complete-trial-vault-approval",
@@ -348,39 +378,37 @@ export const completeTrialVaultApprovalStep = createStep(
     },
     { container }
   ) {
-    const capability = resolvePaypalVaultBindingCapability(container)
+    const capability = resolvePaymentMethodBindingCapability(container)
 
     if (!capability) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "Binding a payment method is not supported: the installed PayPal provider does not provide the vault approval capability. Update the medusa-paypal plugin and try again."
+        "Binding a payment method is not supported: the installed payment-methods module does not provide the binding capability. Update @mengyyy369/medusa-payment-methods and try again."
       )
     }
 
-    const result = await capability.completeVaultApproval({
-      setup_token_id: input.setup_token_id,
+    const result = await capability.completeBinding(container, {
+      customerId: input.context.customer_id,
+      state: input.setup_token_id,
+      scope: PLUGIN_TRIAL_PAYMENT_SCOPE,
     })
 
-    if (!isApprovedVaultStatus(result?.status)) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        `The payment method approval is not complete yet (status '${String(
-          result?.status ?? "unknown"
-        )}'). Approve the setup token in PayPal and try again.`
-      )
-    }
-
-    if (typeof result?.vault_id !== "string" || result.vault_id.length === 0) {
+    if (
+      typeof result?.method?.id !== "string" ||
+      result.method.id.length === 0 ||
+      typeof result?.method?.provider_id !== "string" ||
+      result.method.provider_id.length === 0
+    ) {
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
-        "The PayPal provider approved the setup token but returned no vault id."
+        "The payment-methods module completed the binding but returned no usable payment method."
       )
     }
 
     return new StepResponse<CompleteTrialVaultApprovalStepOutput, null>(
       {
-        status: result.status,
-        vault_id: result.vault_id,
+        vault_id: result.method.id,
+        provider_id: result.method.provider_id,
       },
       null
     )
@@ -439,13 +467,18 @@ async function resolveBonusDays(
 }
 
 /**
- * The reorder-side bind (plan Step 3): store the vault id AND the real
- * registered provider id — both are required by the charge gate (T7) — switch
- * the row to `payment_mode: auto`, extend the trial **anchored on
- * `started_at`** (binding on day 5 must land on the same date as binding on
- * day 1), keep `next_renewal_at` equal to the new `trial_ends_at`, and clear
- * the pending binding. The cycle is moved by `ensureNextRenewalCycleStep`
- * after this step, never by a direct `scheduled_for` write here.
+ * The reorder-side bind (plan Step 3): store the plugin ledger's method
+ * reference AND the provider id it came back under — both are required by the
+ * charge gate (T7) — switch the row to `payment_mode: auto`, extend the trial
+ * **anchored on `started_at`** (binding on day 5 must land on the same date as
+ * binding on day 1), keep `next_renewal_at` equal to the new `trial_ends_at`,
+ * and clear the pending binding. The cycle is moved by
+ * `ensureNextRenewalCycleStep` after this step, never by a direct
+ * `scheduled_for` write here.
+ *
+ * Every write is idempotent for a replayed complete: the extension is
+ * arithmetic on the row's own anchors, so recomputing it lands on the same
+ * date, and writing the same reference is a no-op.
  */
 export const bindTrialPaymentMethodStep = createStep(
   "bind-trial-payment-method",
@@ -454,30 +487,19 @@ export const bindTrialPaymentMethodStep = createStep(
       context: TrialBindContext
       setup_token_id: string
       vault_id: string
+      provider_id: string
     },
     { container }
   ) {
-    const paymentModule = container.resolve(Modules.PAYMENT)
-    const providerId = findPaypalPaymentProviderId(paymentModule)
-
-    if (!providerId) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        "The PayPal payment provider is not declared on the payment module, so the bound method could never be charged. Register the PayPal provider and try again."
-      )
-    }
-
     const bonusDays = await resolveBonusDays(container, input.context)
 
     // The extension is arithmetic on the row's own anchors, never on `now`:
     // original span (trial_ends_at - started_at, i.e. the trial_days the
     // customer was granted) plus the bonus days, measured from started_at.
+    // A replayed complete skips the arithmetic entirely (see below).
     const startedAtMs = new Date(input.context.started_at).getTime()
     const originalEndMs = new Date(input.context.trial_ends_at).getTime()
     const trialSpanMs = Math.max(originalEndMs - startedAtMs, 0)
-    const extendedTrialEndsAt = new Date(
-      startedAtMs + trialSpanMs + bonusDays * 86_400_000
-    )
 
     const subscriptionModule =
       container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -487,6 +509,18 @@ export const bindTrialPaymentMethodStep = createStep(
     const subscription = await subscriptionModule.retrieveSubscription(
       input.context.subscription_id
     )
+
+    // A replayed complete (the trial is already bound) must not extend again:
+    // the row's current anchors are already the extended ones, so they are
+    // kept as-is and the write below is a no-op on the dates.
+    const replayedTrialEndsAt =
+      subscription.trial_ends_at !== null
+        ? new Date(subscription.trial_ends_at)
+        : null
+    const extendedTrialEndsAt = input.context.replay
+      ? (replayedTrialEndsAt ?? new Date(input.context.trial_ends_at))
+      : new Date(startedAtMs + trialSpanMs + bonusDays * 86_400_000)
+
     const previousMetadata = readStoredMetadata(subscription.metadata)
     const previousContext = readStoredPaymentContext(subscription.payment_context)
 
@@ -500,7 +534,7 @@ export const bindTrialPaymentMethodStep = createStep(
     }
 
     const nextPaymentContext: SubscriptionPaymentContext = {
-      payment_provider_id: providerId,
+      payment_provider_id: input.provider_id,
       source_payment_collection_id:
         previousContext.source_payment_collection_id ?? null,
       source_payment_session_id: previousContext.source_payment_session_id ?? null,
@@ -519,11 +553,12 @@ export const bindTrialPaymentMethodStep = createStep(
 
     // 2026-10-04（走查 09A）：把刚绑的 vault 登记到 payment 模块的账户持有人上——
     // 支付方式页从 account holder 出发列 vault，不登记就永远看不到（item 9）。
-    // 非阻断：绑定本身已完成（引擎扣款读订阅上下文），登记失败只告警。
+    // 0.9.3（B6）起插件的 completeBinding 自己已经 ensure 过一次；这里的调用
+    // 保持幂等，只为兼容插件缺位时的直接路径并保持调用点成对。非阻断。
     try {
       await ensureCustomerAccountHolder(container, {
         customer_id: subscription.customer_id,
-        provider_id: providerId,
+        provider_id: input.provider_id,
       })
     } catch (error) {
       const logger = container.resolve("logger") as {
@@ -538,7 +573,7 @@ export const bindTrialPaymentMethodStep = createStep(
 
     return new StepResponse<BindTrialPaymentMethodStepOutput, BindStepCompensation>(
       {
-        payment_provider_id: providerId,
+        payment_provider_id: input.provider_id,
         payment_method_reference: input.vault_id,
         trial_ends_at: extendedTrialEndsAt.toISOString(),
         next_renewal_at: extendedTrialEndsAt.toISOString(),
