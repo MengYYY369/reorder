@@ -1,7 +1,11 @@
 import path from "path"
 import { asValue } from "awilix"
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
-import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
 import {
   createCustomer,
@@ -94,6 +98,7 @@ async function postBind(
       return error.response
     })) as { status: number; data: { message?: string; bind?: unknown } }
 
+  console.log("POST_BIND", result.status, JSON.stringify(result.data))
   return result
 }
 
@@ -238,11 +243,14 @@ function toMs(value: Date | string | null | undefined): number {
 }
 
 /**
- * Registers the fake vault capability the way a host on medusa-paypal >= 0.7.0
- * would present it: `container.resolve("paypalSubscription")` answers an object
- * exposing both approval methods, and the payment module's provider
- * declaration carries the PayPal provider under the test's own id. Returns a
- * restore function — the suite's container is shared by the file's tests.
+ * Registers the fake payment-methods module the way a host on
+ * @mengyyy369/medusa-payment-methods >= 0.2.0 would present it:
+ * `container.resolve("paymentMethods")` answers the duck-typed binding
+ * surface (0.2.0 takes the container as its first argument — the arity IS
+ * the version discriminator, so the fake's methods are declared with two
+ * parameters), and the returned method row carries the provider key the
+ * renewal engine charges through. Returns a restore function — the suite's
+ * container is shared by the file's tests.
  */
 function registerFakeVaultProvider(
   container: MedusaContainer,
@@ -254,28 +262,50 @@ function registerFakeVaultProvider(
   }
 ): {
   fakeVaultModule: {
-    startVaultApproval: jest.Mock
-    completeVaultApproval: jest.Mock
+    startCalls: Array<Record<string, unknown>>
+    completeCalls: Array<Record<string, unknown>>
   }
   restore: () => void
 } {
+  // Plain async functions, NOT jest.fn(): the 0.2.0 capability resolver
+  // reads the function's arity (length >= 2) as the version gate, and a
+  // jest.fn() mock always reports length 0 no matter its implementation,
+  // which made the resolver refuse the fake as an outdated module.
+  const startCalls: Array<Record<string, unknown>> = []
+  const completeCalls: Array<Record<string, unknown>> = []
   const fakeVaultModule = {
-    startVaultApproval: jest.fn().mockResolvedValue({
-      setup_token_id: input.setupTokenId,
-      approve_url: input.approveUrl,
-    }),
-    completeVaultApproval: jest.fn().mockResolvedValue({
-      status: input.completionStatus ?? "VAULTED",
-      vault_id: input.vaultId,
-      customer_id: null,
-    }),
+    // Two declared parameters: the 0.2.0 binding surface is (container,
+    // input), and reorder's capability resolver reads the arity as the
+    // version gate.
+    startBinding: async function (_container: unknown, call: unknown) {
+      startCalls.push(call as Record<string, unknown>)
+      return { approvalUrl: input.approveUrl, state: input.setupTokenId }
+    },
+    completeBinding: async function (_container: unknown, call: unknown) {
+      completeCalls.push(call as Record<string, unknown>)
+      if (input.completionStatus) {
+        // The sandbox's real pending case, surfaced the way the plugin's
+        // binder authors it: an invalid_data refusal the route quotes.
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `PayPal setup token is not approved (status: ${input.completionStatus})`
+        )
+      }
+
+      return {
+        method: {
+          id: input.vaultId,
+          provider_id: FAKE_PAYMENT_PROVIDER_KEY,
+        },
+      }
+    },
   }
 
-  container.register({ paypalSubscription: asValue(fakeVaultModule) })
+  container.register({ paymentMethods: asValue(fakeVaultModule) })
 
-  // Plant the PayPal-shaped declaration on the resolved payment module: in
-  // tests the fake provider's declaration is the truth, and the workflow must
-  // derive the registration key from it — not from a hardcoded literal.
+  // Plant the PayPal-shaped declaration on the resolved payment module: the
+  // renewal charge dispatch still routes by the provider key the fake's
+  // method row carries, and no real provider answers it in the test container.
   const paymentModule = container.resolve(Modules.PAYMENT) as unknown as {
     moduleDeclaration?: { providers?: Array<Record<string, unknown>> }
   }
@@ -291,11 +321,10 @@ function registerFakeVaultProvider(
       },
     ],
   }
-
   return {
-    fakeVaultModule,
+    fakeVaultModule: { startCalls, completeCalls },
     restore: () => {
-      container.register({ paypalSubscription: asValue(null) })
+      container.register({ paymentMethods: asValue(null) })
       paymentModule.moduleDeclaration = previousDeclaration
     },
   }
@@ -401,11 +430,14 @@ medusaIntegrationTestRunner({
         const originalEndMs = toMs(beforeBind.trial_ends_at)
         const startedMs = toMs(beforeBind.started_at)
 
-        const { restore } = registerFakeVaultProvider(container, {
-          setupTokenId: `ST-${runId}`,
-          approveUrl: `https://www.sandbox.paypal.com/vault/setup-tokens/ST-${runId}`,
-          vaultId: `VAULT-${runId}`,
-        })
+        const { restore, fakeVaultModule } = registerFakeVaultProvider(
+          container,
+          {
+            setupTokenId: `ST-${runId}`,
+            approveUrl: `https://www.sandbox.paypal.com/vault/setup-tokens/ST-${runId}`,
+            vaultId: `VAULT-${runId}`,
+          }
+        )
 
         try {
           // Phase (a): the approval starts, the approve_url comes back, and
@@ -428,9 +460,20 @@ medusaIntegrationTestRunner({
             setup_token_id: `ST-${runId}`,
           })
 
+          // The provider half is DELEGATED (B6): the plugin's binding surface
+          // was called with the trial scope and the caller-owned routes.
+          expect(fakeVaultModule.startCalls[0]).toMatchObject(
+            expect.objectContaining({
+              customerId: customer.id,
+              scope: "trial",
+              returnUrl: "https://storefront.example/subscription/return",
+              cancelUrl: "https://storefront.example/subscription/cancel",
+            })
+          )
+
           const pending = await getSubscriptionRow(container, subscriptionId)
           expect(pending.metadata?.trial_binding).toMatchObject({
-            setup_token_id: `ST-${runId}`,
+            state: `ST-${runId}`,
           })
           expect(pending.payment_context?.payment_mode).toEqual("manual")
           expect(pending.payment_context?.payment_method_reference ?? null).toBeNull()
@@ -451,13 +494,23 @@ medusaIntegrationTestRunner({
           expect(complete.data.bind).toMatchObject({
             phase: "bound",
             subscription_id: subscriptionId,
-            // Derived from the fake provider's declaration id, not a
-            // hardcoded "pp_paypal_paypal" literal.
+            // The plugin ledger's provider key, returned on the method row —
+            // not a hardcoded "pp_paypal_paypal" literal.
             payment_provider_id: FAKE_PAYMENT_PROVIDER_KEY,
             payment_method_reference: `VAULT-${runId}`,
             payment_mode: "auto",
             bonus_days_applied: 3,
           })
+
+          // The completion is delegated with the same session state the start
+          // minted, still under the trial scope.
+          expect(fakeVaultModule.completeCalls[0]).toMatchObject(
+            expect.objectContaining({
+              customerId: customer.id,
+              state: `ST-${runId}`,
+              scope: "trial",
+            })
+          )
 
           const bound = await getSubscriptionRow(container, subscriptionId)
           expect(bound.payment_context?.payment_mode).toEqual("auto")
@@ -861,11 +914,12 @@ medusaIntegrationTestRunner({
           regionId: region.id,
         })
 
-        // An outdated medusa-paypal: resolvable, but without the vault
-        // methods. The duck-type — not the package version — is the gate.
+        // An outdated @mengyyy369/medusa-payment-methods: resolvable, but
+        // without the 0.2.0 binding methods. The duck-type, not the package
+        // version, is the gate; the arity is the version discriminator.
         container.register({
-          paypalSubscription: asValue({
-            resolveSubscriptionModule: jest.fn(),
+          paymentMethods: asValue({
+            listCustomerPaymentMethods: jest.fn(),
           }),
         })
 
@@ -882,7 +936,7 @@ medusaIntegrationTestRunner({
           )
           expect(start.status).toEqual(400)
           expect(start.data.message).toContain(
-            "the installed PayPal provider does not provide the vault approval capability"
+            "the installed payment-methods module does not provide the binding capability"
           )
 
           // Untouched and card-free: no pending binding, no payment mode
@@ -904,7 +958,7 @@ medusaIntegrationTestRunner({
           expect(cycles[0].status).toEqual(RenewalCycleStatus.SCHEDULED)
           expect(toMs(cycles[0].scheduled_for)).toBe(toMs(untouched.trial_ends_at))
         } finally {
-          container.register({ paypalSubscription: asValue(null) })
+          container.register({ paymentMethods: asValue(null) })
         }
       })
 
@@ -961,7 +1015,7 @@ medusaIntegrationTestRunner({
           )
           expect(notApproved.status).toEqual(400)
           expect(notApproved.data.message).toContain(
-            "The payment method approval is not complete yet"
+            "PayPal setup token is not approved (status:"
           )
 
           const untouched = await getSubscriptionRow(container, subscriptionId)
@@ -970,7 +1024,7 @@ medusaIntegrationTestRunner({
           // The pending binding survives, so the customer can retry the
           // completion after actually approving in PayPal.
           expect(untouched.metadata?.trial_binding).toMatchObject({
-            setup_token_id: `ST-${runId}`,
+            state: `ST-${runId}`,
           })
         } finally {
           restore()
