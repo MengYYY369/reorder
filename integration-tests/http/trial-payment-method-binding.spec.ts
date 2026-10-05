@@ -98,7 +98,6 @@ async function postBind(
       return error.response
     })) as { status: number; data: { message?: string; bind?: unknown } }
 
-  console.log("POST_BIND", result.status, JSON.stringify(result.data))
   return result
 }
 

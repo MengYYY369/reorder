@@ -253,7 +253,6 @@ function throwClassified(
   req: AuthenticatedMedusaRequest<PostStoreTrialBindSchemaType>,
   errors: unknown
 ) {
-  console.error("TRIAL_BIND_DEBUG", JSON.stringify(errors))
   const mismatchMessage = findSerializedErrorMessageByName(
     errors,
     "PaypalCredentialEnvironmentMismatchError"
