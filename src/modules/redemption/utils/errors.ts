@@ -13,6 +13,11 @@ export const redemptionErrors = {
     new RedemptionError("not_found", `Redemption batch ${id} not found`),
   codeNotFound: (id: string) =>
     new RedemptionError("not_found", `Redemption code ${id} not found`),
+  batchNotDeletable: (id: string) =>
+    new RedemptionError(
+      "invalid_data",
+      `Redemption batch ${id} is not disabled; only disabled batches can be deleted`
+    ),
   batchDisabled: (id: string) =>
     new RedemptionError("invalid_data", `Redemption batch ${id} is disabled`),
   codeDisabled: (id: string) =>

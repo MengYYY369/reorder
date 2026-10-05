@@ -6,6 +6,10 @@ import {
 } from "../helpers/subscription-fixtures"
 import { createPlanOfferSeed } from "../helpers/plan-offer-fixtures"
 import { REDEMPTION_MODULE } from "../../src/modules/redemption"
+import {
+  PlanOfferFrequencyInterval,
+  PlanOfferScope,
+} from "../../src/modules/plan-offer/types"
 
 medusaIntegrationTestRunner({
   medusaConfigFile: path.resolve(process.cwd(), "integration-tests"),
@@ -300,6 +304,121 @@ medusaIntegrationTestRunner({
           outcome: "subscription_created",
           free_cycles_applied: 2,
         })
+      })
+
+      it("refuses to delete an active batch", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+        const { variant } = await createProductWithVariant(container)
+
+        await createPlanOfferSeed(container, {
+          name: "RDM-OFFER-006",
+          scope: PlanOfferScope.VARIANT,
+          variant_id: variant.id,
+          allowed_frequencies: [
+            { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
+          ],
+        })
+
+        const createResponse = await api.post(
+          "/admin/redemptions/batches",
+          {
+            name: "RDM-BATCH-DELETE-ACTIVE",
+            variant_id: variant.id,
+            frequency_interval: "month",
+            frequency_value: 1,
+            free_cycles: 1,
+            generated_code_count: 1,
+          },
+          { headers }
+        )
+        const batchId = createResponse.data.redemption_batch.id
+
+        await expect(
+          api.post(`/admin/redemptions/batches/${batchId}/delete`, {}, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 400 },
+        })
+
+        const detailResponse = await api.get(
+          `/admin/redemptions/batches/${batchId}`,
+          { headers }
+        )
+        expect(detailResponse.status).toEqual(200)
+      })
+
+      it("deletes a disabled batch with its codes and records", async () => {
+        const container = getContainer()
+        const headers = await createAdminAuthHeaders(container)
+        const { variant } = await createProductWithVariant(container)
+
+        await createPlanOfferSeed(container, {
+          name: "RDM-OFFER-007",
+          scope: PlanOfferScope.VARIANT,
+          variant_id: variant.id,
+          allowed_frequencies: [
+            { interval: PlanOfferFrequencyInterval.MONTH, value: 1 },
+          ],
+        })
+
+        const createResponse = await api.post(
+          "/admin/redemptions/batches",
+          {
+            name: "RDM-BATCH-DELETE-DISABLED",
+            variant_id: variant.id,
+            frequency_interval: "month",
+            frequency_value: 1,
+            free_cycles: 2,
+            generated_code_count: 2,
+          },
+          { headers }
+        )
+        const batchId = createResponse.data.redemption_batch.id
+        const codeId = createResponse.data.codes[0].id
+
+        const redemptionModule = container.resolve(
+          REDEMPTION_MODULE
+        ) as any
+        await redemptionModule.createRedemptionRecords({
+          batch_id: batchId,
+          code_id: codeId,
+          customer_id: "cus_records_delete_001",
+          subscription_id: "sub_records_delete_001",
+          outcome: "subscription_created",
+          free_cycles_applied: 2,
+          frequency_interval: "month",
+          frequency_value: 1,
+        })
+
+        await api.post(
+          `/admin/redemptions/batches/${batchId}/disable`,
+          {},
+          { headers }
+        )
+
+        const deleteResponse = await api.post(
+          `/admin/redemptions/batches/${batchId}/delete`,
+          {},
+          { headers }
+        )
+        expect(deleteResponse.status).toEqual(200)
+        expect(deleteResponse.data).toMatchObject({
+          id: batchId,
+          deleted: true,
+          deleted_records: 1,
+          deleted_codes: 2,
+        })
+
+        await expect(
+          api.get(`/admin/redemptions/batches/${batchId}`, { headers })
+        ).rejects.toMatchObject({
+          response: { status: 404 },
+        })
+
+        const recordsAfter = await redemptionModule.listBatchRecords(batchId)
+        expect(recordsAfter).toHaveLength(0)
+        const codesAfter = await redemptionModule.listBatchCodes(batchId)
+        expect(codesAfter).toHaveLength(0)
       })
     })
   },

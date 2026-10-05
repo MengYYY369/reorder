@@ -1,10 +1,12 @@
 import { createWorkflow, WorkflowResponse } from "@medusajs/framework/workflows-sdk"
 import {
   createRedemptionBatchStep,
+  deleteRedemptionBatchStep,
   disableRedemptionBatchStep,
   disableRedemptionCodeStep,
   validateRedemptionGrantTargetStep,
   type CreateRedemptionBatchStepOutput,
+  type DeleteRedemptionBatchStepOutput,
 } from "./steps/redemption-batch"
 import {
   CreateRedemptionBatchInput,
@@ -51,6 +53,16 @@ export const disableRedemptionCodeWorkflow = createWorkflow(
   function (input: DisableRedemptionEntityInput) {
     const codeId: string = disableRedemptionCodeStep(input)
     return new WorkflowResponse(codeId)
+  }
+)
+
+export const deleteRedemptionBatchWorkflow = createWorkflow(
+  "delete-redemption-batch",
+  function (input: DisableRedemptionEntityInput) {
+    const summary: DeleteRedemptionBatchStepOutput = deleteRedemptionBatchStep(
+      input
+    )
+    return new WorkflowResponse(summary)
   }
 )
 

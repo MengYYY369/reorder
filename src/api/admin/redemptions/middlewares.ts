@@ -7,6 +7,7 @@ import {
   GetAdminRedemptionBatchSchema,
   GetAdminRedemptionBatchesSchema,
   PostAdminCreateRedemptionBatchSchema,
+  PostAdminDeleteRedemptionBatchSchema,
   PostAdminDisableRedemptionBatchSchema,
   PostAdminDisableRedemptionCodeSchema,
 } from "./batches/validators"
@@ -44,6 +45,13 @@ export const adminRedemptionsMiddlewares: MiddlewareRoute[] = [
     method: "POST",
     middlewares: [
       validateAndTransformBody(PostAdminDisableRedemptionBatchSchema),
+    ],
+  },
+  {
+    matcher: "/admin/redemptions/batches/:id/delete",
+    method: "POST",
+    middlewares: [
+      validateAndTransformBody(PostAdminDeleteRedemptionBatchSchema),
     ],
   },
   {

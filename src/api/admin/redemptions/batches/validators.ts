@@ -101,6 +101,12 @@ export type PostAdminDisableRedemptionBatchSchemaType = z.infer<
   typeof PostAdminDisableRedemptionBatchSchema
 >
 
+export const PostAdminDeleteRedemptionBatchSchema = z.object({}).strict()
+
+export type PostAdminDeleteRedemptionBatchSchemaType = z.infer<
+  typeof PostAdminDeleteRedemptionBatchSchema
+>
+
 export const PostAdminDisableRedemptionCodeSchema = z.object({}).strict()
 
 export type PostAdminDisableRedemptionCodeSchemaType = z.infer<

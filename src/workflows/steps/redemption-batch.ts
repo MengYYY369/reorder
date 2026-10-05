@@ -192,3 +192,34 @@ export const disableRedemptionCodeStep = createStep(
     } as any)
   }
 )
+
+export type DeleteRedemptionBatchStepOutput = {
+  batch_id: string
+  deleted_records: number
+  deleted_codes: number
+}
+
+/**
+ * Hard-deletes a disabled batch with its codes and records. There is no
+ * compensation on purpose: the rows are gone, and a rollback that resurrects
+ * nothing would only fake safety. The disabled-only gate lives in the module
+ * service (`deleteBatchCascade`), so every caller shares one rule.
+ */
+export const deleteRedemptionBatchStep = createStep(
+  "delete-redemption-batch",
+  async function (input: { id: string }, { container }) {
+    const redemptionModuleService =
+      container.resolve<RedemptionModuleService>(REDEMPTION_MODULE)
+
+    const { records, codes } =
+      await redemptionModuleService.deleteBatchCascade(input.id)
+
+    const output: DeleteRedemptionBatchStepOutput = {
+      batch_id: input.id,
+      deleted_records: records,
+      deleted_codes: codes,
+    }
+
+    return new StepResponse(output)
+  }
+)

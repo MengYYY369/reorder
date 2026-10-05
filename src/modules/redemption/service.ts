@@ -16,6 +16,7 @@ import {
   generateUniqueRedemptionCodes,
   normalizeCustomRedemptionCode,
 } from "./utils/code-generator"
+import { redemptionErrors } from "./utils/errors"
 
 const DEFAULT_CODE_PREFIX = "RDM"
 const DEFAULT_MAX_REDEMPTIONS_PER_CODE = 1
@@ -225,6 +226,43 @@ class RedemptionModuleService extends MedusaService({
       id: batchId,
       status: RedemptionBatchStatus.DISABLED,
     } as any)
+  }
+
+  /**
+   * Hard-deletes a disabled batch together with its codes and records
+   * (children first, so the belongs-to foreign keys never dangle). Only a
+   * disabled batch may be deleted: an active one still grants codes.
+   *
+   * Irreversible by design — records are the only audit of a redemption, so
+   * the admin confirmation dialog must state the record count before calling.
+   */
+  async deleteBatchCascade(
+    batchId: string
+  ): Promise<{ records: number; codes: number }> {
+    const batch = await this.retrieveRedemptionBatch(batchId)
+    if (batch.status !== RedemptionBatchStatus.DISABLED) {
+      throw redemptionErrors.batchNotDeletable(batchId)
+    }
+
+    const records = (await this.listRedemptionRecords(
+      { batch_id: batchId } as any,
+      { select: ["id"] }
+    )) as Array<{ id: string }>
+    if (records.length > 0) {
+      await this.deleteRedemptionRecords(records.map((record) => record.id))
+    }
+
+    const codes = (await this.listRedemptionCodes(
+      { batch_id: batchId } as any,
+      { select: ["id"] }
+    )) as Array<{ id: string }>
+    if (codes.length > 0) {
+      await this.deleteRedemptionCodes(codes.map((code) => code.id))
+    }
+
+    await this.deleteRedemptionBatches(batchId)
+
+    return { records: records.length, codes: codes.length }
   }
 
   async disableCode(codeId: string): Promise<void> {
