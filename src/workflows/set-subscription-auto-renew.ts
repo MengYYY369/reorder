@@ -114,6 +114,7 @@ export const setSubscriptionAutoRenewWorkflow = createWorkflow(
           status: subscription.status,
           next_renewal_at: subscription.next_renewal_at,
           current_mode: subscription.current_mode,
+          payment_method_reference: subscription.payment_method_reference,
           enabled: input.enabled,
         }
       }

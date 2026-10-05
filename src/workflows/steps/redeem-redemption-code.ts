@@ -326,9 +326,14 @@ const REDEMPTION_SHIPPING_PLACEHOLDER: SubscriptionShippingAddress = {
 }
 
 const REDEMPTION_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
-  // "auto" keeps the free cycles inside the scheduler's due set; the
-  // generalized free-cycle branch never builds an order or touches payment.
-  ...buildPaymentModeFields("auto"),
+  // A redemption grant carries no payment method, so the row is a manual row:
+  // it never charges anything and must not read as「自动续费开启」on the panel
+  // (item 9). The free cycles still advance because the renewal scheduler's
+  // disposition predicate keeps the free-period cycle of a manual row
+  // processable (the generalized free-cycle branch never builds an order or
+  // touches payment), and the customer opts into real auto-renewal through the
+  // payment-method bind flow, which flips the mode only after a method lands.
+  ...buildPaymentModeFields("manual"),
   payment_provider_id: null,
   source_payment_collection_id: null,
   source_payment_session_id: null,
@@ -338,11 +343,12 @@ const REDEMPTION_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
 
 const REDEMPTION_TRIAL_PAYMENT_CONTEXT: SubscriptionPaymentContext = {
   ...REDEMPTION_PAYMENT_CONTEXT,
-  // No payment method is collected for v1 trials; payment_mode stays "auto"
-  // exactly like the free-cycles path so the trial-end renewal cycle lands in
-  // the scheduler's due set. The clean-end branch (process-renewal-cycle,
-  // ticket 05) intercepts the trial-end cycle BEFORE any order/payment logic,
-  // so an "auto" mode here never results in a charge.
+  // No payment method is collected for v1 trials; the row is manual like every
+  // other redemption grant. The trial-end cycle still lands in the scheduler's
+  // due set through the manual trial-end carve-out of the disposition
+  // predicate, and the clean-end branch (process-renewal-cycle) intercepts
+  // that cycle BEFORE any order/payment logic, so this mode never results in
+  // a charge.
 }
 
 function buildRedemptionReference(redemptionRecordId: string): string {

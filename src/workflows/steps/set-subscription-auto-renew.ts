@@ -46,6 +46,8 @@ export type AutoRenewSubscriptionState = {
   status: SubscriptionStatus
   next_renewal_at: Date | string | null
   current_mode: SubscriptionPaymentMode
+  /** The stored vault reference, or `null` when the row carries no method. */
+  payment_method_reference: string | null
 }
 
 export type AutoRenewOverdueGuardStepInput = {
@@ -53,6 +55,8 @@ export type AutoRenewOverdueGuardStepInput = {
   status: SubscriptionStatus
   next_renewal_at: Date | string | null
   current_mode: SubscriptionPaymentMode
+  /** The stored vault reference, or `null` when the row carries no method. */
+  payment_method_reference: string | null
   enabled: boolean
 }
 
@@ -74,6 +78,22 @@ export type UpdateSubscriptionPaymentModeStepResult = {
 type PaymentModeCompensation = {
   id: string
   payment_context: Record<string, unknown> | null
+}
+
+/**
+ * The stored vault reference, or `null` when the row carries no method.
+ * `payment_context` is a nullable jsonb column, so every reader narrows the
+ * object first (same idiom as `readStoredPaymentMode`).
+ */
+function readStoredMethodReference(paymentContext: unknown): string | null {
+  if (typeof paymentContext !== "object" || paymentContext === null) {
+    return null
+  }
+
+  const reference = (paymentContext as { payment_method_reference?: unknown })
+    .payment_method_reference
+
+  return typeof reference === "string" ? reference : null
 }
 
 /**
@@ -116,6 +136,9 @@ export const assertAutoRenewNotNativeStep = createStep(
       // A row with no stored mode is not charging on its own, so it cannot be
       // reported as switching to auto by a stale renewal date.
       current_mode: readStoredPaymentMode(subscription.payment_context, "manual"),
+      payment_method_reference: readStoredMethodReference(
+        subscription.payment_context
+      ),
     })
   }
 )
@@ -124,6 +147,13 @@ export const assertAutoRenewNotNativeStep = createStep(
  * Surprise-charge guard: switching a subscription on is refused while it is
  * overdue, and disabling is never refused — turning automatic charging off
  * cannot charge anybody.
+ *
+ * Free grant rows are exempt (item 9): a row with no stored payment method
+ * reference could never have been charged by the off-session engine (charging
+ * requires a method), so its overdue renewal date says only that a free or
+ * uncharged period lapsed — a redemption grant whose first free cycle is due
+ * at `started_at` must not be told to "renew manually" when it has nothing to
+ * renew with. A row that carries a method keeps the guard in full.
  */
 export const assertAutoRenewNotOverdueStep = createStep(
   ASSERT_AUTO_RENEW_NOT_OVERDUE_STEP_NAME,
@@ -131,6 +161,12 @@ export const assertAutoRenewNotOverdueStep = createStep(
     const targetMode: SubscriptionPaymentMode = input.enabled ? "auto" : "manual"
 
     if (targetMode !== "auto" || input.current_mode === "auto") {
+      return new StepResponse<AutoRenewOverdueGuardStepResult>({
+        payment_mode: targetMode,
+      })
+    }
+
+    if (input.payment_method_reference === null) {
       return new StepResponse<AutoRenewOverdueGuardStepResult>({
         payment_mode: targetMode,
       })

@@ -19,6 +19,7 @@ import { RenewalCycleStatus } from "../../src/modules/renewal/types"
 import { ACTIVITY_LOG_MODULE } from "../../src/modules/activity-log"
 import type ActivityLogModuleService from "../../src/modules/activity-log/service"
 import { processRenewalCycleWorkflow } from "../../src/workflows/process-renewal-cycle"
+import { setSubscriptionAutoRenewWorkflow } from "../../src/workflows/set-subscription-auto-renew"
 import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
 
 
@@ -104,11 +105,12 @@ medusaIntegrationTestRunner({
         expect(subscription.is_trial).toEqual(false)
         expect(subscription.cart_id).toBeNull()
         // The create constant writes the mode and its mechanism as one pair: a
-        // free-cycle row the scheduler charges never records a `manual` label.
+        // redemption grant has no payment method, so it is a manual row (item
+        // 9) — the free cycles still advance through the free-cycle carve-out.
         expect(subscription.payment_context).toEqual({
           payment_provider_id: null,
-          payment_mode: "auto",
-          mechanism: "reorder_auto",
+          payment_mode: "manual",
+          mechanism: "manual",
           source_payment_collection_id: null,
           source_payment_session_id: null,
           payment_method_reference: null,
@@ -262,6 +264,81 @@ medusaIntegrationTestRunner({
             cycle.status === RenewalCycleStatus.SCHEDULED
         )
         expect(remainingScheduled).toHaveLength(0)
+      })
+
+      it("exempts the free grant row from the auto-renew overdue guard (item 9)", async () => {
+        const container = getContainer()
+        const customer = await createCustomer(container)
+        const customerHeaders = await createStoreHeadersWithPublishableKey(
+          container,
+          customer
+        )
+        const { variant } = await createProductWithVariant(container)
+
+        await createPlanOfferSeed(container, {
+          name: "RDM-STORE-OFFER-OVERDUE",
+          scope: "variant",
+          variant_id: variant.id,
+          allowed_frequencies: [{ interval: "month", value: 1 }],
+        })
+
+        const batch = await createRedemptionBatch(container, {
+          name: "RDM-STORE-BATCH-OVERDUE",
+          variant_id: variant.id,
+          free_cycles: 2,
+          generated_code_count: 1,
+        })
+
+        const redeem = await api.post(
+          "/store/customers/me/redemptions",
+          { code: batch.codes[0].code },
+          { headers: customerHeaders }
+        )
+        expect(redeem.status).toEqual(200)
+
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        // The redeemed row is due at started_at: push it well past the 24h
+        // grace window so the guard would reject a method-carrying row.
+        const overdue = new Date(Date.now() - 72 * 60 * 60 * 1000)
+        await subscriptionModule.updateSubscriptions({
+          id: redeem.data.subscription_id,
+          next_renewal_at: overdue,
+        } as never)
+
+        // The row carries no payment method and was never charged, so the
+        // overdue guard exempts it and the toggle goes through.
+        const { result, errors } = await setSubscriptionAutoRenewWorkflow(
+          container
+        ).run({
+          input: {
+            subscription_id: redeem.data.subscription_id,
+            enabled: true,
+          },
+          throwOnError: false,
+        })
+        expect(errors ?? []).toHaveLength(0)
+        expect(result?.payment_mode).toEqual("auto")
+
+        const [updated] = await subscriptionModule.listSubscriptions({
+          id: [redeem.data.subscription_id],
+        })
+        expect(updated.payment_context).toMatchObject({
+          payment_mode: "auto",
+          mechanism: "reorder_auto",
+        })
+
+        // Disabling still works exactly as before.
+        const off = await setSubscriptionAutoRenewWorkflow(container).run({
+          input: {
+            subscription_id: redeem.data.subscription_id,
+            enabled: false,
+          },
+          throwOnError: false,
+        })
+        expect(off.errors ?? []).toHaveLength(0)
+        expect(off.result?.payment_mode).toEqual("manual")
       })
 
       it("enforces per-customer limit, window, disabled state and exhaustion", async () => {

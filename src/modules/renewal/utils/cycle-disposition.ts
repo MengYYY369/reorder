@@ -58,6 +58,10 @@ export type DispositionSubscription = {
   is_trial: boolean
   trial_ends_at: Date | string | null
   payment_context: DispositionPaymentContext | null
+  /** Free periods left on the grant; `null` when the column never held one. */
+  free_cycles_remaining?: number | null
+  /** Whether the next period was explicitly skipped. */
+  skip_next_cycle?: boolean
 }
 
 /** The narrow slice of a dunning case the disposition decides on. */
@@ -94,6 +98,21 @@ function isManualTrialEndCycle(
   }
 
   return scheduledFor >= toDate(subscription.trial_ends_at)
+}
+
+/**
+ * Whether the cycle about to be processed is a free period: the same predicate
+ * the `process-renewal-cycle` step applies (`isFreeCycle`) and the only reason
+ * the generalized free-cycle branch exists. That branch never builds an order
+ * and never touches payment, so a manual-mode row it serves stays unchargeable
+ * in effect — redemption grants (manual rows with free periods, item 9) keep
+ * advancing without this carve-out ever charging one.
+ */
+function carriesFreeCyclePeriod(subscription: DispositionSubscription): boolean {
+  return (
+    subscription.skip_next_cycle === true ||
+    (subscription.free_cycles_remaining ?? 0) > 0
+  )
 }
 
 /**
@@ -141,9 +160,18 @@ export function resolveCycleDisposition(
   }
 
   if (subscription.payment_context?.payment_mode === "manual") {
-    return isManualTrialEndCycle(subscription, toDate(cycle.scheduled_for))
-      ? "trial_end"
-      : "not_chargeable"
+    if (isManualTrialEndCycle(subscription, toDate(cycle.scheduled_for))) {
+      return "trial_end"
+    }
+
+    // Free periods of a manual row (a redemption grant) stay processable: the
+    // free-cycle branch they reach never charges (docstring of
+    // `carriesFreeCyclePeriod`).
+    if (carriesFreeCyclePeriod(subscription)) {
+      return "charge"
+    }
+
+    return "not_chargeable"
   }
 
   if (

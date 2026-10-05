@@ -284,6 +284,8 @@ async function excludeNonChargeableCycles(
         trial_ends_at: subscription.trial_ends_at,
         payment_context: (subscription.payment_context ??
           null) as DispositionPaymentContext | null,
+        free_cycles_remaining: subscription.free_cycles_remaining ?? null,
+        skip_next_cycle: subscription.skip_next_cycle,
       },
       openCaseByCycleId.get(cycle.id) ?? null
     )
