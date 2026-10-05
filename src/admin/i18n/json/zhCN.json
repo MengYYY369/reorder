@@ -8,7 +8,8 @@
     "analytics": "数据分析",
     "activityLog": "操作日志",
     "settings": "订阅设置",
-    "redemptions": "兑换码"
+    "redemptions": "兑换码",
+    "trial": "试用"
   },
   "common": {
     "actions": {
@@ -107,24 +108,30 @@
       "enable": "启用",
       "enabling": "启用中……",
       "disable": "停用",
-      "disabling": "停用中……"
+      "disabling": "停用中……",
+      "delete": "删除",
+      "deleting": "删除中……"
     },
     "toast": {
       "enabled": "计划优惠已启用",
       "disabled": "计划优惠已停用",
       "created": "计划优惠已创建",
-      "updated": "计划优惠已更新"
+      "updated": "计划优惠已更新",
+      "deleted": "计划优惠已删除"
     },
     "errors": {
       "updateFailed": "更新计划优惠失败",
       "createFailed": "创建计划优惠失败",
-      "loadFailed": "加载计划优惠失败。"
+      "loadFailed": "加载计划优惠失败。",
+      "deleteFailed": "删除计划优惠失败"
     },
     "prompt": {
       "enableTitle": "启用计划优惠？",
       "enableDescription": "您即将启用此计划优惠。是否继续？",
       "disableTitle": "停用计划优惠？",
       "disableDescription": "您即将停用此计划优惠。是否继续？",
+      "deleteTitle": "删除计划优惠？",
+      "deleteDescription": "该配置已停用，删除后将永久消失，此操作不可撤销。",
       "removeFrequencyTitle": "移除该频率？",
       "removeFrequencyDescription": "此频率行及其折扣配置将被移除。",
       "remove": "移除"
@@ -179,7 +186,7 @@
       "trialBonusDays": "绑卡赠送试用天数",
       "trialBonusDaysHint": "客户为领取的试用绑定支付方式后额外赠送的试用天数。留空（或 0）则隐藏绑定并延长选项。",
       "nativeTrialTitle": "PayPal 原生试用（变体元数据，只读）",
-      "nativeTrialHint": "这些值保存在商品变体的 PayPal 订阅元数据中，由 PayPal 自己扣费。仅作参考展示——上方的试用配置不会改变它们。",
+      "nativeTrialHint": "这些值保存在商品变体的 PayPal 订阅元数据中，由 PayPal 自己扣费。仅作参考展示：上方的试用配置不会改变它们。",
       "nativeTrialPeriods": "试用：{{value}} 天",
       "nativeTrialPeriodsMissing": "试用：未配置",
       "nativeTrialSetupFee": "开通费：{{value}}",
@@ -256,7 +263,8 @@
       "resumed": "订阅已恢复",
       "cancelled": "订阅已取消",
       "paymentMethodUpdated": "支付方式已更新",
-      "paymentMethodUpdateFailed": "更新支付方式失败"
+      "paymentMethodUpdateFailed": "更新支付方式失败",
+      "deleted": "订阅已删除"
     },
     "errors": {
       "pauseFailed": "暂停订阅失败",
@@ -265,7 +273,8 @@
       "planChange": "计划变更已排期",
       "planChangeFailed": "安排计划变更失败",
       "addressUpdated": "收货地址已更新",
-      "addressFailed": "更新收货地址失败"
+      "addressFailed": "更新收货地址失败",
+      "deleteFailed": "删除订阅失败"
     },
     "detail": {
       "title": "订阅",
@@ -279,6 +288,14 @@
       "latestRenewal": "最近一次续订",
       "initialOrder": "初始订单",
       "renewalNumbered": "第 {{index}} 次续订",
+      "actions": {
+        "deleteSubscription": "删除订阅",
+        "deleting": "删除中……"
+      },
+      "prompt": {
+        "deleteTitle": "删除订阅？",
+        "deleteDescription": "订阅将被永久删除，其续订周期、日志、指标与关联案件一并清除，此操作不可撤销。"
+      },
       "sections": {
         "overview": "概览",
         "subscription": "订阅",
@@ -467,7 +484,10 @@
         "approve": "批准",
         "reject": "拒绝",
         "resolveStuck": "解决滞留周期",
-        "resolving": "解决中……"
+        "resolving": "解决中……",
+        "deleteCycle": "删除续订周期",
+        "deleteAttempt": "删除记录",
+        "deleting": "删除中……"
       },
       "prompt": {
         "forceTitle": "立即续订？",
@@ -477,20 +497,28 @@
         "rejectTitle": "拒绝变更？",
         "rejectDescription": "您即将拒绝此续订周期的待处理变更。",
         "resolveTitle": "解决滞留周期？",
-        "resolveDescription": "所选结果会将此续订周期结算、重新排队或终止，并会在活动日志中记录操作人与原因。"
+        "resolveDescription": "所选结果会将此续订周期结算、重新排队或终止，并会在活动日志中记录操作人与原因。",
+        "deleteTitle": "删除续订周期？",
+        "deleteDescription": "该周期及其全部尝试记录将被永久删除，此操作不可撤销。",
+        "attemptDeleteTitle": "删除尝试记录？",
+        "attemptDeleteDescription": "该尝试记录将被永久删除，此操作不可撤销。"
       },
       "toast": {
         "forced": "续订已触发",
         "approved": "待处理变更已批准",
         "rejected": "待处理变更已拒绝",
-        "resolved": "滞留周期已解决"
+        "resolved": "滞留周期已解决",
+        "deleted": "续订周期已删除",
+        "attemptDeleted": "尝试记录已删除"
       },
       "errors": {
         "forceFailed": "触发续订失败",
         "approveFailed": "批准变更失败",
         "rejectFailed": "拒绝变更失败",
         "reasonRequired": "请填写原因",
-        "resolveFailed": "解决滞留续订周期失败"
+        "resolveFailed": "解决滞留续订周期失败",
+        "deleteFailed": "删除续订周期失败",
+        "attemptDeleteFailed": "删除尝试记录失败"
       },
       "sections": {
         "cycleOverview": "周期概览",
@@ -1174,7 +1202,7 @@
       "name": "名称",
       "status": "状态",
       "grant": "授予内容",
-      "grantValue": "{cycles} 个免费周期，{interval}/{value}",
+      "grantValue": "{{cycles}} 个免费周期，{{interval}}/{{value}}",
       "codes": "码数",
       "redemptions": "兑换次数",
       "frequency": "频率"
@@ -1188,19 +1216,20 @@
       "disable": "停用",
       "disableBatch": "停用批次",
       "disableCode": "停用码",
+      "deleteBatch": "删除批次",
       "selectVariant": "选择规格",
       "addCustomCode": "添加码"
     },
     "codes": {
       "title": "码列表",
-      "description": "该批次共 {count} 个码",
+      "description": "该批次共 {{count}} 个码",
       "code": "码",
       "status": "状态",
       "usage": "使用情况",
       "created": "创建时间"
     },
     "detail": {
-      "variantId": "规格：{variantId}",
+      "variantId": "规格：{{variantId}}",
       "noWindow": "无限制",
       "loading": "加载中…"
     },
@@ -1211,16 +1240,21 @@
       "disableBatchTitle": "停用批次？",
       "disableBatchDescription": "该批次下所有码将立即停止兑换。",
       "disableCodeTitle": "停用码？",
-      "disableCodeDescription": "码 {code} 将立即停止兑换。"
+      "disableCodeDescription": "码 {{code}} 将立即停止兑换。",
+      "deleteBatchTitle": "删除批次？",
+      "deleteBatchDescription": "批次及其全部码将被永久删除，此操作不可撤销。",
+      "deleteBatchWithRecordsDescription": "该批次有 {{count}} 条兑换记录，将与批次和全部码一并永久删除，此操作不可撤销。"
     },
     "toast": {
       "created": "兑换码批次已创建",
       "batchDisabled": "批次已停用",
-      "codeDisabled": "码已停用"
+      "codeDisabled": "码已停用",
+      "batchDeleted": "批次已删除"
     },
     "errors": {
       "createFailed": "创建兑换码批次失败",
       "disableFailed": "停用失败",
+      "deleteFailed": "删除失败",
       "required": "必填项"
     },
     "validation": {
@@ -1233,7 +1267,7 @@
     },
     "records": {
       "title": "兑换记录",
-      "description": "该批次共 {count} 次兑换",
+      "description": "该批次共 {{count}} 次兑换",
       "customer": "客户",
       "outcome": "结果",
       "outcomeCreated": "新建订阅",
@@ -1242,6 +1276,61 @@
       "subscription": "订阅",
       "redeemedAt": "兑换时间",
       "empty": "暂无兑换记录"
+    }
+  },
+  "trial": {
+    "list": {
+      "title": "试用",
+      "description": "查看试用领取记录与试用订阅，并执行管理动作。",
+      "loadError": "加载试用数据失败"
+    },
+    "claims": {
+      "title": "试用领取记录",
+      "description": "共 {{count}} 条领取记录",
+      "loading": "加载中……",
+      "empty": "暂无试用领取记录",
+      "emptyHint": "客户领取试用后会在这里出现记录。",
+      "delete": "删除记录",
+      "viewSubscription": "查看订阅",
+      "confirmDeleteTitle": "删除试用记录？",
+      "confirmDeleteDescription": "该领取记录将被永久删除，同一客户之后可以再次领取该商品的试用。此操作不可撤销。"
+    },
+    "subscriptions": {
+      "title": "试用订阅",
+      "description": "共 {{count}} 个试用订阅",
+      "loading": "加载中……",
+      "empty": "暂无试用订阅",
+      "emptyHint": "试用订阅创建后会在这里出现。",
+      "cancel": "取消订阅",
+      "confirmCancelTitle": "取消试用订阅？",
+      "confirmCancelDescription": "您即将取消此试用订阅。是否继续？"
+    },
+    "columns": {
+      "customer": "客户",
+      "product": "商品",
+      "claimedAt": "领取时间",
+      "trialEndsAt": "试用结束",
+      "source": "来源",
+      "bindingMethod": "绑卡方式",
+      "subscription": "订阅",
+      "reference": "订阅编号"
+    },
+    "source": {
+      "self_service": "自助领取",
+      "redemption": "兑换码",
+      "admin": "管理员"
+    },
+    "bindingMethod": {
+      "none": "未绑卡",
+      "vault": "已绑卡"
+    },
+    "toast": {
+      "claimDeleted": "试用记录已删除",
+      "subscriptionCancelled": "订阅已取消"
+    },
+    "errors": {
+      "deleteFailed": "删除试用记录失败",
+      "cancelFailed": "取消订阅失败"
     }
   }
 }

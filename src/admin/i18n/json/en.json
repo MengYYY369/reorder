@@ -8,7 +8,8 @@
     "analytics": "Analytics",
     "activityLog": "Activity Log",
     "settings": "Subscription Settings",
-    "redemptions": "Redemption Codes"
+    "redemptions": "Redemption Codes",
+    "trial": "Trial"
   },
   "common": {
     "actions": {
@@ -107,24 +108,30 @@
       "enable": "Enable",
       "enabling": "Enabling...",
       "disable": "Disable",
-      "disabling": "Disabling..."
+      "disabling": "Disabling...",
+      "delete": "Delete",
+      "deleting": "Deleting..."
     },
     "toast": {
       "enabled": "Plan offer enabled",
       "disabled": "Plan offer disabled",
       "created": "Plan offer created",
-      "updated": "Plan offer updated"
+      "updated": "Plan offer updated",
+      "deleted": "Plan offer deleted"
     },
     "errors": {
       "updateFailed": "Failed to update plan offer",
       "createFailed": "Failed to create plan offer",
-      "loadFailed": "Failed to load plan offer."
+      "loadFailed": "Failed to load plan offer.",
+      "deleteFailed": "Failed to delete plan offer"
     },
     "prompt": {
       "enableTitle": "Enable plan offer?",
       "enableDescription": "You are about to enable this plan offer. Do you want to continue?",
       "disableTitle": "Disable plan offer?",
       "disableDescription": "You are about to disable this plan offer. Do you want to continue?",
+      "deleteTitle": "Delete plan offer?",
+      "deleteDescription": "This configuration is disabled. Once deleted it is gone permanently. This cannot be undone.",
       "removeFrequencyTitle": "Remove frequency?",
       "removeFrequencyDescription": "This frequency row and its discount configuration will be removed.",
       "remove": "Remove"
@@ -179,7 +186,7 @@
       "trialBonusDays": "Trial bonus days for binding a card",
       "trialBonusDaysHint": "Extra trial days granted once the customer binds a payment method to the claimed trial. Leave empty (or 0) to hide the bind-and-extend option.",
       "nativeTrialTitle": "Native PayPal trial (variant metadata, read-only)",
-      "nativeTrialHint": "These values live in the product variant's PayPal subscription metadata and are charged by PayPal itself. They are shown for reference only — the offer's trial values above do not change them.",
+      "nativeTrialHint": "These values live in the product variant's PayPal subscription metadata and are charged by PayPal itself. They are shown for reference only; the offer's trial values above do not change them.",
       "nativeTrialPeriods": "Trial: {{value}} day(s)",
       "nativeTrialPeriodsMissing": "Trial: not configured",
       "nativeTrialSetupFee": "Setup fee: {{value}}",
@@ -256,7 +263,8 @@
       "resumed": "Subscription resumed",
       "cancelled": "Subscription cancelled",
       "paymentMethodUpdated": "Payment method updated",
-      "paymentMethodUpdateFailed": "Failed to update payment method"
+      "paymentMethodUpdateFailed": "Failed to update payment method",
+      "deleted": "Subscription deleted"
     },
     "errors": {
       "pauseFailed": "Failed to pause subscription",
@@ -265,7 +273,8 @@
       "planChange": "Plan change scheduled",
       "planChangeFailed": "Failed to schedule plan change",
       "addressUpdated": "Shipping address updated",
-      "addressFailed": "Failed to update shipping address"
+      "addressFailed": "Failed to update shipping address",
+      "deleteFailed": "Failed to delete subscription"
     },
     "detail": {
       "title": "Subscription",
@@ -279,6 +288,14 @@
       "latestRenewal": "Latest renewal",
       "initialOrder": "Initial order",
       "renewalNumbered": "Renewal {{index}}",
+      "actions": {
+        "deleteSubscription": "Delete subscription",
+        "deleting": "Deleting..."
+      },
+      "prompt": {
+        "deleteTitle": "Delete subscription?",
+        "deleteDescription": "The subscription is removed permanently, together with its renewal cycles, logs, metrics, and linked cases. This cannot be undone."
+      },
       "sections": {
         "overview": "Overview",
         "subscription": "Subscription",
@@ -467,7 +484,10 @@
         "approve": "Approve",
         "reject": "Reject",
         "resolveStuck": "Resolve stuck cycle",
-        "resolving": "Resolving..."
+        "resolving": "Resolving...",
+        "deleteCycle": "Delete renewal cycle",
+        "deleteAttempt": "Delete record",
+        "deleting": "Deleting..."
       },
       "prompt": {
         "forceTitle": "Force renewal?",
@@ -477,20 +497,28 @@
         "rejectTitle": "Reject changes?",
         "rejectDescription": "You are about to reject the pending changes for this renewal cycle.",
         "resolveTitle": "Resolve stuck cycle?",
-        "resolveDescription": "The chosen outcome settles, re-queues, or terminates this renewal cycle, and records you and this reason in the activity log."
+        "resolveDescription": "The chosen outcome settles, re-queues, or terminates this renewal cycle, and records you and this reason in the activity log.",
+        "deleteTitle": "Delete renewal cycle?",
+        "deleteDescription": "The cycle and all of its attempt records will be permanently deleted. This cannot be undone.",
+        "attemptDeleteTitle": "Delete attempt record?",
+        "attemptDeleteDescription": "This attempt record will be permanently deleted. This cannot be undone."
       },
       "toast": {
         "forced": "Renewal forced",
         "approved": "Pending changes approved",
         "rejected": "Pending changes rejected",
-        "resolved": "Stuck cycle resolved"
+        "resolved": "Stuck cycle resolved",
+        "deleted": "Renewal cycle deleted",
+        "attemptDeleted": "Attempt record deleted"
       },
       "errors": {
         "forceFailed": "Failed to force renewal",
         "approveFailed": "Failed to approve changes",
         "rejectFailed": "Failed to reject changes",
         "reasonRequired": "Reason is required",
-        "resolveFailed": "Failed to resolve the stuck renewal cycle"
+        "resolveFailed": "Failed to resolve the stuck renewal cycle",
+        "deleteFailed": "Failed to delete the renewal cycle",
+        "attemptDeleteFailed": "Failed to delete the attempt record"
       },
       "sections": {
         "cycleOverview": "Cycle overview",
@@ -1174,7 +1202,7 @@
       "name": "Name",
       "status": "Status",
       "grant": "Grant",
-      "grantValue": "{cycles} free cycle(s), {interval}/{value}",
+      "grantValue": "{{cycles}} free cycle(s), {{interval}}/{{value}}",
       "codes": "Codes",
       "redemptions": "Redemptions",
       "frequency": "Frequency"
@@ -1188,19 +1216,20 @@
       "disable": "Disable",
       "disableBatch": "Disable batch",
       "disableCode": "Disable code",
+      "deleteBatch": "Delete batch",
       "selectVariant": "Select variant",
       "addCustomCode": "Add code"
     },
     "codes": {
       "title": "Codes",
-      "description": "{count} code(s) in this batch",
+      "description": "{{count}} code(s) in this batch",
       "code": "Code",
       "status": "Status",
       "usage": "Usage",
       "created": "Created"
     },
     "detail": {
-      "variantId": "Variant: {variantId}",
+      "variantId": "Variant: {{variantId}}",
       "noWindow": "No window",
       "loading": "Loading batch..."
     },
@@ -1211,16 +1240,21 @@
       "disableBatchTitle": "Disable batch?",
       "disableBatchDescription": "All codes in this batch will stop redeeming immediately.",
       "disableCodeTitle": "Disable code?",
-      "disableCodeDescription": "Code {code} will stop redeeming immediately."
+      "disableCodeDescription": "Code {{code}} will stop redeeming immediately.",
+      "deleteBatchTitle": "Delete batch?",
+      "deleteBatchDescription": "The batch and all of its codes will be permanently deleted. This cannot be undone.",
+      "deleteBatchWithRecordsDescription": "This batch has {{count}} redemption record(s). They will be permanently deleted together with the batch and all of its codes. This cannot be undone."
     },
     "toast": {
       "created": "Redemption batch created",
       "batchDisabled": "Batch disabled",
-      "codeDisabled": "Code disabled"
+      "codeDisabled": "Code disabled",
+      "batchDeleted": "Batch deleted"
     },
     "errors": {
       "createFailed": "Failed to create redemption batch",
       "disableFailed": "Failed to disable",
+      "deleteFailed": "Failed to delete batch",
       "required": "This field is required"
     },
     "validation": {
@@ -1233,7 +1267,7 @@
     },
     "records": {
       "title": "Redemption records",
-      "description": "{count} redemption(s) in this batch",
+      "description": "{{count}} redemption(s) in this batch",
       "customer": "Customer",
       "outcome": "Outcome",
       "outcomeCreated": "Created",
@@ -1242,6 +1276,61 @@
       "subscription": "Subscription",
       "redeemedAt": "Redeemed at",
       "empty": "No redemptions yet"
+    }
+  },
+  "trial": {
+    "list": {
+      "title": "Trial",
+      "description": "Review trial claims and trial subscriptions, and run the admin actions.",
+      "loadError": "Failed to load trial data"
+    },
+    "claims": {
+      "title": "Trial claims",
+      "description": "{{count}} claim record(s)",
+      "loading": "Loading...",
+      "empty": "No trial claims yet",
+      "emptyHint": "Claims will appear here once customers claim a trial.",
+      "delete": "Delete record",
+      "viewSubscription": "View subscription",
+      "confirmDeleteTitle": "Delete trial record?",
+      "confirmDeleteDescription": "This claim record will be permanently deleted, and the customer can claim a trial of this product again. This cannot be undone."
+    },
+    "subscriptions": {
+      "title": "Trial subscriptions",
+      "description": "{{count}} trial subscription(s)",
+      "loading": "Loading...",
+      "empty": "No trial subscriptions yet",
+      "emptyHint": "Trial subscriptions will appear here once created.",
+      "cancel": "Cancel subscription",
+      "confirmCancelTitle": "Cancel trial subscription?",
+      "confirmCancelDescription": "You are about to cancel this trial subscription. Do you want to continue?"
+    },
+    "columns": {
+      "customer": "Customer",
+      "product": "Product",
+      "claimedAt": "Claimed at",
+      "trialEndsAt": "Trial ends",
+      "source": "Source",
+      "bindingMethod": "Payment method",
+      "subscription": "Subscription",
+      "reference": "Reference"
+    },
+    "source": {
+      "self_service": "Self service",
+      "redemption": "Redemption code",
+      "admin": "Admin"
+    },
+    "bindingMethod": {
+      "none": "No card",
+      "vault": "Card bound"
+    },
+    "toast": {
+      "claimDeleted": "Trial record deleted",
+      "subscriptionCancelled": "Subscription cancelled"
+    },
+    "errors": {
+      "deleteFailed": "Failed to delete trial record",
+      "cancelFailed": "Failed to cancel subscription"
     }
   }
 }

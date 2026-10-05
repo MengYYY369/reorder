@@ -224,7 +224,7 @@ export const CreateBatchModal = ({ open, onOpenChange }: CreateBatchModalProps) 
             {t("redemptions.actions.create")}
           </Button>
         </FocusModal.Header>
-        <FocusModal.Body>
+        <FocusModal.Body className="flex-1 overflow-y-auto">
           <form
             id="create-redemption-batch-form"
             onSubmit={handleSubmit}
