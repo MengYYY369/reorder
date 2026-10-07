@@ -462,11 +462,34 @@ reorder 1.12.1, better-auth 0.9.4, epay 1.1.1); `tsc --noEmit` → 0 errors; `me
 `[{provider_id: "pp_paypal_paypal", kind: "paypal", display_name: "PayPal", binding: {supported: true},
  native: {supported: true}}]` — the D1/D3 contract, in the real host, from the published packages.
 
-3. **Still ahead: the production window and the deploy.** The migration above ran against a dev
-database; production needs the same script inside its maintenance window, and the image/deploy
-steps are the operator's. A real PayPal bind (start → approve → complete) also needs sandbox
-credentials, so the three rewritten paths are covered by the suites and this smoke rather than by
-a live bind.
+3. **The production deploy: done and verified (2026-10-07).** Ran the §7 runbook on
+   `170.106.132.210` end to end.
+
+   - **Backend**: image `medusa-saas-backend:0.4.57` built locally (`Dockerfile.prod`; the server
+     only loads a tar — building there is what hangs it) and shipped. The image was verified
+     *before* shipping to carry payment-methods 0.3.0, paypal 0.10.0, reorder 1.12.1, better-auth
+     0.9.4, epay 1.1.1, webhooks 1.3.0 and the migration script. Production had **zero `NATIVE-%`
+     rows** (1 subscription total), so the dry run reported `0 mirror row(s)` and the reference
+     migration was a no-op — verified twice: before the swap and again after it
+     (`done — 0 rewritten, 0 merged`).
+   - **Boot**: `Server is ready on port: 9000` in ~12s, no boot errors, `/health` 200, admin i18n
+     asset present, the react-i18next single-copy count is 2 (the regression check), and no
+     `not iterable` / `is not installed` in the logs.
+   - **Storefront**: built as a Linux standalone (Node 20, matching the server's runtime) inside a
+     local container — Windows cannot emit it (`next build`'s standalone copy fails on pnpm
+     symlinks), which is also why the runbook builds on Linux. Built with production's
+     `NEXT_PUBLIC_*` values injected, verified that the shipped JS inlines
+     `medusa.dayzcloud.com` (the four `localhost` hits are the source-level fallback literal that
+     the bundle immediately reassigns). Swapped, restarted: `/` → 200 at `/en`, `/en` and `/zh`
+     200, `/en/account` 200, and `providerDisplayName` / `methodTitle` / `{provider}` are in the
+     deployed bundle.
+   - **Rollback anchors**: `.env.bak.2026-10-07-1326`, `compose.yaml.bak-2026-10-07-1326`, images
+     0.4.53–0.4.56 still loaded, `apps/storefront.bak-*` + `node_modules.bak-*` on the server.
+   - **Still the owner's**: the §7.5 acceptance items that need a logged-in account and a PayPal
+     sandbox buyer (a real bind, a native subscription change reaching the mirror, the admin
+     native-trial card). Production's PayPal credentials are live — a direct sandbox OAuth call
+     returns 200 — so those are runnable; they mutate real customer records, so they are the
+     owner's to run, not this session's.
 
 ### Two P0s the release steps found (both fixed in `reorder` 1.12.1)
 
