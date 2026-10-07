@@ -449,7 +449,10 @@ needs a Medusa project around it, and `--apply` is *not* forwarded by Medusa's `
    NATIVE_REFERENCE_BACKFILL_APPLY=1 npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js  # write
    ```
 
-2. **Step 5 — the host: installed, built, booted, smoked.** `pnpm install` + `pnpm update
+2. **Step 5 — the host: installed, built, booted, smoked.** The production cutover has a
+   step-by-step runbook now — `medusa-saas/docs/deploy.md` **§7** (the stopped window's order, the
+   three traps this release found, the idempotency re-run that has to report a no-op, and the
+   rollback). `pnpm install` + `pnpm update
 @mengyyy369/reorder` resolved the registry versions (payment-methods 0.3.0, paypal 0.10.0,
 reorder 1.12.1, better-auth 0.9.4, epay 1.1.1); `tsc --noEmit` → 0 errors; `medusa db:migrate`,
 `medusa build` (backend + admin) and `medusa develop` all succeed. Smoke on the booted host
