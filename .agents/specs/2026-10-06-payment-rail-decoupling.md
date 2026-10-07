@@ -423,6 +423,29 @@ reorder's contribution is visibility, not a refusal:
    conditionally claimed by the in-flight trial-bind batch
    (`docs/plans/2026-10-04-0.9.3-trial-bind-plugin-and-p2-hardening.md:6`); 0.9.4 avoids both.
 
+### Release status — 2026-10-07
+
+Done, with each commit and each published version verified:
+
+| Step | State |
+| --- | --- |
+| 1. `medusa-payment-methods@0.3.0` | **published** (`npm view … version` → `0.3.0`); commit `e681e9d` |
+| 2. `medusa-paypal@0.10.0` | **published** → `0.10.0`; commit `f60b3f0` (78 files — the deleted `binder`/`events` `.d.ts` no longer ship) |
+| 4. `reorder@1.12.0` | **published** → `1.12.0`; commit `8ee16b1` |
+| 6. `medusa-better-auth@0.9.4` | **published** → `0.9.4`; commit `b7e91d3` |
+
+Still ahead, in this order:
+
+1. **Step 3 — the reference migration**, in a stopped window and before the host deploy:
+   `npx medusa exec ./src/scripts/backfill-native-reference-format.ts` (dry run), then the same
+   with `--apply`, then re-run it after the deploy and expect a no-op. This is the one step that
+   touches production data.
+2. **Step 5 — the host**: `pnpm install` in `medusa-saas` (this is the first install that resolves
+   the four pins from the registry rather than from local links), then `medusa build`, the image
+   and the deploy, then the storefront. The storefront build already passes locally.
+3. **Smoke**: a bind (start → approve → complete) against the live host, one native subscription
+   change reaching the mirror, and one unbind — the three paths this batch rewrote.
+
 ## Step-by-Step Implementation Plan
 
 ### Phase 0 — `medusa-better-auth` 0.9.4 (independent, ~30 min)
