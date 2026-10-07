@@ -44,8 +44,15 @@ import { asSubscriptionUpdateInput } from "../modules/subscription/utils/subscri
  *
  * Usage:
  *
- *     npx medusa exec ./src/scripts/backfill-native-reference-format.ts
- *     npx medusa exec ./src/scripts/backfill-native-reference-format.ts --apply
+ *     # from the host project (the one that installed this package):
+ *     npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js
+ *     NATIVE_REFERENCE_BACKFILL_APPLY=1 npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js
+ *
+ * The flag form (`… --apply`) only works where the runner forwards it; Medusa's
+ * own `exec` does not (`--apply` is rejected as an unknown argument, and
+ * `-- --apply` reaches the script as a dry run, which is the dangerous version of
+ * the two). The environment variable is the form that works everywhere, so it is
+ * the one to use and the one the release notes name.
  */
 
 /**
@@ -57,7 +64,7 @@ const LEGACY_KIND_BY_PROVIDER_ID: Record<string, string> = {
   pp_paypal_paypal: "paypal",
 }
 
-type MirrorRow = {
+export type MirrorRow = {
   id: string
   reference: string
   status?: string | null
@@ -67,15 +74,15 @@ type MirrorRow = {
   payment_context?: Record<string, unknown> | null
 }
 
-type Rewrite = { id: string; from: string; to: string }
+export type Rewrite = { id: string; from: string; to: string }
 
-type Merge = {
+export type Merge = {
   survivor: MirrorRow
   legacy: MirrorRow
   target: string
 }
 
-type Plan = {
+export type Plan = {
   rewrites: Rewrite[]
   merges: Merge[]
   alreadyCurrent: number
@@ -86,7 +93,9 @@ export default async function backfillNativeReferenceFormat({
   container,
   args,
 }: ExecArgs) {
-  const apply = (args ?? []).includes("--apply")
+  const apply =
+    (args ?? []).includes("--apply") ||
+    /^(1|true|yes)$/i.test(process.env.NATIVE_REFERENCE_BACKFILL_APPLY ?? "")
   const logger = container.resolve<{
     info: (msg: string) => void
     warn: (msg: string) => void
@@ -179,7 +188,7 @@ async function readKindByProviderId(
   return map
 }
 
-function buildPlan(
+export function buildPlan(
   rows: MirrorRow[],
   kindByProviderId: Map<string, string>
 ): Plan {
@@ -196,19 +205,6 @@ function buildPlan(
       continue
     }
 
-    const providerSubscriptionId = row.reference
-      .slice(NATIVE_SUBSCRIPTION_REFERENCE_PREFIX.length)
-      .trim()
-
-    if (!providerSubscriptionId) {
-      plan.unresolved.push({
-        id: row.id,
-        reference: row.reference,
-        reason: "the reference carries no provider subscription id",
-      })
-      continue
-    }
-
     const providerId = readText(row.payment_context?.payment_provider_id)
     const kind =
       (providerId ? kindByProviderId.get(providerId) : null) ??
@@ -219,6 +215,17 @@ function buildPlan(
         id: row.id,
         reference: row.reference,
         reason: `no kind for provider '${providerId ?? "unknown"}'`,
+      })
+      continue
+    }
+
+    const providerSubscriptionId = readProviderSubscriptionId(row, kind)
+
+    if (!providerSubscriptionId) {
+      plan.unresolved.push({
+        id: row.id,
+        reference: row.reference,
+        reason: "the reference carries no provider subscription id",
       })
       continue
     }
@@ -241,6 +248,35 @@ function buildPlan(
   }
 
   return plan
+}
+
+/**
+ * The provider subscription id inside a mirror reference.
+ *
+ * The raw id is authoritative in `payment_context.customer_payment_reference`
+ * (written on every mirror upsert since 1.12.0), so a row that carries it is
+ * resolved from there and the reference is only *compared*, never parsed. That
+ * is what makes a second run a no-op: after the rewrite the reference reads
+ * `NATIVE-paypal-I-XXXX`, and slicing the prefix off *that* yields
+ * `paypal-I-XXXX` and mints `NATIVE-paypal-paypal-I-XXXX` on every run.
+ *
+ * Only rows that predate the field are parsed, and only by removing a prefix
+ * this script knows: the new format's `NATIVE-{kind}-` when it matches, else the
+ * legacy `NATIVE-`.
+ */
+function readProviderSubscriptionId(row: MirrorRow, kind: string): string {
+  const fromContext = readText(row.payment_context?.customer_payment_reference)
+
+  if (fromContext) {
+    return fromContext
+  }
+
+  const body = row.reference
+    .slice(NATIVE_SUBSCRIPTION_REFERENCE_PREFIX.length)
+    .trim()
+  const kindPrefix = `${kind}-`
+
+  return body.startsWith(kindPrefix) ? body.slice(kindPrefix.length) : body
 }
 
 /**

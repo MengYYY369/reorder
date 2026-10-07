@@ -1,11 +1,40 @@
+## [1.12.1] - 2026-10-07
+
+Two defects in 1.12.0's migration script, both found by running the release steps
+against a real database. Nothing else changes.
+
+- **The script was not idempotent.** It read the provider subscription id by
+  slicing `NATIVE-` off the reference, so a second run read `paypal-I-XXXX` as the
+  id and rewrote `NATIVE-paypal-I-XXXX` into `NATIVE-paypal-paypal-I-XXXX` — one
+  more prefix per run, hidden by the unique `reference` column until a provider
+  event looked for the right one and missed. The id now comes from
+  `payment_context.customer_payment_reference` (authoritative, written on every
+  mirror upsert), and only rows that predate that field are parsed — by removing a
+  prefix the script knows. A second run is a genuine no-op, which is what the
+  release checklist asks for. Regression tests:
+  `src/modules/subscription/__tests__/native-reference-backfill-plan.spec.ts`.
+- **`--apply` was unreachable through Medusa's `exec`.** `medusa exec <script>
+  --apply` is rejected as an unknown argument, and `-- --apply` silently reaches
+  the script as a dry run — an operator would believe the migration ran. The
+  script now also takes `NATIVE_REFERENCE_BACKFILL_APPLY=1`, and that is the form
+  to use (run from the **host** project, since this package is a plugin and
+  `medusa exec` needs a Medusa project around it):
+
+  ```sh
+  # dry run
+  npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js
+  # write
+  NATIVE_REFERENCE_BACKFILL_APPLY=1 npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js
+  ```
+
 ## [1.12.0] - 2026-10-06
 
 Payment-rail decoupling (spec `.agents/specs/2026-10-06-payment-rail-decoupling.md`;
 requires `@mengyyy369/medusa-payment-methods` 0.3.0 and `@mengyyy369/medusa-paypal`
-0.10.0). **One migration step:** run
-`npx medusa exec ./src/scripts/backfill-native-reference-format.ts --apply` with
-the backend stopped (or the hourly backfill job disabled), **before** deploying
-this version — see the upgrade note at the end.
+0.10.0). **One migration step:** run the backfill script with
+`NATIVE_REFERENCE_BACKFILL_APPLY=1` (see 1.12.1 for the exact command) with the
+backend stopped (or the hourly backfill job disabled), **before** deploying this
+version — see the upgrade note at the end.
 
 - **No provider-specific coupling left in this plugin.** The duck-types
   (`workflows/utils/paypal-vault-binding.ts`, `native-provider-cancel.ts`) are

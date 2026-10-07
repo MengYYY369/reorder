@@ -2,7 +2,7 @@
 
 > Status: **all decisions locked by the owner (2026-10-06, grilling rounds 1–3).** Nothing here is
 > waiting on an answer; the remaining work is implementation.
-> Cross-repo: `medusa-payment-methods` **0.3.0**, `medusa-paypal` **0.10.0**, `reorder` **1.12.0**,
+> Cross-repo: `medusa-payment-methods` **0.3.0**, `medusa-paypal` **0.10.0**, `reorder` **1.12.1**,
 > `medusa-better-auth` **0.9.4**, host + storefront wiring in `medusa-saas`.
 >
 > Grilling rounds 1–2 (Q1–Q12) are answered. Three independent reviews of the first draft and a
@@ -433,18 +433,58 @@ Done, with each commit and each published version verified:
 | 2. `medusa-paypal@0.10.0` | **published** → `0.10.0`; commit `f60b3f0` (78 files — the deleted `binder`/`events` `.d.ts` no longer ship) |
 | 4. `reorder@1.12.0` | **published** → `1.12.0`; commit `8ee16b1` |
 | 6. `medusa-better-auth@0.9.4` | **published** → `0.9.4`; commit `b7e91d3` |
+| 4b. `reorder@1.12.1` | **published** → `1.12.1` — the migration script's two P0s (below); regression tests added |
 
-Still ahead, in this order:
+Done since, in the order the release asks for:
 
-1. **Step 3 — the reference migration**, in a stopped window and before the host deploy:
-   `npx medusa exec ./src/scripts/backfill-native-reference-format.ts` (dry run), then the same
-   with `--apply`, then re-run it after the deploy and expect a no-op. This is the one step that
-   touches production data.
-2. **Step 5 — the host**: `pnpm install` in `medusa-saas` (this is the first install that resolves
-   the four pins from the registry rather than from local links), then `medusa build`, the image
-   and the deploy, then the storefront. The storefront build already passes locally.
-3. **Smoke**: a bind (start → approve → complete) against the live host, one native subscription
-   change reaching the mirror, and one unbind — the three paths this batch rewrote.
+1. **Step 3 — the reference migration: run and verified idempotent.** Against the host's own dev
+database (`medusa-saas`'s `docker-compose.dev.yml`, port 5436): dry run, then apply
+(`NATIVE-I-TEST0001` → `NATIVE-paypal-I-TEST0001`), then re-run → **0 rewritten, 1 left as it
+was**. The command that works from the host project (this package is a plugin, so `medusa exec`
+needs a Medusa project around it, and `--apply` is *not* forwarded by Medusa's `exec`):
+
+   ```sh
+   cd apps/backend
+   npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js          # dry run
+   NATIVE_REFERENCE_BACKFILL_APPLY=1 npx medusa exec ./node_modules/@mengyyy369/reorder/.medusa/server/src/scripts/backfill-native-reference-format.js  # write
+   ```
+
+2. **Step 5 — the host: installed, built, booted, smoked.** `pnpm install` + `pnpm update
+@mengyyy369/reorder` resolved the registry versions (payment-methods 0.3.0, paypal 0.10.0,
+reorder 1.12.1, better-auth 0.9.4, epay 1.1.1); `tsc --noEmit` → 0 errors; `medusa db:migrate`,
+`medusa build` (backend + admin) and `medusa develop` all succeed. Smoke on the booted host
+(port 9100): `/health` 200; admin login 200; `GET /admin/subscription-offers/providers/declarations`
+200 (`{"declarations":[]}` — no plan offers exist in that database);
+`GET /admin/payment-methods` 200 with the descriptor view live:
+`[{provider_id: "pp_paypal_paypal", kind: "paypal", display_name: "PayPal", binding: {supported: true},
+ native: {supported: true}}]` — the D1/D3 contract, in the real host, from the published packages.
+
+3. **Still ahead: the production window and the deploy.** The migration above ran against a dev
+database; production needs the same script inside its maintenance window, and the image/deploy
+steps are the operator's. A real PayPal bind (start → approve → complete) also needs sandbox
+credentials, so the three rewritten paths are covered by the suites and this smoke rather than by
+a live bind.
+
+### Two P0s the release steps found (both fixed in `reorder` 1.12.1)
+
+1. **The migration script was not idempotent.** It read the provider subscription id by slicing
+   `NATIVE-` off the reference, so a second run read `paypal-I-XXXX` as the id and rewrote
+   `NATIVE-paypal-I-XXXX` into `NATIVE-paypal-paypal-I-XXXX` — one more prefix per run, hidden by the
+   unique `reference` column until a provider event looked for the right row and missed. Observed
+   live, not theorised: the second `--apply` produced exactly that row. The id now comes from
+   `payment_context.customer_payment_reference` (authoritative, written on every mirror upsert), and
+   only rows predating that field are parsed — by removing a prefix the script knows. Six regression
+   tests: `src/modules/subscription/__tests__/native-reference-backfill-plan.spec.ts`.
+2. **`--apply` was unreachable through Medusa's `exec`.** `medusa exec <script> --apply` is rejected
+   as an unknown argument, and `-- --apply` silently reaches the script as a **dry run** — an operator
+   would believe the migration had run. The script now also takes
+   `NATIVE_REFERENCE_BACKFILL_APPLY=1`, which is the form documented above.
+
+One host-side P1 came with them: **`apps/backend` was missing `@mengyyy369/medusa-webhooks`.**
+`saas_bridge` requires it (it fans out the configured subscriptions whitelist) and reorder declares it
+as an *optional* peer, so pnpm never auto-installs it — the host had been booting on a stale copy
+left in `node_modules` by an earlier install, and the first real install (this one) took it away and
+made the boot fail. The dependency is now declared (`^1.3.0`), and the host boots.
 
 ## Step-by-Step Implementation Plan
 
@@ -593,7 +633,9 @@ Still ahead, in this order:
       the provider, the plugin's options reaching the module constructor), and the provider reads the
       hook off the module service instead.
 - [x] `apps/backend/package.json`: `^0.2.0` → `^0.3.0`, `^0.9.5` → `^0.10.0`, `^1.11.0` →
-      `^1.12.0`, `0.9.1` → `0.9.4`; add the four versions to `minimumReleaseAgeExclude`
+      `^1.12.0` (later `^1.12.1`), `0.9.1` → `0.9.4`; add `@mengyyy369/medusa-webhooks` `^1.3.0`
+      (found while booting the host — `saas_bridge` needs it and an optional peer is never
+      auto-installed); add the four versions to `minimumReleaseAgeExclude`
       (`pnpm-workspace.yaml:17`); regenerate the lockfile.
 - [x] Storefront: provider-aware rail titles (§5) — `lib/util/payment-methods.ts` and
       `messages/{en,zh}.json:39-40`, with `payment-methods.test.ts:39-42`.
@@ -675,8 +717,13 @@ tick).
 | medusa-paypal | `tsc --noEmit -p tsconfig.json` | exit 0 |
 | medusa-paypal | `jest` | 12/12 suites, 246/246 tests |
 | medusa-paypal | `npm run build` | OK; `.medusa/server/src/rail/` and `.medusa/types/rail/` emitted |
-| reorder | `jest` (`TEST_TYPE=integration:modules`) | 34/34 suites, 343/343 tests |
+| reorder | `jest` (`TEST_TYPE=integration:modules`) | **35/35 suites, 349/349 tests** (the sixth is the migration-plan regression spec added in 1.12.1) |
 | reorder | `jest` (`TEST_TYPE=integration:http`, in batches) | **53/53 files green** — batch 1 8/8 (35 tests), batch 2 8/8, the remaining 37 files 33/37 then 4/4 after their fakes were updated (32 tests) |
+| reorder | migration script against the host's dev database | dry run → 1 to rewrite; apply → 1 rewritten; re-run → **0 rewritten, 1 left as it was** (the idempotency proof) |
+| medusa-saas (host) | `pnpm install` + `pnpm update @mengyyy369/reorder` | registry versions resolved: payment-methods 0.3.0, paypal 0.10.0, reorder 1.12.1, better-auth 0.9.4, epay 1.1.1, webhooks 1.3.0 |
+| medusa-saas (host) | `tsc --noEmit` | **0 errors** — against the published packages, not `yalc` links |
+| medusa-saas (host) | `medusa db:migrate`, `medusa build`, `medusa develop` | migrate clean; build backend + admin frontend both succeed; server ready on 9100 |
+| medusa-saas (host) | HTTP smoke on the booted server | `/health` 200; admin login 200; `GET /admin/subscription-offers/providers/declarations` 200; `GET /admin/payment-methods` 200 with `[{provider_id: pp_paypal_paypal, kind: paypal, display_name: PayPal, binding: {supported: true}, native: {supported: true}}]` |
 | reorder | `jest` (`TEST_TYPE=integration:http`, in batches) | batch 1: 8/8 suites, 35 tests; batch 2: 6/8 suites, 51/55 tests (see the deferrals) |
 | reorder | `npm run verify:package` | packed exports ok (11 targets), admin bundle i18n ok |
 | medusa-saas `apps/backend` | `tsc --noEmit -p tsconfig.json` | **0 errors** — includes `medusa-config.ts`, i.e. the `satisfies Record<string, PaymentProviderDescriptor>` assertion against the linked `createPaypalRail`, and `emitNativeSubscriptionChanged` from 0.3.0 |
