@@ -1,3 +1,27 @@
+## [1.12.2] - 2026-10-07
+
+**The published manifests of 1.12.0 and 1.12.1 declared a local path instead of a
+range.** `yalc publish --push` (used while wiring the host against the new plugin)
+rewrites the *consumer's* `package.json`, and its rewrite of this package's
+`@mengyyy369/medusa-payment-methods` dependency landed in the release commit:
+
+```diff
+-    "@mengyyy369/medusa-payment-methods": "file:.yalc/@mengyyy369/medusa-payment-methods"
++    "@mengyyy369/medusa-payment-methods": "^0.3.0"
+```
+
+So `npm install @mengyyy369/reorder@1.12.1` pulled a manifest pointing at a directory
+that exists on one machine only. pnpm happens to drop such a dependency when it
+resolves a registry package, which is why the host still booted — a stricter client
+would have failed. Nothing else changes: the code in 1.12.2 is byte-identical to
+1.12.1, and a running 1.12.1 keeps working (the host declares the plugin itself).
+
+Also in this release: `yarn.lock` is regenerated — it still resolved
+`@mengyyy369/medusa-payment-methods@npm:^0.1.3` → **0.1.3**, the stale range the
+0.3.0 cut exists to remove (arity-1 `startBinding`, and a boot-time refusal this
+plugin never saw). `.yalc/` and `yalc.lock` are gitignored now, so the same
+accident cannot be committed again.
+
 ## [1.12.1] - 2026-10-07
 
 Two defects in 1.12.0's migration script, both found by running the release steps

@@ -1,6 +1,6 @@
 {
   "name": "@mengyyy369/reorder",
-  "version": "1.12.1",
+  "version": "1.12.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MengYYY369/reorder.git"
@@ -101,6 +101,6 @@
     "registry": "https://npm.pkg.github.com"
   },
   "dependencies": {
-    "@mengyyy369/medusa-payment-methods": "file:.yalc/@mengyyy369/medusa-payment-methods"
+    "@mengyyy369/medusa-payment-methods": "^0.3.0"
   }
 }

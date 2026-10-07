@@ -38,3 +38,6 @@ docs/superpowers/
 e2e/.auth/
 playwright-report/
 test-results/
+# yalc 联调产物（2026-10-07：它曾把 file:.yalc/... 写进 package.json 并被误提交）
+.yalc/
+yalc.lock

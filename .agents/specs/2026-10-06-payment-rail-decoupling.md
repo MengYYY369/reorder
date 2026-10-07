@@ -434,6 +434,7 @@ Done, with each commit and each published version verified:
 | 4. `reorder@1.12.0` | **published** → `1.12.0`; commit `8ee16b1` |
 | 6. `medusa-better-auth@0.9.4` | **published** → `0.9.4`; commit `b7e91d3` |
 | 4b. `reorder@1.12.1` | **published** → `1.12.1` — the migration script's two P0s (below); regression tests added |
+| 4c. `reorder@1.12.2` | **published** → `1.12.2` — the manifest fix (below): 1.12.0/1.12.1 shipped a `file:.yalc/…` dependency and a stale `yarn.lock`. Host moved to `^1.12.2` and re-verified (tsc 0). The running production image is still 1.12.1: its code is identical and it works (the host declares the plugin itself), so a redeploy is optional rather than needed. |
 
 Done since, in the order the release asks for:
 
@@ -872,6 +873,34 @@ Both carry a superseded note naming the descriptor contract.
 Every `file:line` citation in the reworked documents was then machine-checked against
 the tree: **83 citations, 0 missing files, 0 out-of-range lines** (throwaway script,
 not committed).
+
+**Third pass — the auditor was right a third time, and this one had shipped a broken
+artifact.** `yalc publish --push` (used to wire the host against the new plugin)
+rewrites the *consumer's* `package.json`, and its rewrite of this repository's
+`@mengyyy369/medusa-payment-methods` dependency —
+`file:.yalc/@mengyyy369/medusa-payment-methods` — was committed in `8ee16b1` and so
+**published**: 1.12.0 and 1.12.1 both declare a directory that exists on one machine.
+pnpm drops such a dependency when it resolves a registry package, which is why the
+host still booted; a stricter client would have failed. And the Phase 3 box reading
+"regenerate `yarn.lock`" was ticked while `yarn.lock` still resolved
+`@mengyyy369/medusa-payment-methods@npm:^0.1.3` → **0.1.3** — the stale range this
+whole cut exists to remove, i.e. the tick was false for exactly the half the auditor
+checked.
+
+Fixed in **1.12.2** (manifest-only; the code is byte-identical to 1.12.1, so a
+running 1.12.1 keeps working): `package.json` back to `^0.3.0`, `yarn.lock`
+regenerated (0.3.0, zero `0.1.3` entries), `.yalc/` and `yalc.lock` deleted and
+gitignored so the accident cannot be committed again, the stale tarball in
+`.scratch/pkg` removed so `verify:package` passes clean, and the host moved to
+`^1.12.2` with its installed manifest verified. The published manifest was checked
+after the fact: `npm view @mengyyy369/reorder@1.12.2 dependencies` →
+`{ '@mengyyy369/medusa-payment-methods': '^0.3.0' }`. Host re-verified on 1.12.2:
+all six plugins at their pinned versions, `tsc --noEmit` 0 errors.
+
+The lesson is narrower and nastier than the docs one: a local-link tool rewrote a
+file the release depends on, and the diff hid in a file nobody re-read because it
+"wasn't part of the change". `git diff package.json` after any `yalc` operation is
+the check; the `.gitignore` entry is the backstop.
 
 ### Deferred, with reasons
 
