@@ -532,7 +532,51 @@ Response shape:
 - `404 not_found`
   Plan offer does not exist.
 
-## 6. Domain Rules and Common Errors
+## 6. Provider Declarations
+
+### Endpoint
+
+- Method: `GET`
+- Path: `/admin/subscription-offers/providers/declarations`
+
+### Purpose
+
+Returns the provider-side declarations of one product's variants, for the offer
+form's read-only native card. The browser must not parse provider metadata itself
+(the old card did, and the key it looked for was PayPal's): every native-capable
+provider is asked through the capability view (`medusa-payment-methods` ≥ 0.3.0),
+and only the providers that recognise a variant answer.
+
+### Query Parameters
+
+- `product_id: string` (required)
+
+### Response
+
+```json
+{
+  "declarations": [
+    {
+      "product_id": "prod_…",
+      "variant_id": "variant_…",
+      "variant_title": "PRO Monthly",
+      "provider_id": "pp_paypal_paypal",
+      "kind": "paypal",
+      "display_name": "PayPal",
+      "fields": [{ "key": "trial_periods", "label": "Trial", "value": "7 days" }]
+    }
+  ]
+}
+```
+
+- `display_name` and every `label` come from the provider's own descriptor, so a
+  second native provider needs no change here.
+- A provider that throws while reading a variant is **skipped** — one broken
+  provider must not blank the card.
+- A product with no variants, or a deployment with no native rail, is an empty
+  list, never an error.
+
+## 7. Domain Rules and Common Errors
 
 The `Plans & Offers` API enforces several domain rules beyond basic request validation.
 

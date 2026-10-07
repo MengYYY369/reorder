@@ -768,15 +768,51 @@ tick).
   `emitSubscriptionEvent` are gone; `paypal.subscription.` survives only in
   three sentences that state the names were removed (a test comment, the README,
   the tutorial).
-- reorder `src/`: `pp_paypal_paypal` appears exactly once — the legacy fallback
-  map in `scripts/backfill-native-reference-format.ts` that decision 2 asks for;
+- reorder `src/`: `pp_paypal_paypal` appears **once in production code** — the
+  legacy fallback map in `scripts/backfill-native-reference-format.ts:64` that
+  decision 2 asks for (it resolves rows written before
+  `payment_context.payment_provider_id` existed). The other 52 occurrences are test
+  fixtures (`src/**/__tests__` 37, `integration-tests/` 15) — which is where a
+  provider key belongs, since each one stands in for a host that registered it;
   `paypal_native_mirror` is gone; nothing queries the `paypal_subscription`
   table; the remaining `paypal.subscription.` / `paypal-vault-binding` mentions
   are comments explaining what was removed.
 
+### Phase 5 docs — reworked after the completion audit (2026-10-07)
+
+The first completion request was **rejected, correctly**: Phase 5's checkboxes were
+ticked while two of the files that phase names had not been touched, and both still
+described the deleted system as current behaviour. What was wrong, and what those
+files say now:
+
+| file | was | is |
+| --- | --- | --- |
+| `docs/architecture/subscription-relationship-model.md` | the PayPal event bridge `paypal-subscription-mirror.ts`; `reference` = `NATIVE-{paypal_subscription_id}`; `PAYPAL_SUBSCRIPTION_EVENT_NAMES`; the direct `paypal_subscription` read; `STATUS_BY_PAYPAL_STATE` | the rail-neutral subscriber; `NATIVE-{kind}-{provider_subscription_id}` with the raw id in `payment_context.customer_payment_reference`; one event whose name `medusa-payment-methods` owns; the reconcile pass through `native.listRecords`; the four-word vocabulary the provider maps into (`MIRROR_STATUS_BY_RAIL_STATUS`) |
+| `docs/architecture/subscriptions.md` | rows upserted from `paypal.subscription.*` keyed on `NATIVE-{paypal_subscription_id}`; the hourly pass reading the provider's own table | the neutral event, the new reference format, `native.listRecords`, and the `providerDescriptors` ≥ 0.3.0 contract stated where the provider side is described |
+| `docs/architecture/payments.md` | provider-specific requirements only | + a **Provider Descriptors** section: the host-registered map, the `satisfies` edge, why the key is not `providers`, the ≥ 0.3.0 / ≥ 0.10.0 floors, the injected hook |
+| `docs/api/admin-plan-offers.md` | no provider-declaration endpoint | + **§6 Provider Declarations** (`GET /admin/subscription-offers/providers/declarations`), response shape and the skip-don't-blank rule |
+| `docs/admin/plan-offers.md`, `docs/testing/plan-offers.md` | the card parses `paypal_subscription` metadata itself | the card fetches the declarations endpoint; provider-agnostic wording throughout |
+| `docs/api/store-subscription-offers.md`, `docs/api/store-customer-self-service-tutorial.md` | `binding.supported` = "the installed PayPal provider"; the deleted provider prose quoted as the error message | provider-agnostic (any registered provider, ≥ 0.3.0) and reorder's own copy: "the payment method is not approved yet — finish the approval at the provider, then retry" |
+| `docs/architecture/cancellation.md` | two audit mechanisms | + the third: `metadata.cancel_context.provider_cancel`, with all three `NativeCancelOutcome` shapes |
+| `docs/architecture/renewals.md` | "a native mirror (PayPal charges it)" | "the native mirror (the provider charges it)" |
+| `docs/releases/1.6.0-host-upgrade.md` | `paypal.subscription.revised` listed as a live gap | annotated as superseded in 1.12.0 |
+
+Final sweep over `docs/` for `paypal.subscription.`, `paypal-subscription-mirror`,
+`PAYPAL_SUBSCRIPTION_EVENT_NAMES`, `NATIVE-{paypal_subscription_id}` and
+`STATUS_BY_PAYPAL_STATE`: the only remaining hits are that annotation's own history
+sentence. No document states the old mechanism as current.
+
+The lesson worth keeping: a ticked docs checkbox is not evidence — the grep behind
+it is. That sweep is what should have run before the first completion request, and
+it is what these checkboxes are now backed by.
+
 ### Deferred, with reasons
 
-1. **reorder `test:integration:http` — partially verified, and the run has to be
+1. *(Superseded — the release-status section carries the final numbers: the http
+   suite finished **53/53 files green** and the module suite **35/35 suites, 349/349
+   tests** once the 1.12.1 regression spec landed. Kept because it records what the
+   first run actually found.)*
+   **reorder `test:integration:http` — partially verified, and the run has to be
    repeated once before publishing.** A Postgres *was* reachable on
    `localhost:15433` (the `medusa-test` compose project, `medusa/medusa`), which
    changed the picture: with it,

@@ -229,14 +229,22 @@ The rules area supports:
   would push the accumulated cycle count past that ceiling; empty input evaluates
   to `null` (no limit).
 
-When the product has a variant carrying `paypal_subscription` metadata, the form
-also shows a read-only **native PayPal trial** panel listing each such variant's
-`trial_periods` and `setup_fee` beside the offer's own trial inputs. Those
-values live in the variant metadata and are charged by PayPal itself; the
-offer's trial values do not change them. A product-scoped offer covers every
-native variant of the product, so all of them are listed. The panel exists to
-prevent a misconfiguration — the native plan's trial length is part of the
-PayPal plan's identity and must not be sourced from the offer.
+When a product's variants declare a provider-side subscription, the form also
+shows a read-only **native trial** panel listing each such variant's declaration
+fields (`trial_periods`, `setup_fee`, …) beside the offer's own trial inputs. The
+panel is provider-agnostic: it asks
+`GET /admin/subscription-offers/providers/declarations?product_id=…`, which in
+turn asks every native-capable provider through the capability view, and each row
+carries the provider's own `display_name` and field labels (`medusa-payment-methods`
+≥ 0.3.0 — the browser never parses provider metadata itself, which is what the old
+PayPal-shaped card did). A provider that throws is skipped rather than blanking the
+card, and a product with no declarations is an empty list, not an error.
+
+Those declared values live in the variant's metadata and are charged by the
+provider itself; the offer's trial values do not change them. A product-scoped
+offer covers every native variant of the product, so all of them are listed. The
+panel exists to prevent a misconfiguration — a native plan's trial length is part
+of the provider plan's identity and must not be sourced from the offer.
 
 The legacy `minimum_cycles` and `stacking_policy` rules are **not editable in
 the UI and not enforced** by any workflow; they are decorative for backward

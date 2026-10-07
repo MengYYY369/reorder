@@ -163,12 +163,19 @@ managed by this plugin, but it must still be visible locally: checkout has to
 know that the customer already pays for this product, and that question has to be
 answered by an indexed local read before money moves.
 
-Those rows are upserted by the `paypal-subscription-mirror` subscriber from
-`paypal.subscription.*` events, keyed on the unique reference
-`NATIVE-{paypal_subscription_id}`, and refreshed hourly by the
-`native-subscription-backfill` job (which also covers provider subscriptions
-that predate the plugin, and plan swaps until `paypal.subscription.revised`
-exists).
+The provider side is reached only through the capability view
+(`providerDescriptors`, `medusa-payment-methods` ≥ 0.3.0 — the host registers one
+descriptor per provider, and nothing in this repository names a provider, its key
+or its protocol). Which rail a row belongs to is readable from the `kind` segment
+of its reference, so a second native provider needs no change here.
+
+Those rows are upserted by the `native-subscription-mirror` subscriber from the
+rail-neutral `payment-rail.native_subscription.changed` event — a name owned by
+`medusa-payment-methods`, not by this plugin and not by the provider — keyed on the
+unique reference `NATIVE-{kind}-{provider_subscription_id}`, and refreshed hourly
+by the `native-subscription-backfill` job (which also covers provider subscriptions
+that predate the plugin, and plan swaps, by reading the provider's records through
+the capability view rather than through the provider's own table).
 
 A mirror row is **never** charged, extended or dunned by reorder:
 
@@ -203,12 +210,12 @@ placeholder whose `N/A` country marks the row as a mirror. Their
 infers a date from the event type.
 
 **Known limitation — a mirror moves only as far as the provider reports.** A
-mirror follows the provider as far as the provider talks:
-`paypal.subscription.cancelled` and `paypal.subscription.expired` move the row to
-`cancelled`, and the hourly pass re-reads the provider module's own
-`paypal_subscription` rows and refreshes a mirror for every one of them it can map.
-Two properties of that pass are worth stating exactly, because both limit what can
-ever clear a stale mirror:
+mirror follows the provider as far as the provider talks: the provider maps its own
+states onto the four-word rail vocabulary (`active | paused | past_due |
+ cancelled`) before the event is published, and the hourly pass re-reads the
+provider's records through the capability view (`native.listRecords`) and refreshes
+a mirror for every one of them it can map. Two properties of that pass are worth
+stating exactly, because both limit what can ever clear a stale mirror:
 
 - it reads the provider module's **local table** through the query layer
   (`loadProviderSubscriptionRecords`,

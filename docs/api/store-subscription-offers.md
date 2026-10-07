@@ -54,7 +54,7 @@ product/variant. When set:
 | `eligible` | boolean | whether **this** customer can claim a trial for this product right now |
 | `reason` | string \| null | why `eligible` is `false` |
 | `binding.method` | `"vault"` | the only binding mechanism for a claimed trial |
-| `binding.supported` | boolean | whether the installed PayPal provider ships the vault approval capability; when `false`, hide the bind-and-extend control |
+| `binding.supported` | boolean | whether **any** registered provider ships the binding capability. Provider-agnostic by construction (`medusa-payment-methods` ≥ 0.3.0): reorder asks the capability view, never a named provider, so a second provider with binding support flips this to `true` without a code change. When `false`, hide the bind-and-extend control |
 
 `reason` values:
 

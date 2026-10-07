@@ -533,12 +533,15 @@ Two phases, because the customer leaves for PayPal and comes back:
 Errors: `401` unauthenticated; `404` unknown or foreign subscription; `400`
 when the subscription is not an active trial, already has a bound method, has
 no pending approval (complete without start), the setup token does not match
-the pending approval, or the PayPal approval is not complete yet (`The payment
-method approval is not complete yet (status '...')`); `400 not_allowed` when
-the installed PayPal provider does not ship the vault capability, or the
-PayPal provider is not declared on the payment module. `binding.supported` in
-the offer DTO tells the portal whether the capability is present — hide the
-bind-and-extend control when it is `false`.
+the pending approval, or the provider's approval is not complete yet (`the
+payment method is not approved yet — finish the approval at the provider, then
+retry`); `400 not_allowed` when no registered provider ships the binding
+capability, or the provider that owns the variant's native declaration is not
+registered on the payment module. `binding.supported` in the offer DTO tells
+the portal whether the capability is present — it is provider-agnostic (any
+registered provider counts; `medusa-payment-methods` ≥ 0.3.0 answers it from the
+capability view, not from a named provider) — hide the bind-and-extend control
+when it is `false`.
 
 #### Leaving a trial
 

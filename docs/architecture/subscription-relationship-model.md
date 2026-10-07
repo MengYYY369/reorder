@@ -19,9 +19,14 @@ It is the follow-up to `plan-offers.md` (which covers offer configuration).
 The behavioral rules are implemented in the checkout validation step
 (`src/workflows/steps/validate-subscription-cart.ts`), the record write
 (`src/workflows/steps/create-subscription-record.ts`), the pure decision units
-under `src/modules/subscription/utils/`, the PayPal event bridge
-(`src/subscribers/paypal-subscription-mirror.ts`) and its reconciliation job
+under `src/modules/subscription/utils/`, the rail-neutral mirror subscriber
+(`src/subscribers/native-subscription-mirror.ts`) and its reconciliation job
 (`src/jobs/native-subscription-backfill.ts`).
+
+The subscriber listens for `payment-rail.native_subscription.changed`, a name owned
+by `medusa-payment-methods` — not by this plugin, and not by any provider (the host
+injects the emitting hook into the provider's options; see the `providerDescriptors`
+contract in `medusa-payment-methods` ≥ 0.3.0 and `medusa-paypal`'s README).
 
 Documentation split: this document covers the relationship rules (R1-R5) and the
 three rule fields (`consent_from_session`, `row_stacking_policy`,
@@ -85,11 +90,19 @@ type SubscriptionPaymentContext = {
   payment-method update it survives, instead of being interpreted at read time.
 - **A provider-owned row has no `native_subscription_id` field.** Identity is two
   values on the row itself:
-  - `reference` = `NATIVE-{paypal_subscription_id}`
+  - `reference` = `NATIVE-{kind}-{provider_subscription_id}` (for example
+    `NATIVE-paypal-I-BW452GLLEP1G`)
     (`NATIVE_SUBSCRIPTION_REFERENCE_PREFIX` and `buildNativeSubscriptionReference`,
-    `src/modules/subscription/utils/native-subscription.ts:23,40-50`; built from the
-    event at `src/modules/subscription/utils/native-mirror.ts:141`; written at
-    `src/modules/subscription/utils/native-mirror-sync.ts:50`). `reference` is
+    `src/modules/subscription/utils/native-subscription.ts:26,77-92`; built from the
+    record at `src/modules/subscription/utils/native-mirror.ts:121-124`; written at
+    `src/modules/subscription/utils/native-mirror-sync.ts:41`). The `kind` segment
+    makes the reference self-describing — which rail a row belongs to is readable
+    without a join — and nothing parses it back into parts: the raw provider id
+    always travels separately in `payment_context.customer_payment_reference`
+    (`readNativeProviderTarget`,
+    `src/modules/subscription/utils/native-subscription.ts:48-74`), which is also the
+    only thing the migration script
+    (`src/scripts/backfill-native-reference-format.ts`) reads. `reference` is
     `model.text().unique()` (`src/modules/subscription/models/subscription.ts:10`),
     so the prefix test is exact, indexable, and cannot be silently NULL.
   - the provider's own id, stored verbatim in
@@ -231,44 +244,49 @@ arrive as a second mirror row with a different `reference` — not as a conflict
 Changing plan/frequency within the same product uses PayPal's native **revise**
 endpoint instead (the *switch subscription* flow): the same subscription is revised
 in place — no cancel, no new subscription — and the new price takes effect at the
-next billing cycle (no proration). On the reorder side this is **not implemented
-yet and is blocked externally**: `paypal.subscription.revised` is subscribed to
-(`src/modules/subscription/utils/native-mirror.ts:56-65`) but refused at build time
-until medusa-paypal 0.5.0 emits it with the plan and frequency fields the mirror
-needs (`:153-160`, reason `revised_not_supported_until_paypal_0_5_0`). What
-actually keeps a mirror honest meanwhile is the hourly reconciliation pass, which
-reads the provider module's local `paypal_subscription` rows and, when a row's
-plan id differs from the one recorded on the mirror, updates `metadata.plan_id` and
-`plan_changed_at` and logs a warning
-(`src/modules/subscription/utils/native-mirror-sync.ts:99-118`). Because the
-subscription stays ACTIVE upstream, no cancelled/activated events fire.
+next billing cycle (no proration). On the reorder side this is **not implemented**:
+the neutral payload carries no plan/frequency pair to revise onto, so there is
+nothing here to act on. What keeps a mirror honest meanwhile is the hourly
+reconciliation pass, which reads the provider's records through the capability view
+(`native.listRecords`) — never through the provider's own table — and, when a
+record's plan id differs from the one recorded on the mirror, updates
+`metadata.plan_id` and `plan_changed_at` and logs a warning
+(`src/modules/subscription/utils/native-mirror-sync.ts:113-125`). Because the
+subscription stays ACTIVE upstream, no cancelled/activated transition fires.
 
 ## Native mirror rows
 
-The event bridge subscribes to the paypal plugin's lifecycle events
-(`PAYPAL_SUBSCRIPTION_EVENT_NAMES`: `activated`, `suspended`, `resumed`,
-`revised`, `cancelled`, `expired`, `payment_succeeded`, `payment_failed`;
-`src/modules/subscription/utils/native-mirror.ts:56-65`) and upserts read-only
-mirror rows (`src/subscribers/paypal-subscription-mirror.ts`):
+The subscriber listens to exactly one event,
+`payment-rail.native_subscription.changed`
+(`src/subscribers/native-subscription-mirror.ts:111`), whose **name and payload are
+owned by `medusa-payment-methods`**: this plugin does not name it, and neither does
+the provider. Each payload carries `kind`, `provider_subscription_id`, the record
+fields, and a `transition` (`status | payment_succeeded | payment_failed`). The
+handler (`src/subscribers/native-subscription-mirror.ts:41-111`) resolves the
+capability by `kind` — the payload's `provider_id` is the provider's own payment
+session echo and may be null, while the mirror stores the payment module's
+registration key — then upserts read-only mirror rows
+(`src/modules/subscription/utils/native-mirror-sync.ts:41`):
 
-- every row is built from the payload alone. `customer_id`, `product_id`,
-  `variant_id`, `frequency_interval` and `frequency_value` are required to exist
-  (`MIRROR_BUILD_FIELDS`, `:122-128`) and the frequency must be a whole positive
-  week/month/year count (`readFrequency`, `:192-219`); anything else is skipped
-  with its reason logged rather than written with a guessed value. The mirror
-  never derives product or frequency from reorder's own plan or offer data: every
-  field a row needs comes from the event payload (`:9-21`), the plan id is the
-  provider's own (`record.paypal_plan_id`, `:255`, read from medusa-paypal's
-  `paypal_subscription` row, whose shape is declared at `:221-238`), and the
-  backfill maps such a row through `buildNativeMirrorFieldsFromRecord`
-  (`:244-267`), which takes `product_id` from the caller precisely because the
-  provider row knows only the variant (`:240-243`)
-- `status` maps PayPal's five states onto reorder's four; `EXPIRED` becomes
-  `cancelled`, and `APPROVAL_PENDING` maps to nothing at all so a recurrence the
-  customer never approved cannot block a checkout
-  (`STATUS_BY_PAYPAL_STATE`, `:80-86`, its reason comment at `:76-78`);
-  `payment_failed` forces `past_due` and
-  `expired` forces `cancelled` whatever the payload says (`:102-115`)
+- every row is built from the record alone. `customer_id`, `variant_id` and
+  `interval_unit` are required to exist (`MIRROR_BUILD_FIELDS`, `:98-102`) and the
+  frequency must be a whole positive week/month/year count (`readFrequency`,
+  `:175-207`); anything else is skipped with its reason logged rather than written
+  with a guessed value. The mirror never derives product or frequency from reorder's
+  own plan or offer data: every field a row needs comes from the record
+  (`buildNativeMirrorFieldsFromRecord`, `:109-173`), the plan id is the provider's
+  own (`record.paypal_plan_id`), and the backfill maps a provider record through the
+  same builder (`:160-259`), which takes `product_id` from the caller precisely
+  because a provider package knows only the variant (`readProductIdsForVariants`,
+  `:261`)
+- `status` arrives already mapped. The provider's rail reports four words
+  (`active | paused | past_due | cancelled`) and this file is a lookup, not a second
+  provider table (`MIRROR_STATUS_BY_RAIL_STATUS`, `:88-93`): the five-state PayPal
+  table this used to keep is gone, and `payment_failed → past_due` is the provider's
+  own mapping, applied inside its package. A status outside the vocabulary — or
+  `null`, the provider's "do not mirror" for an approval nobody finished — writes
+  nothing, because a half-populated row would look like a live recurrence to the
+  checkout gates (`:129-135`)
 - `next_renewal_at` is only ever what the provider last reported and may be null;
   no date is inferred from the event type, and an update leaves out a date the
   event did not carry rather than overwriting a real one with null

@@ -303,7 +303,7 @@ step, so ownership cannot drift between the two. Evaluated top to bottom:
 | disposition | when | consequence |
 | --- | --- | --- |
 | `settled` | cycle status is `succeeded`, `abandoned`, or `awaiting_manual_resolution` | terminal or parked — neither the scheduler nor the step may reopen it (`processing` is deliberately not adjudicated here; it is in-flight state owned by the workflow lock) |
-| `not_chargeable` | subscription status is not `active`/`past_due` (paused, cancelled), or `cancel_effective_at` is at or before the cycle's `scheduled_for`, or the row is a native mirror (PayPal charges it), or it is manual-mode outside the trial carve-out | dropped from the due set; the scheduler never charges or fails it |
+| `not_chargeable` | subscription status is not `active`/`past_due` (paused, cancelled), or `cancel_effective_at` is at or before the cycle's `scheduled_for`, or the row is a native mirror (the provider charges it), or it is manual-mode outside the trial carve-out | dropped from the due set; the scheduler never charges or fails it |
 | `dunning_owns` | an **open** dunning case exists for the cycle (`open`, `retry_scheduled`, `retrying`, `awaiting_manual_resolution`) | the case owns the retry timing; the scheduler must not touch the cycle |
 | `trial_end` | a manual-mode trial whose cycle is at or after `trial_ends_at` | the one manual cycle the scheduler picks up, so the deterministic trial-end branch can run on time; that branch never charges |
 | `charge` | everything else | the normal off-session charge path |

@@ -151,7 +151,9 @@ offer form: `trial_requires_payment_method` at checkout, redemption and the
 trial claim (`trial-requires-payment-method.spec.ts`,
 `trial-claim.spec.ts`), and `trial_bonus_days` through the bind-and-extend flow
 (`trial-payment-method-binding.spec.ts`). The Admin form's own rendering —
-including the read-only native PayPal trial panel — has no automated coverage:
+including the read-only native declaration panel, which fetches
+`GET /admin/subscription-offers/providers/declarations` instead of parsing provider
+metadata in the browser — has no automated coverage:
 `src/admin` is excluded from the backend build's typecheck and matches no jest
 `testMatch`.
 

@@ -361,6 +361,33 @@ The current implementation records operational audit in two ways:
 - explicit fields such as `finalized_by`, `decided_by`, and workflow-specific actor fields
 - append-only `manual_actions` metadata entries with `who / when / why / data`
 
+A third record is written when a cancellation actually goes out to a provider. The
+cancel step stamps `metadata.cancel_context` on the row it cancels:
+
+```ts
+cancel_context: {
+  reason,            // the requested reason, or null
+  effective_at,      // "immediately" or the requested date
+  cancelled_at,      // ISO timestamp of the write
+  triggered_by,      // the actor that started the workflow, or null
+  provider_cancel,   // what the provider side did — see below
+}
+```
+
+`provider_cancel` is the provider-side outcome as the capability view reported it
+(`NativeCancelOutcome`, `medusa-payment-methods` ≥ 0.3.0), so an operator can tell a
+real cancel from a no-op without reading logs:
+
+| `status` | meaning | other fields |
+|---|---|---|
+| `cancelled` | the provider accepted the cancel | `provider_subscription_id`, `provider_row_id` |
+| `skipped` | nothing was sent: `reason` is `not_native`, `provider_row_id` missing, or the provider registers no native rail | `reason` |
+| `failed` | the provider refused or threw; the local row is still cancelled and the failure is logged | `error`, `provider_subscription_id`, `provider_row_id` |
+
+A `failed` outcome is **not** a cancelled cancellation: the local row is cancelled
+regardless (the workflow logs a warning naming the reference), which is why the
+outcome is recorded rather than thrown.
+
 This gives:
 - operator traceability for risky actions
 - case-level audit summary

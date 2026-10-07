@@ -32,6 +32,51 @@ Provider specific requirement for Stripe: the storefront must initialize the che
 
 Provider specific requirement for PayPal: the storefront must create the checkout payment session with `customer_id` in the session data so the provider vaults the wallet on successful capture (`store_in_vault: "ON_SUCCESS"`, usage type `MERCHANT`, associated with `customer_id` as `merchant_customer_id`). After capture the provider writes the vault token id into the session data as `payment_method`, which is exactly the reference `validate-subscription-cart` reads. Renewal sessions the scheduler creates carry that token id back to the provider, which charges it with an Orders API `payment_source.paypal.vault_id` purchase — no buyer interaction. PayPal requires RDA (risk data) on the approval flow and enables vaulting per account: reference-transaction approval, an eligibility review, and the "Save payment methods" toggle on the API application in the PayPal Developer Dashboard (sandbox included).
 
+## Provider Descriptors (`medusa-payment-methods` ≥ 0.3.0)
+
+The customer-payment-method plugin no longer keeps one binder per provider. The host
+registers **one descriptor per payment provider**, keyed by the payment module's
+registration key (`pp_paypal_paypal` in this deployment — the host id `paypal` plus
+the provider's `identifier`), under the plugin option `providerDescriptors`
+(`Record<string, PaymentProviderDescriptor>`):
+
+```ts
+// medusa-config.ts — `satisfies` is the only compile-time edge: each provider
+// package declares the contract type locally, so neither imports the other and
+// the host is the single place where both are visible.
+{
+  resolve: "@mengyyy369/medusa-payment-methods",
+  options: {
+    adapter: reorderSiteAdapter,
+    providerDescriptors: {
+      pp_paypal_paypal: createPaypalRail({ providerId: "pp_paypal_paypal", /* … */ }),
+    } satisfies Record<string, PaymentProviderDescriptor>,
+  },
+}
+```
+
+A descriptor carries the provider's **binding protocol**, its **native rail** (when
+it has one), its labels (`display_name`, `display_name_i18n`) and its error mapping
+(`mapError`). Two consequences this repository relies on:
+
+- nothing here names a provider, its key or its protocol. The capability view
+  (`getProviderCapabilities`, or reorder's `resolveProviderCapabilities` in
+  `src/modules/subscription/utils/provider-capabilities.ts`) is the only way this
+  plugin learns what a provider can do — the mirror, the backfill and both cancel
+  paths all go through it.
+- the option is **not** called `providers` on purpose: Medusa's module loader treats
+  `options.providers` as its own provider list and iterates it, so a descriptor map
+  under that name makes the host throw `TypeError: providers is not iterable` while
+  it boots.
+
+Version floor for this contract: **≥ 0.3.0** (0.2.x used `binders`, and 0.3.0
+refuses that key at boot with the replacement named), and **≥ 0.10.0** for
+`@mengyyy369/medusa-paypal`, whose `./rail` export and `createPaypalRail` replace
+the deleted `./binder`. The rail-neutral event
+`payment-rail.native_subscription.changed` is named and published by
+`medusa-payment-methods`; a provider never knows the name — the host injects the
+emitting hook into the provider's plugin options.
+
 ## Payment Context
 
 `subscription.payment_context` is the operational record of how a subscription is charged. It is a JSON column on the subscription model with the following fields:
