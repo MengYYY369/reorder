@@ -217,12 +217,13 @@ provider's records through the capability view (`native.listRecords`) and refres
 a mirror for every one of them it can map. Two properties of that pass are worth
 stating exactly, because both limit what can ever clear a stale mirror:
 
-- it reads the provider module's **local table** through the query layer
-  (`loadProviderSubscriptionRecords`,
-  `src/modules/subscription/utils/native-mirror-sync.ts`), never the provider
-  account. Reorder only ever reads that table and never deletes a row from it, so a
-  recurrence whose local row keeps reporting a live status keeps its mirror live no
-  matter what the provider account itself looks like
+- it asks the provider for its records through the capability view
+  (`capability.native.listRecords(container)`,
+  `src/modules/subscription/utils/native-mirror-sync.ts:186`), which the provider
+  answers from its own local table — never from the provider's account. Reorder only
+  ever reads those records and never deletes one, so a recurrence whose provider
+  record keeps reporting a live status keeps its mirror live no matter what the
+  provider account itself looks like
 - the pass is **one-directional**: it creates and refreshes mirrors from provider
   rows and never enumerates the mirror rows already in the database against that
   set, so nothing here clears a mirror whose provider row is gone or unreadable

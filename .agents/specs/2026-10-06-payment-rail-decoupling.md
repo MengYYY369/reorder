@@ -840,6 +840,39 @@ The lesson worth keeping: a ticked docs checkbox is not evidence — the grep be
 it is. That sweep is what should have run before the first completion request, and
 it is what these checkboxes are now backed by.
 
+**Second pass — the auditor's second rejection was right too.** The first pass swept
+for the names a reader sees (the event, the option) and missed a deleted **symbol**:
+`loadProviderSubscriptionRecords`, the query-layer reader that
+`capability.native.listRecords` replaced, was still named as current behaviour in
+`subscriptions.md:220-221` and in `subscription-relationship-model.md:315-318` —
+contradicting the corrected paragraph a few lines above it in the same file. Fixed
+here, along with the citation drift the same pass had introduced (`record.paypal_plan_id`
+→ `record.plan_id`, `:170`; the reference build is `:119-122`; `readNativeProviderTarget`
+is `:48-62`; `readFrequency` is `:175-202`; the backfill is `:160-242`).
+
+The sweep set was the problem, not the sweep. What it should contain — and now does —
+is every name the change deleted, not only the ones a user would type:
+
+```
+binders · createPaypalBinder · PaypalBinder · paypal-vault-binding ·
+native-provider-cancel · paypal-subscription-mirror · PaypalSubscriptionEvents ·
+emitSubscriptionEvent · PAYPAL_SUBSCRIPTION_EVENT_NAMES · STATUS_BY_PAYPAL_STATE ·
+loadProviderSubscriptionRecords · findSerializedErrorMessageByName ·
+SubscriptionEventPayload · buildNativeMirrorFieldsFromPayload ·
+revised_not_supported_until_paypal_0_5_0 · paypal_native_mirror ·
+NATIVE-{paypal_subscription_id} · record.paypal_plan_id
+```
+
+Two hits outside this repository were annotated rather than rewritten, because they
+are records of what shipped at the time: `medusa-better-auth/docs/acceptance.md` §30
+(the round-3 acceptance log — its `binders:` snippet would now break a boot) and
+`docs/plans/2026-10-02-storefront-walkthrough-round3.md` T11 (the executed plan).
+Both carry a superseded note naming the descriptor contract.
+
+Every `file:line` citation in the reworked documents was then machine-checked against
+the tree: **83 citations, 0 missing files, 0 out-of-range lines** (throwaway script,
+not committed).
+
 ### Deferred, with reasons
 
 1. *(Superseded — the release-status section carries the final numbers: the http

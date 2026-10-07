@@ -94,13 +94,13 @@ type SubscriptionPaymentContext = {
     `NATIVE-paypal-I-BW452GLLEP1G`)
     (`NATIVE_SUBSCRIPTION_REFERENCE_PREFIX` and `buildNativeSubscriptionReference`,
     `src/modules/subscription/utils/native-subscription.ts:26,77-92`; built from the
-    record at `src/modules/subscription/utils/native-mirror.ts:121-124`; written at
+    record at `src/modules/subscription/utils/native-mirror.ts:119-122`; written at
     `src/modules/subscription/utils/native-mirror-sync.ts:41`). The `kind` segment
     makes the reference self-describing — which rail a row belongs to is readable
     without a join — and nothing parses it back into parts: the raw provider id
     always travels separately in `payment_context.customer_payment_reference`
     (`readNativeProviderTarget`,
-    `src/modules/subscription/utils/native-subscription.ts:48-74`), which is also the
+    `src/modules/subscription/utils/native-subscription.ts:48-62`), which is also the
     only thing the migration script
     (`src/scripts/backfill-native-reference-format.ts`) reads. `reference` is
     `model.text().unique()` (`src/modules/subscription/models/subscription.ts:10`),
@@ -271,12 +271,12 @@ registration key — then upserts read-only mirror rows
 - every row is built from the record alone. `customer_id`, `variant_id` and
   `interval_unit` are required to exist (`MIRROR_BUILD_FIELDS`, `:98-102`) and the
   frequency must be a whole positive week/month/year count (`readFrequency`,
-  `:175-207`); anything else is skipped with its reason logged rather than written
+  `:175-202`); anything else is skipped with its reason logged rather than written
   with a guessed value. The mirror never derives product or frequency from reorder's
   own plan or offer data: every field a row needs comes from the record
   (`buildNativeMirrorFieldsFromRecord`, `:109-173`), the plan id is the provider's
-  own (`record.paypal_plan_id`), and the backfill maps a provider record through the
-  same builder (`:160-259`), which takes `product_id` from the caller precisely
+  own (`record.plan_id`, `:170`), and the backfill maps a provider record through the
+  same builder (`:160-242`), which takes `product_id` from the caller precisely
   because a provider package knows only the variant (`readProductIdsForVariants`,
   `:261`)
 - `status` arrives already mapped. The provider's rail reports four words
@@ -286,7 +286,7 @@ registration key — then upserts read-only mirror rows
   own mapping, applied inside its package. A status outside the vocabulary — or
   `null`, the provider's "do not mirror" for an approval nobody finished — writes
   nothing, because a half-populated row would look like a live recurrence to the
-  checkout gates (`:129-135`)
+  checkout gates (`:128-134`)
 - `next_renewal_at` is only ever what the provider last reported and may be null;
   no date is inferred from the event type, and an update leaves out a date the
   event did not carry rather than overwriting a real one with null
@@ -310,14 +310,15 @@ registration key — then upserts read-only mirror rows
   (`src/jobs/native-subscription-backfill.ts`, `config.schedule = "17 * * * *"`),
   because subscriptions created before this plugin was installed never re-emit
   their `activated` event (`:8-22`)
-- the pass is **one-directional**: it creates and refreshes mirrors from provider
-  rows and never enumerates the mirror rows already in the database against that
-  set, and it reads the provider module's *local* table
-  (`loadProviderSubscriptionRecords`,
-  `src/modules/subscription/utils/native-mirror-sync.ts:125-159`). A mirror whose
-  provider row was deleted out of band therefore stays live until support cancels
-  it. That gap is documented rather than papered over with an unused reconciliation
-  helper, and `subscriptions.md` (*Known limitation*) states it
+- the pass is **one-directional**: it creates and refreshes mirrors from the
+  provider's records and never enumerates the mirror rows already in the database
+  against that set, and it asks for those records through the capability view
+  (`capability.native.listRecords(container)`,
+  `src/modules/subscription/utils/native-mirror-sync.ts:160-242`), which the provider
+  answers from its own local table — never from the provider's account. A mirror
+  whose provider record was deleted out of band therefore stays live until support
+  cancels it. That gap is documented rather than papered over with an unused
+  reconciliation helper, and `subscriptions.md` (*Known limitation*) states it
 
 Having the mirror locally turns "does this customer already hold a native
 subscription?" (R3/R5) into a plain indexed table query.
