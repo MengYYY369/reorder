@@ -1,5 +1,12 @@
 # Spec: Billing Engine Hardening, Event Completion, and Trial Conversion
 
+> **Historical (superseded 2026-10-06).** Where this document names
+> `src/subscribers/paypal-subscription-mirror.ts`, `paypal-vault-binding.ts` or the
+> provider's own `paypal.subscription.*` events, those were removed in reorder 1.12.0 /
+> medusa-paypal 0.10.0: one rail-neutral event named by `medusa-payment-methods`, one
+> capability resolver, and provider descriptors instead of binders. Kept as the record of
+> that round; current contract in `2026-10-06-payment-rail-decoupling.md`.
+
 **Status:** FINAL (revision 3) — trial-claim round applied 2026-09-28.
 **Date:** 2026-09-28
 **Scope owner:** repository owner (single-operator production deployment)
