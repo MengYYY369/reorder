@@ -11,15 +11,16 @@ type Logger = {
  * Reconcile the native mirror set against the provider's own subscriptions.
  *
  * Two jobs, one pass:
- * - backfill: PayPal subscriptions created before this plugin was installed
- *   never re-emit their `activated` event, so without this the mirror set only
- *   covers what arrives from here on, and the checkout exclusivity gate would
- *   not see the rows that matter most.
- * - drift: medusa-paypal does not deliver `paypal.subscription.revised` (as of
- *   0.6.1 the in-place revise flow is planned in that plugin's changelog, not
- *   shipped), so this pass is what notices a plan swap.
+ * - backfill: provider subscriptions created before this plugin was installed
+ *   never re-emit their activation, so without this the mirror set only covers
+ *   what arrives from here on, and the checkout exclusivity gate would not see
+ *   the rows that matter most.
+ * - drift: a plan swap the provider never reported (a missed webhook, or a
+ *   change made in the provider's own dashboard) is noticed here — the rail
+ *   event carries `plan_id` on every transition, so this pass is the safety net
+ *   rather than the only way to see it.
  *
- * No-op when medusa-paypal is not installed.
+ * No-op when no provider with a native rail is installed.
  */
 export default async function nativeSubscriptionBackfillJob(
   container: MedusaContainer

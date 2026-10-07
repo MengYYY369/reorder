@@ -349,7 +349,7 @@ medusaIntegrationTestRunner({
           },
           payment_context: null,
           pending_update_data: null,
-          metadata: { source: "paypal_native_mirror" },
+          metadata: { source: "native_mirror" },
         } as never)
 
         await expect(

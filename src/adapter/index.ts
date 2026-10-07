@@ -146,7 +146,11 @@ export const reorderSiteAdapter: SiteAdapter = {
         id: row.id,
         provider_id: providerId,
         rail: "native",
-        summary: { type: "paypal" },
+        // The plugin stamps the row's `summary.type` from the provider
+        // descriptor's `kind` (2026-10-06 rail decoupling): the site adapter
+        // reports the row, never a provider family — it has no business
+        // naming a provider it does not own.
+        summary: { type: null },
         canUnbind: false,
         scope: readNonEmpty(row.product_id),
         subscription_id: row.id,

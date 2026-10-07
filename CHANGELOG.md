@@ -1,3 +1,55 @@
+## [1.12.0] - 2026-10-06
+
+Payment-rail decoupling (spec `.agents/specs/2026-10-06-payment-rail-decoupling.md`;
+requires `@mengyyy369/medusa-payment-methods` 0.3.0 and `@mengyyy369/medusa-paypal`
+0.10.0). **One migration step:** run
+`npx medusa exec ./src/scripts/backfill-native-reference-format.ts --apply` with
+the backend stopped (or the hourly backfill job disabled), **before** deploying
+this version — see the upgrade note at the end.
+
+- **No provider-specific coupling left in this plugin.** The duck-types
+  (`workflows/utils/paypal-vault-binding.ts`, `native-provider-cancel.ts`) are
+  deleted and replaced by one capability resolver
+  (`modules/subscription/utils/provider-capabilities.ts`) that reads the
+  payment-methods plugin's provider capabilities. The mirror, the backfill and
+  both cancel paths go through it; nothing here names a provider, its key or its
+  protocol.
+- **The mirror is driven by the rail-neutral event.**
+  `payment-rail.native_subscription.changed` (a name owned by
+  medusa-payment-methods) replaces the seven `paypal.subscription.*` names, and
+  the subscriber is now `subscribers/native-subscription-mirror.ts`. The payload
+  carries the complete record, so **one builder**
+  (`buildNativeMirrorFieldsFromRecord`) serves both the event and the backfill:
+  the two halves can no longer disagree about what an event carries, which is
+  what kept the old path silently dead.
+- **`listRecords` replaces the direct table read.** The backfill no longer
+  queries `paypal_subscription`; it asks every native-capable provider for its
+  own records, so a new provider needs no change here.
+- **References are kind-scoped:** `NATIVE-{kind}-{providerSubscriptionId}`
+  (`NATIVE-paypal-I-XXXX`), and the provider's own id lives in
+  `payment_context.customer_payment_reference` — that is what a provider's
+  `cancel` receives, and nothing parses the reference back into parts. The
+  `NATIVE-%` prefix and every query built on it are unchanged.
+- **The bind failure contract is type-based.** `binding_pending_approval` (422)
+  maps to reorder's own copy; the credential-environment mismatch keeps its 500
+  and its operator message. Both `/^PayPal setup token is not approved…$/` rules
+  and the `PaypalCredentialEnvironmentMismatchError` name match are deleted, and
+  `findSerializedPaymentMethodsFailure` now also returns the plugin's machine
+  `type`.
+- **Admin:** the native plan card reads
+  `GET /admin/subscription-offers/providers/declarations?product_id=` instead of
+  parsing variant metadata in the browser, and the card title is provider-aware.
+- `binding.supported` asks the capability view instead of probing a provider
+  module by name; the unused import in `workflows/steps/renew-now.ts` is gone.
+
+**Upgrade note (the mirror set).** A mirror row's `reference` changed shape, and
+the mirror upserts on it. Run the backfill script (dry-run first) **before**
+deploying this version, with the backend stopped: while the old code is live it
+looks rows up by the old reference and would re-create a legacy row right after
+the rewrite. The script is idempotent and dedupe-safe, so re-running it after the
+deploy must report a no-op.
+
+
 ## [1.11.0] - 2026-10-06
 
 Trial bind delegation (B6), the auto-renew bind flow, renew-now, the

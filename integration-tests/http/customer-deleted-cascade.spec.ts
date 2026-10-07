@@ -17,21 +17,43 @@ import { runCustomerDeletedCascade } from "../../src/subscribers/customer-delete
 
 jest.setTimeout(180 * 1000)
 
-/**
- * The fake `paypalSubscription` service a host on medusa-paypal would present:
- * the cascade's protocol-cancel step duck-types exactly these two methods.
- */
-function registerFakePaypalSubscription(container: any) {
-  const requestLifecycleAction = jest.fn().mockResolvedValue({ id: "row-1" })
-  const listSubscriptions = jest
-    .fn()
-    .mockResolvedValue([[{ id: "provider-row-1" }], 1])
+/** The provider's own subscription id the mirror row points at. */
+const PROVIDER_SUBSCRIPTION_ID = "I-CASCADE-1"
 
-  container.register({
-    paypalSubscription: asValue({ listSubscriptions, requestLifecycleAction }),
+/**
+ * The fake `paymentMethods` service a host with the payment-methods plugin
+ * presents: the cascade's provider cancel goes through the capability view
+ * (`getProviderCapabilities`), never through a provider module by name
+ * (2026-10-06 rail decoupling).
+ */
+function registerFakeProviderCapability(container: any) {
+  const cancel = jest.fn().mockResolvedValue({
+    status: "cancelled",
+    provider_subscription_id: PROVIDER_SUBSCRIPTION_ID,
+    provider_row_id: "provider-row-1",
   })
 
-  return { listSubscriptions, requestLifecycleAction }
+  container.register({
+    paymentMethods: asValue({
+      getProviderCapabilities: async () => [
+        {
+          provider_id: "pp_paypal_paypal",
+          kind: "paypal",
+          display_name: "PayPal",
+          display_name_i18n: null,
+          binding: { supported: true },
+          native: {
+            supported: true,
+            readVariantDeclaration: () => null,
+            listRecords: async () => [],
+            cancel,
+          },
+        },
+      ],
+    }),
+  })
+
+  return { cancel }
 }
 
 async function seedSubscriptionChain(container: any, customerId: string) {
@@ -165,16 +187,27 @@ medusaIntegrationTestRunner({
         expect(replay.provider_cancels).toEqual([])
       })
 
-      it("cancels a live provider-owned recurrence at PayPal before deleting the mirror row", async () => {
+      it("cancels a live provider-owned recurrence at the provider before deleting the mirror row", async () => {
         const container = getContainer()
         const customer = await createCustomer(container)
         const mirror = await createSubscriptionSeed(container, {
           customer_id: customer.id,
           reference: `NATIVE-paypal-${Date.now()}`,
           status: SubscriptionStatus.ACTIVE,
+          // The cancel target: which provider key owns the row, and the
+          // provider's own subscription id (never parsed out of the reference).
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "manual",
+            mechanism: "native",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: PROVIDER_SUBSCRIPTION_ID,
+          },
         })
 
-        const capability = registerFakePaypalSubscription(container)
+        const capability = registerFakeProviderCapability(container)
 
         const outcome = await runCustomerDeletedCascade(container, customer.id)
 
@@ -183,9 +216,9 @@ medusaIntegrationTestRunner({
         expect(outcome.provider_cancels[0]).toMatchObject({
           status: "cancelled",
         })
-        expect(capability.requestLifecycleAction).toHaveBeenCalledWith(
-          "provider-row-1",
-          "cancel"
+        expect(capability.cancel).toHaveBeenCalledWith(
+          expect.anything(),
+          PROVIDER_SUBSCRIPTION_ID
         )
 
         const subscriptionModule = container.resolve(

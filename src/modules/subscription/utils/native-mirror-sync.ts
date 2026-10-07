@@ -8,8 +8,11 @@ import {
   buildNativeMirrorProductSnapshot,
   nativeMirrorReconcileFields,
   type NativeMirrorFields,
-  type ProviderSubscriptionRecord,
 } from "./native-mirror"
+import {
+  nativeCapabilities,
+  resolveProviderCapabilities,
+} from "./provider-capabilities"
 import {
   asSubscriptionCreateInput,
   asSubscriptionUpdateInput,
@@ -31,8 +34,9 @@ type ExistingMirrorRecord = {
 /**
  * Create-or-update for one mirror row, keyed on the unique `reference`.
  *
- * Shared by the event subscriber and the backfill job so a replayed event and a
- * reconciliation pass cannot produce two rows for one PayPal subscription.
+ * Shared by the neutral event subscriber and the backfill job so a replayed
+ * event and a reconciliation pass cannot produce two rows for one provider
+ * subscription.
  */
 export async function upsertNativeMirrorSubscription(
   container: MedusaContainer,
@@ -77,17 +81,20 @@ export async function upsertNativeMirrorSubscription(
       pricing_snapshot: null,
       shipping_address: NATIVE_MIRROR_SHIPPING_ADDRESS,
       payment_context: {
-        payment_provider_id: "pp_paypal_paypal",
+        // The provider key the capability view resolved, never a literal: a
+        // host that registers the provider under another declaration id gets
+        // another key, and the checkout gates compare against this value.
+        payment_provider_id: fields.provider_id,
         payment_mode: "manual",
         mechanism: "native",
         source_payment_collection_id: null,
         source_payment_session_id: null,
         payment_method_reference: null,
-        customer_payment_reference: fields.paypal_subscription_id,
+        // The provider's own subscription id — the one value its `cancel` takes.
+        customer_payment_reference: fields.provider_subscription_id,
       },
-      pending_update_data: null,
       metadata: {
-        source: "paypal_native_mirror",
+        source: "native_mirror",
         plan_id: fields.plan_id,
       },
     })
@@ -106,12 +113,11 @@ export async function upsertNativeMirrorSubscription(
   const recordedPlanId = current.metadata?.plan_id
 
   if (fields.plan_id && recordedPlanId !== fields.plan_id) {
-    // The provider revised the subscription onto a different plan.
-    // medusa-paypal does not deliver `paypal.subscription.revised` (as of 0.6.1
-    // the in-place revise flow is planned in that plugin's changelog, not
-    // shipped), so this reconciliation pass is the only thing that notices; the
-    // plan id itself is not a billing input here (PayPal charges its own plan),
-    // so it is recorded for support rather than acted on.
+    // The provider revised the subscription onto a different plan. The neutral
+    // event carries `plan_id` on every transition, so this is noticed as soon
+    // as the provider reports it; the plan id itself is not a billing input
+    // here (the provider charges its own plan), so it is recorded for support
+    // rather than acted on.
     update.metadata = {
       ...(current.metadata ?? {}),
       plan_id: fields.plan_id,
@@ -131,42 +137,6 @@ export async function upsertNativeMirrorSubscription(
   return "updated"
 }
 
-/**
- * Read the provider's own subscription rows.
- *
- * Returns an empty list when medusa-paypal is not installed (or its entity is
- * not in the data model): the backfill then simply has nothing to reconcile, and
- * that is a normal state for this plugin, not an error.
- */
-export async function loadProviderSubscriptionRecords(
-  container: MedusaContainer
-): Promise<ProviderSubscriptionRecord[]> {
-  try {
-    const query = container.resolve<RemoteQueryFunction>(
-      ContainerRegistrationKeys.QUERY
-    )
-    const { data } = await query.graph({
-      entity: "paypal_subscription",
-      fields: [
-        "id",
-        "paypal_subscription_id",
-        "paypal_plan_id",
-        "status",
-        "customer_id",
-        "variant_id",
-        "interval_unit",
-        "interval_count",
-        "next_billing_at",
-        "last_billing_at",
-      ],
-    })
-
-    return (data as ProviderSubscriptionRecord[]) ?? []
-  } catch {
-    return []
-  }
-}
-
 export type BackfillResult = {
   scanned: number
   created: number
@@ -175,60 +145,96 @@ export type BackfillResult = {
 }
 
 /**
- * One pass over the provider's subscriptions: mirror anything missing and
- * refresh anything already known. Records whose variant cannot be resolved to a
- * product are skipped rather than written with a guessed product id, because a
- * wrong product id would block the wrong checkout.
+ * One pass over every provider that has a native rail: mirror anything missing
+ * and refresh anything already known.
+ *
+ * The records come from the capability view (`native.listRecords`), not from a
+ * query over a provider's table — that is the whole point of the contract: this
+ * plugin used to read `paypal_subscription` directly, which meant every
+ * provider's schema had to be known here.
+ *
+ * Records whose variant cannot be resolved to a product are skipped rather than
+ * written with a guessed product id, because a wrong product id would block the
+ * wrong checkout.
  */
 export async function backfillNativeMirrorSubscriptions(
   container: MedusaContainer,
   logger: MirrorLogger
 ): Promise<BackfillResult> {
-  const records = await loadProviderSubscriptionRecords(container)
+  const capabilities = nativeCapabilities(
+    await resolveProviderCapabilities(container)
+  )
   const result: BackfillResult = {
-    scanned: records.length,
+    scanned: 0,
     created: 0,
     updated: 0,
     skipped: [],
   }
 
-  if (!records.length) {
+  if (!capabilities.length) {
     logger.info(
-      "[reorder] native subscription backfill found no provider rows (medusa-paypal not installed, or nothing to mirror yet)"
+      "[reorder] native subscription backfill found no provider rail (medusa-payment-methods not installed, or no provider with a native rail)"
     )
 
     return result
   }
 
-  const productIds = await readProductIdsForVariants(
-    container,
-    records.map((record) => record.variant_id).filter(Boolean) as string[]
-  )
+  for (const capability of capabilities) {
+    let records
 
-  for (const record of records) {
-    const productId = record.variant_id
-      ? productIds.get(record.variant_id) ?? null
-      : null
-    const built = buildNativeMirrorFieldsFromRecord(record, productId)
-
-    if (!built.ok) {
-      result.skipped.push({
-        reference: record.paypal_subscription_id ?? null,
-        reason: built.reason,
-      })
+    try {
+      records = await capability.native.listRecords(container)
+    } catch (error) {
+      // One provider failing must not stop the others from being reconciled.
+      logger.warn(
+        `[reorder] native subscription backfill could not list '${capability.provider_id}': ` +
+          `${error instanceof Error ? error.message : String(error)}`
+      )
       continue
     }
 
-    const action = await upsertNativeMirrorSubscription(
+    result.scanned += records.length
+
+    if (!records.length) {
+      continue
+    }
+
+    const productIds = await readProductIdsForVariants(
       container,
-      built.fields,
-      logger
+      records
+        .map((record) => record.variant_id)
+        .filter((id): id is string => typeof id === "string" && !!id.trim())
     )
 
-    if (action === "created") {
-      result.created += 1
-    } else {
-      result.updated += 1
+    for (const record of records) {
+      const built = buildNativeMirrorFieldsFromRecord(
+        {
+          ...record,
+          kind: capability.kind,
+          provider_id: capability.provider_id,
+        },
+        record.variant_id ? productIds.get(record.variant_id) ?? null : null
+      )
+
+      if (!built.ok) {
+        result.skipped.push({
+          reference: record.provider_subscription_id ?? null,
+          reason: built.reason,
+        })
+        continue
+      }
+
+      const action = await upsertNativeMirrorSubscription(
+        container,
+        built.fields,
+        logger
+      )
+
+      if (action === "created") {
+        result.created += 1
+      } else {
+        result.updated += 1
+      }
     }
   }
 
@@ -248,7 +254,11 @@ async function readVariantTitles(
   }
 }
 
-async function readProductIdsForVariants(
+/**
+ * Variant id → product id, for the records a provider hands over: a provider
+ * package knows the variant a merchant declared, never reorder's product graph.
+ */
+export async function readProductIdsForVariants(
   container: MedusaContainer,
   variantIds: string[]
 ): Promise<Map<string, string>> {

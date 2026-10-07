@@ -24,7 +24,7 @@ import {
 } from "../../../../../modules/subscription/utils/payment-methods"
 import { isPaymentMethodsModuleRegistered } from "../../../../../modules/subscription/utils/preferred-payment-method"
 import { serializeStoreSubscriptionListItem } from "../../../../../modules/subscription/utils/store-list-serialization"
-import { isPaypalVaultBindingSupported } from "../../../../../workflows/utils/paypal-vault-binding"
+import { resolveProviderCapabilities } from "../../../../../modules/subscription/utils/provider-capabilities"
 
 const ACTIVE_CANCELLATION_STATUSES = [
   CancellationCaseStatus.REQUESTED,
@@ -796,13 +796,15 @@ export async function getStoreProductSubscriptionOfferResponse(
               // provider rail is a different product reached through the
               // storefront's native path, not through the claim endpoint.
               method: "vault" as const,
-              // True when the installed medusa-paypal provider ships the
-              // vault approval capability (Phase 14, Task 22; a hardcoded
-              // false until the provider half landed). A provider that
-              // predates the capability answers false, so the storefront
-              // hides the bound button — and the bind endpoint refuses with
-              // a clear error all the same.
-              supported: isPaypalVaultBindingSupported(req.scope),
+              // True when a registered provider descriptor can bind a payment
+              // method at all — asked of the capability view, never of a
+              // provider package by name. A host with no plugin, or with no
+              // descriptor that binds, answers false, so the storefront hides
+              // the bound button — and the bind endpoint refuses with a clear
+              // error all the same.
+              supported: (await resolveProviderCapabilities(req.scope)).some(
+                (capability) => capability.binding.supported
+              ),
             },
           }
         : null,

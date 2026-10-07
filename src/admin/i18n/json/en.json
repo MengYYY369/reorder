@@ -185,8 +185,14 @@
       "discountValue": "Discount value",
       "trialBonusDays": "Trial bonus days for binding a card",
       "trialBonusDaysHint": "Extra trial days granted once the customer binds a payment method to the claimed trial. Leave empty (or 0) to hide the bind-and-extend option.",
-      "nativeTrialTitle": "Native PayPal trial (variant metadata, read-only)",
-      "nativeTrialHint": "These values live in the product variant's PayPal subscription metadata and are charged by PayPal itself. They are shown for reference only; the offer's trial values above do not change them.",
+      "nativeTrialTitle": "{{provider}} native subscription (provider-side, read-only)",
+      "nativeTrialHint": "These values live in the product variant's {{provider}} subscription metadata and are charged by {{provider}} itself. They are shown for reference only; the offer's trial values above do not change them.",
+      "nativeField": {
+        "interval": "Billing interval",
+        "trial_period": "Trial period",
+        "setup_fee": "Setup fee (checkout currency)",
+        "product_type": "Product type"
+      },
       "nativeTrialPeriods": "Trial: {{value}} day(s)",
       "nativeTrialPeriodsMissing": "Trial: not configured",
       "nativeTrialSetupFee": "Setup fee: {{value}}",

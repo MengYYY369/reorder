@@ -14,10 +14,8 @@ import {
   type CustomerPaymentLinkDeletionCounts,
   type SubscriptionChainDeletionCounts,
 } from "../modules/subscription/utils/subscription-chain-delete"
-import {
-  cancelNativeProviderSubscription,
-  type NativeProviderCancelOutcome,
-} from "../workflows/utils/native-provider-cancel"
+import type { NativeCancelOutcome } from "@mengyyy369/medusa-payment-methods"
+import { cancelNativeSubscriptionRow } from "../modules/subscription/utils/provider-capabilities"
 
 type Logger = {
   info: (message: string, payload?: unknown) => void
@@ -30,11 +28,13 @@ type SubscriptionCascadeRow = {
   reference: string
   status: string
   customer_id: string
+  /** Read for the provider cancel target (provider key + the provider's own id). */
+  payment_context?: unknown
 }
 
 export type CustomerDeletedCascadeOutcome = {
   subscriptions_deleted: number
-  provider_cancels: NativeProviderCancelOutcome[]
+  provider_cancels: NativeCancelOutcome[]
   vault_tokens_deleted: number
   payment_links: CustomerPaymentLinkDeletionCounts | null
   failures: string[]
@@ -125,15 +125,15 @@ export async function runCustomerDeletedCascade(
   // 1. Protocol cancels for the live provider-owned recurrences, while the
   //    mirror rows still carry the provider subscription ids.
   for (const subscription of subscriptions) {
-    const cancelOutcome = await cancelNativeProviderSubscription(
+    const cancelOutcome = await cancelNativeSubscriptionRow(
       container,
-      subscription.reference
+      subscription
     )
 
     outcome.provider_cancels.push(cancelOutcome)
 
     if (cancelOutcome.status === "failed") {
-      const message = `provider cancel failed for subscription '${subscription.id}' (${cancelOutcome.paypal_subscription_id}): ${cancelOutcome.error}`
+      const message = `provider cancel failed for subscription '${subscription.id}' (${cancelOutcome.provider_subscription_id ?? "unknown"}): ${cancelOutcome.error}`
       outcome.failures.push(message)
       logger.warn(`[reorder] customer.deleted cascade: ${message}`)
     }

@@ -146,6 +146,10 @@ medusaIntegrationTestRunner({
           payment_context: {
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 

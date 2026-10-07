@@ -1,19 +1,28 @@
 import path from "path"
+import { asValue } from "awilix"
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import { Modules, MedusaError } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
-import paypalSubscriptionMirrorHandler from "../../src/subscribers/paypal-subscription-mirror"
+import {
+  NATIVE_SUBSCRIPTION_CHANGED_EVENT,
+  type NativeSubscriptionChangedPayload,
+  type NativeSubscriptionRecord,
+  type ProviderCapabilityView,
+} from "@mengyyy369/medusa-payment-methods"
+import nativeSubscriptionMirrorHandler from "../../src/subscribers/native-subscription-mirror"
 import nativeSubscriptionBackfillJob from "../../src/jobs/native-subscription-backfill"
 import { SUBSCRIPTION_MODULE } from "../../src/modules/subscription"
 import type SubscriptionModuleService from "../../src/modules/subscription/service"
 import {
   SubscriptionFrequencyInterval,
   SubscriptionStatus,
+  type SubscriptionPaymentContext,
 } from "../../src/modules/subscription/types"
 import { listDueRenewalCyclesForProcessing } from "../../src/modules/renewal/utils/scheduler-query"
 import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
 import {
   createCustomer,
+  createProductWithVariant,
   createSubscriptionSeed,
 } from "../helpers/subscription-fixtures"
 
@@ -23,26 +32,100 @@ const BRIDGE_SECRET = "test-bridge-secret"
 
 const PAYPAL_ID = "I-MIRROR01"
 
-const ACTIVATED_PAYLOAD = {
-  paypal_subscription_id: PAYPAL_ID,
-  status: "ACTIVE",
-  customer_id: "",
-  product_id: "prod_mirror",
-  variant_id: "variant_mirror",
-  plan_id: "P-PLAN1",
-  frequency_interval: "month",
-  frequency_value: 1,
-  next_billing_at: "2026-11-01T00:00:00Z",
-  last_billing_at: "2026-10-01T00:00:00Z",
+/** The registration key the capability view maps the `paypal` kind to. */
+const PAYPAL_PROVIDER_ID = "pp_paypal_paypal"
+
+/** `NATIVE-{kind}-{providerSubscriptionId}` — the key the mirror upserts on. */
+function mirrorReference(providerSubscriptionId: string): string {
+  return `NATIVE-paypal-${providerSubscriptionId}`
 }
 
+/**
+ * A rail-neutral record as the provider publishes it on
+ * `payment-rail.native_subscription.changed`. `product_id` is deliberately
+ * absent: the handler resolves it from `variant_id` through the catalog, so a
+ * test that wants a row has to seed a real variant and override `variant_id`.
+ *
+ * `provider_id` is the provider's own echo and is deliberately `null` here
+ * (the real payloads often are): the row's `payment_provider_id` must come from
+ * the capability view's registration key, never from this field.
+ */
+const ACTIVATED_PAYLOAD: NativeSubscriptionChangedPayload = {
+  provider_subscription_id: PAYPAL_ID,
+  plan_id: "P-PLAN1",
+  status: "active",
+  customer_id: null,
+  variant_id: null,
+  interval_unit: "MONTH",
+  interval_count: 1,
+  next_billing_at: "2026-11-01T00:00:00Z",
+  last_billing_at: "2026-10-01T00:00:00Z",
+  kind: "paypal",
+  provider_id: null,
+  transition: "payment_succeeded",
+}
+
+/**
+ * The fake `paymentMethods` module a host on
+ * `@mengyyy369/medusa-payment-methods` registers: the mirror handler and the
+ * backfill job resolve their capability view from the container and map
+ * `kind` → the registration key. Without a registration both warn and write
+ * nothing.
+ *
+ * `records` is handed back by reference so a test can change what the next
+ * `listRecords` pass returns. Returns a restore function — the suite's
+ * container is shared by the file's tests (same pattern as
+ * `trial-payment-method-binding.spec.ts`).
+ */
+function registerFakePaymentMethods(
+  container: MedusaContainer,
+  records: NativeSubscriptionRecord[] = []
+): { records: NativeSubscriptionRecord[]; restore: () => void } {
+  const capability: ProviderCapabilityView = {
+    provider_id: PAYPAL_PROVIDER_ID,
+    kind: "paypal",
+    display_name: "PayPal",
+    display_name_i18n: null,
+    binding: { supported: true },
+    native: {
+      supported: true,
+      readVariantDeclaration: () => null,
+      listRecords: async () => records,
+      cancel: async () => ({
+        status: "skipped",
+        reason: "provider_row_missing",
+      }),
+    },
+  }
+
+  container.register({
+    paymentMethods: asValue({
+      getProviderCapabilities: async () => [capability],
+    }),
+  })
+
+  return {
+    records,
+    restore: () => {
+      container.register({ paymentMethods: asValue(null) })
+    },
+  }
+}
+
+/**
+ * Delivers the rail-neutral event straight to the subscriber, the way the
+ * provider's injected hook publishes it on the bus.
+ */
 async function emit(
   container: MedusaContainer,
-  name: string,
   data: Record<string, unknown>
 ) {
-  await paypalSubscriptionMirrorHandler({
-    event: { name, data, broadcast: false },
+  await nativeSubscriptionMirrorHandler({
+    event: {
+      name: NATIVE_SUBSCRIPTION_CHANGED_EVENT,
+      data,
+      broadcast: false,
+    },
     container,
     pluginOptions: {},
   } as never)
@@ -99,7 +182,7 @@ function lockKeys(keys: string | string[]): string[] {
   return Array.isArray(keys) ? keys : [keys]
 }
 
-function autoRenewKeys(calls: [string | string[]][]): string[] {
+function autoRenewKeys(calls: [string | string[], ...unknown[]][]): string[] {
   return calls
     .flatMap(([keys]) => lockKeys(keys))
     .filter((key) => key.startsWith(AUTO_RENEW_LOCK_PREFIX))
@@ -119,44 +202,70 @@ medusaIntegrationTestRunner({
           SUBSCRIPTION_MODULE
         )
         const customer = await createCustomer(container)
-        const payload = { ...ACTIVATED_PAYLOAD, customer_id: customer.id }
+        const { product, variant } = await createProductWithVariant(container)
+        const { restore } = registerFakePaymentMethods(container)
 
-        await emit(container, "paypal.subscription.activated", payload)
-        await emit(container, "paypal.subscription.activated", payload)
+        try {
+          const payload = {
+            ...ACTIVATED_PAYLOAD,
+            customer_id: customer.id,
+            variant_id: variant.id,
+          }
 
-        const rows = await subscriptionModule.listSubscriptions({
-          reference: [`NATIVE-${PAYPAL_ID}`],
-        })
+          await emit(container, payload)
+          await emit(container, payload)
 
-        expect(rows).toHaveLength(1)
-        expect(rows[0]).toMatchObject({
-          reference: `NATIVE-${PAYPAL_ID}`,
-          status: SubscriptionStatus.ACTIVE,
-          customer_id: customer.id,
-          product_id: "prod_mirror",
-          frequency_interval: SubscriptionFrequencyInterval.MONTH,
-          frequency_value: 1,
-        })
-        expect(rows[0].payment_context).toMatchObject({
-          payment_mode: "manual",
-          mechanism: "native",
-        })
-        expect(new Date(rows[0].next_renewal_at!).toISOString()).toEqual(
-          "2026-11-01T00:00:00.000Z"
-        )
+          const rows = await subscriptionModule.listSubscriptions({
+            reference: [mirrorReference(PAYPAL_ID)],
+          })
 
-        await emit(container, "paypal.subscription.payment_failed", payload)
+          expect(rows).toHaveLength(1)
+          expect(rows[0]).toMatchObject({
+            reference: mirrorReference(PAYPAL_ID),
+            status: SubscriptionStatus.ACTIVE,
+            customer_id: customer.id,
+            product_id: product.id,
+            variant_id: variant.id,
+            frequency_interval: SubscriptionFrequencyInterval.MONTH,
+            frequency_value: 1,
+          })
+          expect(rows[0].payment_context).toMatchObject({
+            // The capability view's registration key, not the payload's echo
+            // (which is null in this fixture).
+            payment_provider_id: PAYPAL_PROVIDER_ID,
+            payment_mode: "manual",
+            mechanism: "native",
+            customer_payment_reference: PAYPAL_ID,
+          })
+          expect(rows[0].metadata).toMatchObject({
+            source: "native_mirror",
+            plan_id: "P-PLAN1",
+          })
+          expect(new Date(rows[0].next_renewal_at!).toISOString()).toEqual(
+            "2026-11-01T00:00:00.000Z"
+          )
 
-        const afterFailure = await subscriptionModule.listSubscriptions({
-          reference: [`NATIVE-${PAYPAL_ID}`],
-        })
+          await emit(container, {
+            ...payload,
+            status: "past_due",
+            // A failed charge says nothing new about the date: the row must
+            // keep the one the provider reported earlier.
+            next_billing_at: null,
+            transition: "payment_failed",
+          })
 
-        expect(afterFailure).toHaveLength(1)
-        expect(afterFailure[0].status).toEqual(SubscriptionStatus.PAST_DUE)
-        // A later event without a billing date must not erase the known one.
-        expect(new Date(afterFailure[0].next_renewal_at!).toISOString()).toEqual(
-          "2026-11-01T00:00:00.000Z"
-        )
+          const afterFailure = await subscriptionModule.listSubscriptions({
+            reference: [mirrorReference(PAYPAL_ID)],
+          })
+
+          expect(afterFailure).toHaveLength(1)
+          expect(afterFailure[0].status).toEqual(SubscriptionStatus.PAST_DUE)
+          expect(
+            new Date(afterFailure[0].next_renewal_at!).toISOString()
+          ).toEqual("2026-11-01T00:00:00.000Z")
+        } finally {
+          restore()
+        }
       })
 
       it("leaves the renewal date null when activation reported none", async () => {
@@ -165,21 +274,28 @@ medusaIntegrationTestRunner({
           SUBSCRIPTION_MODULE
         )
         const customer = await createCustomer(container)
+        const { variant } = await createProductWithVariant(container)
+        const { restore } = registerFakePaymentMethods(container)
 
-        await emit(container, "paypal.subscription.activated", {
-          ...ACTIVATED_PAYLOAD,
-          customer_id: customer.id,
-          paypal_subscription_id: "I-NODATE01",
-          next_billing_at: null,
-          last_billing_at: null,
-        })
+        try {
+          await emit(container, {
+            ...ACTIVATED_PAYLOAD,
+            customer_id: customer.id,
+            variant_id: variant.id,
+            provider_subscription_id: "I-NODATE01",
+            next_billing_at: null,
+            last_billing_at: null,
+          })
 
-        const [row] = await subscriptionModule.listSubscriptions({
-          reference: ["NATIVE-I-NODATE01"],
-        })
+          const [row] = await subscriptionModule.listSubscriptions({
+            reference: [mirrorReference("I-NODATE01")],
+          })
 
-        expect(row).toBeDefined()
-        expect(row.next_renewal_at).toBeNull()
+          expect(row).toBeDefined()
+          expect(row.next_renewal_at).toBeNull()
+        } finally {
+          restore()
+        }
       })
 
       it("writes nothing when the payload cannot build a row", async () => {
@@ -188,19 +304,49 @@ medusaIntegrationTestRunner({
           SUBSCRIPTION_MODULE
         )
         const customer = await createCustomer(container)
+        const { variant } = await createProductWithVariant(container)
+        const { restore } = registerFakePaymentMethods(container)
 
-        await emit(container, "paypal.subscription.activated", {
-          ...ACTIVATED_PAYLOAD,
-          customer_id: customer.id,
-          paypal_subscription_id: "I-PARTIAL1",
-          product_id: null,
-        })
-
-        expect(
-          await subscriptionModule.listSubscriptions({
-            reference: ["NATIVE-I-PARTIAL1"],
+        try {
+          // No variant means no product to resolve: a row built without one
+          // would look like a live recurrence and block the wrong checkout.
+          await emit(container, {
+            ...ACTIVATED_PAYLOAD,
+            customer_id: customer.id,
+            variant_id: null,
+            provider_subscription_id: "I-PARTIAL1",
           })
-        ).toHaveLength(0)
+
+          // The rail's `null` status is "do not mirror" (an approval nobody
+          // finished), and a status outside the vocabulary is not writable
+          // either.
+          await emit(container, {
+            ...ACTIVATED_PAYLOAD,
+            customer_id: customer.id,
+            variant_id: variant.id,
+            provider_subscription_id: "I-NULLSTATUS1",
+            status: null,
+          })
+          await emit(container, {
+            ...ACTIVATED_PAYLOAD,
+            customer_id: customer.id,
+            variant_id: variant.id,
+            provider_subscription_id: "I-UNKNOWN1",
+            status: "something_new",
+          })
+
+          expect(
+            await subscriptionModule.listSubscriptions({
+              reference: [
+                mirrorReference("I-PARTIAL1"),
+                mirrorReference("I-NULLSTATUS1"),
+                mirrorReference("I-UNKNOWN1"),
+              ],
+            })
+          ).toHaveLength(0)
+        } finally {
+          restore()
+        }
       })
 
       it("keeps mirror rows out of the renewal scheduler and their cycles untouched", async () => {
@@ -216,6 +362,10 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_paypal_paypal",
             payment_mode: "manual",
             mechanism: "native",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -228,6 +378,9 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_system_default",
             payment_mode: "auto",
             payment_method_reference: "pm_auto",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -283,6 +436,10 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_paypal_paypal",
             payment_mode: "manual",
             mechanism: "native",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -331,6 +488,9 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
             payment_method_reference: "pm_toggle",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -416,6 +576,9 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
             payment_method_reference: "pm_lock",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -432,6 +595,10 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_paypal_paypal",
             payment_mode: "manual",
             mechanism: "native",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -504,6 +671,9 @@ medusaIntegrationTestRunner({
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
             payment_method_reference: "pm_overdue",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -539,7 +709,17 @@ medusaIntegrationTestRunner({
         // the message is theirs, not the engine's. Each is asserted in full,
         // because the whole sentence is what the whitelist in
         // `src/workflows/set-subscription-auto-renew.ts` declares.
-        const refusals = [
+        type GuardRefusalSeed = {
+          reference: string
+          status: SubscriptionStatus
+          next_renewal_at: Date
+          payment_context: SubscriptionPaymentContext
+        }
+
+        const refusals: Array<{
+          seed: GuardRefusalSeed
+          copy: (id: string) => string
+        }> = [
           {
             seed: {
               reference: `NATIVE-GUARD-${Date.now()}`,
@@ -549,6 +729,10 @@ medusaIntegrationTestRunner({
                 payment_provider_id: "pp_paypal_paypal",
                 payment_mode: "manual",
                 mechanism: "native",
+                source_payment_collection_id: null,
+                source_payment_session_id: null,
+                payment_method_reference: null,
+                customer_payment_reference: null,
               },
             },
             copy: (id: string) =>
@@ -562,6 +746,13 @@ medusaIntegrationTestRunner({
               payment_context: {
                 payment_provider_id: "pp_system_default",
                 payment_mode: "manual",
+                // The overdue guard exempts rows with no stored method (a free
+                // grant could never have been charged), so the row has to carry
+                // one for the refusal this case pins to fire at all.
+                payment_method_reference: "pm_guard",
+                source_payment_collection_id: null,
+                source_payment_session_id: null,
+                customer_payment_reference: null,
               },
             },
             copy: (id: string) =>
@@ -610,6 +801,10 @@ medusaIntegrationTestRunner({
           payment_context: {
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -678,6 +873,10 @@ medusaIntegrationTestRunner({
           payment_context: {
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -766,6 +965,10 @@ medusaIntegrationTestRunner({
             payment_context: {
               payment_provider_id: "pp_system_default",
               payment_mode: "manual",
+              source_payment_collection_id: null,
+              source_payment_session_id: null,
+              payment_method_reference: null,
+              customer_payment_reference: null,
             },
           })
 
@@ -840,6 +1043,10 @@ medusaIntegrationTestRunner({
           payment_context: {
             payment_provider_id: "pp_system_default",
             payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
           },
         })
 
@@ -878,6 +1085,75 @@ medusaIntegrationTestRunner({
 
         expect(row.payment_context).toMatchObject({ payment_mode: "manual" })
         expect(row.payment_context).not.toHaveProperty("mechanism")
+      })
+
+      it("backfills the provider's records, then updates the row it created", async () => {
+        const container = getContainer()
+        const subscriptionModule = container.resolve<SubscriptionModuleService>(
+          SUBSCRIPTION_MODULE
+        )
+        const customer = await createCustomer(container)
+        const { product, variant } = await createProductWithVariant(container)
+
+        // The records the provider's capability view hands over — the backfill
+        // no longer reads a provider table, so this is the whole input.
+        const { records, restore } = registerFakePaymentMethods(container, [
+          {
+            provider_subscription_id: "I-BACKFILL1",
+            plan_id: "P-BACKFILL",
+            status: "active",
+            customer_id: customer.id,
+            variant_id: variant.id,
+            interval_unit: "MONTH",
+            interval_count: 1,
+            next_billing_at: "2026-12-01T00:00:00Z",
+            last_billing_at: "2026-11-01T00:00:00Z",
+          },
+        ])
+
+        try {
+          await nativeSubscriptionBackfillJob(container)
+
+          const created = await subscriptionModule.listSubscriptions({
+            reference: [mirrorReference("I-BACKFILL1")],
+          })
+
+          expect(created).toHaveLength(1)
+          expect(created[0]).toMatchObject({
+            reference: mirrorReference("I-BACKFILL1"),
+            status: SubscriptionStatus.ACTIVE,
+            customer_id: customer.id,
+            product_id: product.id,
+            frequency_interval: SubscriptionFrequencyInterval.MONTH,
+            frequency_value: 1,
+          })
+          expect(created[0].payment_context).toMatchObject({
+            payment_provider_id: PAYPAL_PROVIDER_ID,
+            payment_mode: "manual",
+            mechanism: "native",
+            customer_payment_reference: "I-BACKFILL1",
+          })
+          expect(created[0].metadata).toMatchObject({
+            source: "native_mirror",
+            plan_id: "P-BACKFILL",
+          })
+
+          // The provider cancelled the subscription between passes: the next
+          // run reconciles the same row instead of creating a second one.
+          records[0].status = "cancelled"
+
+          await nativeSubscriptionBackfillJob(container)
+
+          const updated = await subscriptionModule.listSubscriptions({
+            reference: [mirrorReference("I-BACKFILL1")],
+          })
+
+          expect(updated).toHaveLength(1)
+          expect(updated[0].id).toEqual(created[0].id)
+          expect(updated[0].status).toEqual(SubscriptionStatus.CANCELLED)
+        } finally {
+          restore()
+        }
       })
 
       it("reconciles to nothing when the provider module is absent", async () => {

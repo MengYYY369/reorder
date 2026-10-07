@@ -44,6 +44,50 @@ type ProductModuleService = {
   ): Promise<Record<string, unknown>>
 }
 
+/**
+ * The fake `paymentMethods` service a host with the payment-methods plugin
+ * presents: the cancel path goes through the capability view
+ * (`getProviderCapabilities`), never through a provider module by name
+ * (2026-10-06 rail decoupling). The returned `cancel` is the provider's own
+ * callable, so a test can assert it was reached and what it was handed.
+ */
+function registerFakeProviderCapability(container: any, cancel: jest.Mock) {
+  const getProviderCapabilities = jest.fn(async () => [
+    {
+      provider_id: "pp_paypal_paypal",
+      kind: "paypal",
+      display_name: "PayPal",
+      display_name_i18n: null,
+      binding: { supported: true },
+      native: {
+        supported: true,
+        readVariantDeclaration: () => null,
+        listRecords: async () => [],
+        cancel,
+      },
+    },
+  ])
+
+  container.register({
+    paymentMethods: asValue({ getProviderCapabilities }),
+  })
+
+  return { cancel, getProviderCapabilities }
+}
+
+/** The `payment_context` of a native mirror row pointing at one provider id. */
+function nativeMirrorPaymentContext(providerSubscriptionId: string) {
+  return {
+    payment_provider_id: "pp_paypal_paypal",
+    payment_mode: "manual",
+    mechanism: "native",
+    source_payment_collection_id: null,
+    source_payment_session_id: null,
+    payment_method_reference: null,
+    customer_payment_reference: providerSubscriptionId,
+  }
+}
+
 medusaIntegrationTestRunner({
   medusaConfigFile: path.resolve(process.cwd(), "integration-tests"),
   env: {
@@ -308,28 +352,19 @@ medusaIntegrationTestRunner({
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
-        const calls: Array<{ id: string; action: string }> = []
-
-        container.register({
-          paypalSubscription: asValue({
-            listSubscriptions: jest.fn(async () => [
-              [{ id: "prow_native_1", paypal_subscription_id: "I-NATIVE-1" }],
-              1,
-            ]),
-            requestLifecycleAction: jest.fn(
-              async (id: string, action: string) => {
-                calls.push({ id, action })
-
-                return { id, status: "CANCELLED" }
-              }
-            ),
-          }),
+        const cancel = jest.fn().mockResolvedValue({
+          status: "cancelled",
+          provider_subscription_id: "I-NATIVE-1",
+          provider_row_id: "prow_native_1",
         })
+
+        registerFakeProviderCapability(container, cancel)
 
         try {
           const subscription = await createSubscriptionSeed(container, {
             reference: "NATIVE-I-NATIVE-1",
             status: SubscriptionStatus.ACTIVE,
+            payment_context: nativeMirrorPaymentContext("I-NATIVE-1"),
           })
 
           const { result } = await cancelSubscriptionWorkflow(container).run({
@@ -339,7 +374,10 @@ medusaIntegrationTestRunner({
           expect(result.subscription.status).toEqual(
             SubscriptionStatus.CANCELLED
           )
-          expect(calls).toEqual([{ id: "prow_native_1", action: "cancel" }])
+          expect(cancel).toHaveBeenCalledWith(
+            expect.anything(),
+            "I-NATIVE-1"
+          )
 
           const stored = await subscriptionModule.retrieveSubscription(
             subscription.id
@@ -347,12 +385,12 @@ medusaIntegrationTestRunner({
           expect(stored.metadata?.cancel_context).toMatchObject({
             provider_cancel: {
               status: "cancelled",
-              paypal_subscription_id: "I-NATIVE-1",
+              provider_subscription_id: "I-NATIVE-1",
               provider_row_id: "prow_native_1",
             },
           })
         } finally {
-          container.register({ paypalSubscription: asValue(null) })
+          container.register({ paymentMethods: asValue(null) })
         }
       })
 
@@ -360,23 +398,17 @@ medusaIntegrationTestRunner({
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
+        const cancel = jest
+          .fn()
+          .mockRejectedValue(new Error("paypal rejected cancel: HTTP 500"))
 
-        container.register({
-          paypalSubscription: asValue({
-            listSubscriptions: jest.fn(async () => [
-              [{ id: "prow_native_2" }],
-              1,
-            ]),
-            requestLifecycleAction: jest.fn(async () => {
-              throw new Error("paypal rejected cancel: HTTP 500")
-            }),
-          }),
-        })
+        registerFakeProviderCapability(container, cancel)
 
         try {
           const subscription = await createSubscriptionSeed(container, {
             reference: "NATIVE-I-NATIVE-2",
             status: SubscriptionStatus.ACTIVE,
+            payment_context: nativeMirrorPaymentContext("I-NATIVE-2"),
           })
 
           const { result } = await cancelSubscriptionWorkflow(container).run({
@@ -397,7 +429,7 @@ medusaIntegrationTestRunner({
             },
           })
         } finally {
-          container.register({ paypalSubscription: asValue(null) })
+          container.register({ paymentMethods: asValue(null) })
         }
       })
 
@@ -405,14 +437,11 @@ medusaIntegrationTestRunner({
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
-        const listSubscriptions = jest.fn(async () => [[], 0])
-
-        container.register({
-          paypalSubscription: asValue({
-            listSubscriptions,
-            requestLifecycleAction: jest.fn(),
-          }),
-        })
+        const cancel = jest.fn()
+        const { getProviderCapabilities } = registerFakeProviderCapability(
+          container,
+          cancel
+        )
 
         try {
           const subscription = await createSubscriptionSeed(container, {
@@ -424,7 +453,10 @@ medusaIntegrationTestRunner({
             input: { id: subscription.id, effective_at: "immediately" },
           })
 
-          expect(listSubscriptions).not.toHaveBeenCalled()
+          // A non-native row is answered before the capability view is even
+          // consulted: neither the provider cancel nor the view are reached.
+          expect(cancel).not.toHaveBeenCalled()
+          expect(getProviderCapabilities).not.toHaveBeenCalled()
 
           const stored = await subscriptionModule.retrieveSubscription(
             subscription.id
@@ -433,7 +465,7 @@ medusaIntegrationTestRunner({
             provider_cancel: { status: "skipped", reason: "not_native" },
           })
         } finally {
-          container.register({ paypalSubscription: asValue(null) })
+          container.register({ paymentMethods: asValue(null) })
         }
       })
 

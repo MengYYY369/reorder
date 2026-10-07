@@ -3,7 +3,6 @@ import { asValue } from "awilix"
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import {
   ContainerRegistrationKeys,
-  MedusaError,
   Modules,
 } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
@@ -284,11 +283,17 @@ function registerFakeVaultProvider(
       completeCalls.push(call as Record<string, unknown>)
       if (input.completionStatus) {
         // The sandbox's real pending case, surfaced the way the plugin's
-        // binder authors it: an invalid_data refusal the route quotes.
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `PayPal setup token is not approved (status: ${input.completionStatus})`
-        )
+        // binder authors it: a `PaymentMethodsError` (422
+        // `binding_pending_approval`) whose machine type the route maps to
+        // reorder's own buyer copy. The plain object is the shape the
+        // workflow engine serializes out of that error class
+        // (name/status/type/message).
+        throw {
+          name: "PaymentMethodsError",
+          status: 422,
+          type: "binding_pending_approval",
+          message: `PayPal setup token is not approved (status: ${input.completionStatus})`,
+        }
       }
 
       return {
@@ -1013,8 +1018,8 @@ medusaIntegrationTestRunner({
             headers
           )
           expect(notApproved.status).toEqual(400)
-          expect(notApproved.data.message).toContain(
-            "PayPal setup token is not approved (status:"
+          expect(notApproved.data.message).toEqual(
+            "the payment method is not approved yet — finish the approval at the provider, then retry"
           )
 
           const untouched = await getSubscriptionRow(container, subscriptionId)

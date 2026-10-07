@@ -264,40 +264,6 @@ export function logUnquotedStepFailure(
   )
 }
 
-/**
- * The serialized copy of a *typed* failure the engine reported, found by the
- * `name` `serializeError` preserved. Returns its own message — the one text a
- * typed operational error is allowed to quote, because the type's author wrote
- * that message for the operator — or `null` when no such failure is in the
- * array.
- *
- * Consumer: medusa-paypal 0.9.5's `PaypalCredentialEnvironmentMismatchError`
- * (ticket 03, #18). Without this lookup the mismatch would collapse into the
- * route's generic 500 text — a fail-fast the operator must be able to read,
- * never a generic "binding failed" with the cause in a log line.
- */
-export function findSerializedErrorMessageByName(
-  errors: unknown,
-  errorName: string
-): string | null {
-  const entries = Array.isArray(errors) ? errors : []
-
-  for (const entry of entries) {
-    const raw = (entry as SerializedStepFailure | null)?.error
-
-    if (!raw || typeof raw !== "object") {
-      continue
-    }
-
-    const candidate = raw as Record<string, unknown>
-
-    if (candidate.name === errorName && typeof candidate.message === "string") {
-      return candidate.message
-    }
-  }
-
-  return null
-}
 
 /**
  * Maps a `PaymentMethodsError`'s own serialized `status` onto the core
@@ -320,6 +286,12 @@ export function coreTypeForPaymentMethodsStatus(status: unknown): string | null 
       return MedusaError.Types.NOT_FOUND
     case 409:
       return MedusaError.Types.CONFLICT
+    case 500:
+      // An operator fault the plugin raised as a 500 on purpose (the
+      // credential-environment mismatch): it keeps its status *and* its
+      // message, which is why the routes rethrow the plugin's own message on
+      // this branch instead of a generic customer-facing copy.
+      return MedusaError.Types.UNEXPECTED_STATE
     default:
       return null
   }
@@ -327,13 +299,18 @@ export function coreTypeForPaymentMethodsStatus(status: unknown): string | null 
 
 /**
  * The first serialized `PaymentMethodsError` in the engine's errors array, as
- * `{ status, message }` — the plugin's error class carries both as own
- * properties, which survive `serializeError`. `null` when the failure was not
- * one of the plugin's.
+ * `{ status, type, message }` — the plugin's error class carries all three as
+ * own properties, which survive `serializeError`. `null` when the failure was
+ * not one of the plugin's.
+ *
+ * `type` is what a caller maps to its own copy: the plugin's machine code is
+ * stable, its message is operator-facing prose. Without it the only way to tell
+ * `binding_pending_approval` from a provider outage would be to match on that
+ * prose, which is exactly what the 2026-10-06 contract removed.
  */
 export function findSerializedPaymentMethodsFailure(
   errors: unknown
-): { status: number; message: string } | null {
+): { status: number; type: string | null; message: string } | null {
   const entries = Array.isArray(errors) ? errors : []
 
   for (const entry of entries) {
@@ -353,7 +330,11 @@ export function findSerializedPaymentMethodsFailure(
       typeof candidate.status === "number" &&
       typeof candidate.message === "string"
     ) {
-      return { status: candidate.status, message: candidate.message }
+      return {
+        status: candidate.status,
+        type: typeof candidate.type === "string" ? candidate.type : null,
+        message: candidate.message,
+      }
     }
   }
 

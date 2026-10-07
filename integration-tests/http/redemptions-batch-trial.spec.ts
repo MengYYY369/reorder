@@ -29,6 +29,9 @@ const OFFER_BONUS_DAYS = 3
 const BATCH_BONUS_DAYS = 5
 const DAY_MS = 86_400_000
 
+/** The registration key derived from the fake PayPal declaration below. */
+const FAKE_PAYMENT_PROVIDER_KEY = "pp_paypal_paypal_test"
+
 type ApiKeyModule = {
   createApiKeys: (input: {
     title: string
@@ -104,25 +107,36 @@ async function postBind(
 
 /**
  * Registers the fake vault capability the way the bind tests do: the resolved
- * `paypalSubscription` answers both approval methods, and the payment module's
- * provider declaration carries a PayPal provider. Returns a restore function —
- * the suite's container is shared by the file's tests.
+ * `paymentMethods` answers the 0.2.0 binding surface (the container is the
+ * first argument — its arity is the version discriminator), and the payment
+ * module's provider declaration carries a PayPal provider. Returns a restore
+ * function — the suite's container is shared by the file's tests.
  */
 function registerFakeVaultProvider(
   container: MedusaContainer,
   input: { setupTokenId: string; approveUrl: string; vaultId: string }
 ): { restore: () => void } {
+  // Plain async functions, NOT jest.fn(): the capability resolver reads the
+  // function's arity (length >= 2) as the version gate, and a jest.fn() mock
+  // always reports length 0 no matter its implementation.
   container.register({
-    paypalSubscription: asValue({
-      startVaultApproval: jest.fn().mockResolvedValue({
-        setup_token_id: input.setupTokenId,
-        approve_url: input.approveUrl,
-      }),
-      completeVaultApproval: jest.fn().mockResolvedValue({
-        status: "VAULTED",
-        vault_id: input.vaultId,
-        customer_id: null,
-      }),
+    paymentMethods: asValue({
+      startBinding: async function (_container: unknown, call: unknown) {
+        void call
+        return {
+          approvalUrl: input.approveUrl,
+          state: input.setupTokenId,
+        }
+      },
+      completeBinding: async function (_container: unknown, call: unknown) {
+        void call
+        return {
+          method: {
+            id: input.vaultId,
+            provider_id: FAKE_PAYMENT_PROVIDER_KEY,
+          },
+        }
+      },
     }),
   })
 
@@ -144,7 +158,7 @@ function registerFakeVaultProvider(
 
   return {
     restore: () => {
-      container.register({ paypalSubscription: asValue(null) })
+      container.register({ paymentMethods: asValue(null) })
       paymentModule.moduleDeclaration = previousDeclaration
     },
   }

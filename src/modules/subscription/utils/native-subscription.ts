@@ -4,8 +4,11 @@ import { SubscriptionStatus } from "../types"
  * The one definition of "this subscription row mirrors a provider-owned
  * recurrence".
  *
- * A native row is written by the PayPal event bridge and gets a fixed
- * `NATIVE-{paypal_subscription_id}` reference. Reference-prefix matching is the
+ * A native row is written by the neutral rail event (`payment-rail.native_subscription.changed`)
+ * or by the backfill, and gets a fixed `NATIVE-{kind}-{provider_subscription_id}`
+ * reference — `kind` is the provider family (`paypal`), so a row says which rail
+ * it belongs to without a join, and the provider's own id keeps its dashes.
+ * Reference-prefix matching is the
  * only allowed test, and it is deliberately not the `mechanism` value inside
  * `payment_context`:
  *
@@ -33,20 +36,59 @@ export function isNativeSubscriptionReference(reference: unknown): boolean {
 }
 
 /**
- * Reference for a mirror row, or null when the event carries no provider id —
- * a native row without one could never be located again, so it must not be
- * created.
+ * The provider target of a native mirror row: which provider key owns it and
+ * which of the provider's own subscription ids it stands for, or `null` when
+ * the row is not a native mirror at all.
+ *
+ * The raw id lives in `payment_context.customer_payment_reference` (written when
+ * the row was mirrored) because the `NATIVE-…` reference is a *key*: the
+ * provider's `cancel` takes its own id, and nothing here parses the key back
+ * into parts.
  */
-export function buildNativeSubscriptionReference(
-  providerSubscriptionId: unknown
-): string | null {
-  if (typeof providerSubscriptionId !== "string") {
+export function readNativeProviderTarget(row: {
+  reference?: unknown
+  payment_context?: unknown
+}): { providerId: string | null; reference: string | null } | null {
+  if (!isNativeSubscriptionReference(row?.reference)) {
     return null
   }
 
-  const id = providerSubscriptionId.trim()
+  const context = (row?.payment_context ?? null) as Record<string, unknown> | null
 
-  return id ? `${NATIVE_SUBSCRIPTION_REFERENCE_PREFIX}${id}` : null
+  return {
+    providerId: readText(context?.payment_provider_id),
+    reference: readText(context?.customer_payment_reference),
+  }
+}
+
+function readText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+/**
+ * Reference for a mirror row: `NATIVE-{kind}-{providerSubscriptionId}`, or null
+ * when either half is missing — a native row without them could never be
+ * located again, so it must not be created.
+ *
+ * Nothing parses this back into its parts for identity: the raw provider id
+ * travels separately in `payment_context.customer_payment_reference`, which is
+ * what a provider's `cancel` receives.
+ */
+export function buildNativeSubscriptionReference(
+  kind: unknown,
+  providerSubscriptionId: unknown
+): string | null {
+  const providerKind = typeof kind === "string" ? kind.trim() : ""
+  const id =
+    typeof providerSubscriptionId === "string"
+      ? providerSubscriptionId.trim()
+      : ""
+
+  if (!providerKind || !id) {
+    return null
+  }
+
+  return `${NATIVE_SUBSCRIPTION_REFERENCE_PREFIX}${providerKind}-${id}`
 }
 
 /** Push-down filter for "only native mirror rows". */

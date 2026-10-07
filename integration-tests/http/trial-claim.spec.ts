@@ -410,11 +410,11 @@ medusaIntegrationTestRunner({
           customerA
         )
 
-        // Task 22: the DTO's `binding.supported` follows the duck-typed
-        // capability of the installed provider — dynamic, never a hardcoded
-        // literal. No provider is registered in this suite (the acceptance
-        // environment ships none), so the flag answers false and the request
-        // stays a 200.
+        // Task 22: the DTO's `binding.supported` follows the capability view
+        // of the installed payment-methods plugin — dynamic, never a hardcoded
+        // literal. No capability view is registered in this suite (the
+        // acceptance environment ships none), so the flag answers false and
+        // the request stays a 200.
         const withoutProvider = await api.get(
           `/store/products/${product.id}/subscription-offer`,
           { headers: headersA }
@@ -427,12 +427,21 @@ medusaIntegrationTestRunner({
           supported: false,
         })
 
-        // Register a fake that ships both methods — the state a host on
-        // medusa-paypal >= 0.7.0 runs in — and the same DTO flips to true.
+        // Register a fake capability view that ships the binding surface —
+        // the state a host with the payment-methods plugin runs in — and the
+        // same DTO flips to true.
         container.register({
-          paypalSubscription: asValue({
-            startVaultApproval: jest.fn(),
-            completeVaultApproval: jest.fn(),
+          paymentMethods: asValue({
+            getProviderCapabilities: async () => [
+              {
+                provider_id: "pp_paypal_paypal",
+                kind: "paypal",
+                display_name: "PayPal",
+                display_name_i18n: null,
+                binding: { supported: true },
+                native: null,
+              },
+            ],
           }),
         })
 
@@ -469,8 +478,8 @@ medusaIntegrationTestRunner({
           })
         } finally {
           // Awilix 8 has no unregister; a null value is the same answer for
-          // the duck-typed capability as a missing registration.
-          container.register({ paypalSubscription: asValue(null) })
+          // the capability view as a missing registration.
+          container.register({ paymentMethods: asValue(null) })
         }
 
         // And the absence left behind answers false again: every flavor of

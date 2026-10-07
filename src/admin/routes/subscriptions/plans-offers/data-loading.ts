@@ -8,6 +8,7 @@ import { sdk } from "../../../lib/client";
 import {
   PlanOfferAdminDetailResponse,
   PlanOfferAdminListResponse,
+  PlanOfferAdminProviderDeclarationsResponse,
   PlanOfferAdminStatus,
   PlanOfferFrequencyInterval,
   PlanOfferScope,
@@ -38,8 +39,8 @@ export const adminPlanOffersQueryKeys = {
     ] as const,
   variantSelection: (productId: string) =>
     [...adminPlanOffersQueryKeys.all, "variant-selection", productId] as const,
-  variantMetadata: (productId: string) =>
-    [...adminPlanOffersQueryKeys.all, "variant-metadata", productId] as const,
+  providerDeclarations: (productId: string) =>
+    [...adminPlanOffersQueryKeys.all, "provider-declarations", productId] as const,
   display: (params: {
     pageSize: number;
     offset: number;
@@ -213,30 +214,21 @@ export function useAdminProductVariantsSelectionQuery(
 }
 
 /**
- * Variant metadata for the offer form's read-only native-trial display: a
- * variant carrying `paypal_subscription` metadata is a provider-managed
- * subscription whose trial length and setup fee live in the variant metadata
- * (Q14/Q11) — shown to the operator beside the offer's own trial values so
- * the two numbers cannot be confused.
+ * The provider-side declarations of a product's variants, for the offer
+ * form's read-only native card. The endpoint asks every native-capable
+ * provider through the capability view, so the browser never parses a
+ * provider's metadata key itself.
  */
-export type ProductVariantMetadataRow = {
-  id: string
-  title: string | null
-  metadata: Record<string, unknown> | null
-}
-
-export function useAdminProductVariantsMetadataQuery(productId?: string | null) {
-  return useQuery<ProductVariantMetadataRow[]>({
-    queryKey: adminPlanOffersQueryKeys.variantMetadata(productId ?? ""),
-    queryFn: async () => {
-      const response = await sdk.admin.product.listVariants(productId!, {
-        limit: 100,
-        offset: 0,
-        fields: "id,title,metadata",
-      });
-
-      return (response.variants ?? []) as ProductVariantMetadataRow[];
-    },
+export function useAdminProviderDeclarationsQuery(productId?: string | null) {
+  return useQuery<PlanOfferAdminProviderDeclarationsResponse>({
+    queryKey: adminPlanOffersQueryKeys.providerDeclarations(productId ?? ""),
+    queryFn: () =>
+      sdk.client.fetch<PlanOfferAdminProviderDeclarationsResponse>(
+        "/admin/subscription-offers/providers/declarations",
+        {
+          query: { product_id: productId! },
+        }
+      ),
     enabled: Boolean(productId),
   });
 }

@@ -185,8 +185,14 @@
       "discountValue": "折扣值",
       "trialBonusDays": "绑卡赠送试用天数",
       "trialBonusDaysHint": "客户为领取的试用绑定支付方式后额外赠送的试用天数。留空（或 0）则隐藏绑定并延长选项。",
-      "nativeTrialTitle": "PayPal 原生试用（变体元数据，只读）",
-      "nativeTrialHint": "这些值保存在商品变体的 PayPal 订阅元数据中，由 PayPal 自己扣费。仅作参考展示：上方的试用配置不会改变它们。",
+      "nativeTrialTitle": "{{provider}} 原生订阅（服务商侧，只读）",
+      "nativeTrialHint": "这些值保存在商品变体的 {{provider}} 订阅元数据中，由 {{provider}} 自己扣费。仅作参考展示：上方的试用配置不会改变它们。",
+      "nativeField": {
+        "interval": "计费周期",
+        "trial_period": "试用期",
+        "setup_fee": "开通费（结账币种）",
+        "product_type": "商品类型"
+      },
       "nativeTrialPeriods": "试用：{{value}} 天",
       "nativeTrialPeriodsMissing": "试用：未配置",
       "nativeTrialSetupFee": "开通费：{{value}}",

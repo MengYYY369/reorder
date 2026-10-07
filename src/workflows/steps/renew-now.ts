@@ -11,7 +11,6 @@ import { resolveRenewalPaymentContext } from "../../modules/subscription/utils/p
 import { RENEWAL_MODULE } from "../../modules/renewal"
 import type RenewalModuleService from "../../modules/renewal/service"
 import { RenewalCycleStatus } from "../../modules/renewal/types"
-import { isPaymentMethodsModuleRegistered } from "../../modules/subscription/utils/preferred-payment-method"
 import { processRenewalCycleWorkflow } from "../process-renewal-cycle"
 import {
   createManualRenewalWorkflow,

@@ -18,7 +18,6 @@ import {
 } from "../../../../../../../workflows/steps/bind-trial-payment-method"
 import {
   classifyStepFailure,
-  findSerializedErrorMessageByName,
   findSerializedPaymentMethodsFailure,
   coreTypeForPaymentMethodsStatus,
   logUnquotedStepFailure,
@@ -92,15 +91,6 @@ export const TRIAL_BIND_CUSTOMER_REFUSALS = [
     type: MedusaError.Types.NOT_ALLOWED,
     copy: CAPABILITY_REFUSAL_COPY,
   },
-  {
-    // The sandbox's normal pending case: the buyer has not approved yet. The
-    // plugin's binder (medusa-paypal) authors this refusal; the delegated
-    // step carries it under the complete step's name.
-    step: COMPLETE_STEP,
-    type: MedusaError.Types.INVALID_DATA,
-    copy:
-      /^PayPal setup token is not approved \(status: [^)]*\)$/,
-  },
 ] as const
 
 const TRIAL_BIND_FAILURE_COPY: StepFailureCopy = {
@@ -108,6 +98,15 @@ const TRIAL_BIND_FAILURE_COPY: StepFailureCopy = {
   refused: "payment method binding was refused",
   failed: "payment method binding failed",
 }
+
+/**
+ * The buyer-facing copy for the plugin's `binding_pending_approval` (422).
+ *
+ * The plugin's own message for that code is the operator line; this is what the
+ * customer reads, and it names the recovery path.
+ */
+const BINDING_PENDING_APPROVAL_COPY =
+  "the payment method is not approved yet — finish the approval at the provider, then retry"
 
 /**
  * The two-phase binding endpoint (Phase 14, plan Task 22; since 0.9.3 the
@@ -237,31 +236,21 @@ export const POST = async (
  * status, everything else is logged exactly as the engine serialized it and
  * answered with the route's fixed texts.
  *
- * Two typed escapes run before the fixed-text fallback:
+ * The plugin's own `PaymentMethodsError` is rethrown under the core type with
+ * the same HTTP semantics (its class carries the contract status, which would
+ * otherwise collapse into the route's generic 500). Two of its statuses need
+ * more than a status match, and neither needs a name match any more:
  *
- * - the plugin's own `PaymentMethodsError` (the delegated start/complete
- *   raise them) — its class carries the contract status and a message the
- *   plugin authors as customer copy (`already_bound`, `binding_not_verified`,
- *   …), so it is rethrown under the core type with the same HTTP semantics
- *   instead of collapsing into the route's generic 500;
- * - medusa-paypal's `PaypalCredentialEnvironmentMismatchError` (ticket 03,
- *   #18) — the fail-fast the operator must be able to read; it keeps its own
- *   message as a 500 (`unexpected_state`), never swallowed into
- *   "payment method binding failed".
+ * - `binding_pending_approval` (422) gets **reorder's** copy: the plugin's
+ *   message is the operator line, and the buyer-facing wording belongs here;
+ * - a 500 (`unexpected_state`, the credential-environment mismatch) keeps the
+ *   plugin's message verbatim — that text names both environments, and it is
+ *   the only thing that tells an operator what to fix.
  */
 function throwClassified(
   req: AuthenticatedMedusaRequest<PostStoreTrialBindSchemaType>,
   errors: unknown
 ) {
-  const mismatchMessage = findSerializedErrorMessageByName(
-    errors,
-    "PaypalCredentialEnvironmentMismatchError"
-  )
-
-  if (mismatchMessage) {
-    throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, mismatchMessage)
-  }
-
   const failure = classifyStepFailure({
     errors,
     refusals: TRIAL_BIND_CUSTOMER_REFUSALS,
@@ -276,6 +265,13 @@ function throwClassified(
   const pluginFailure = findSerializedPaymentMethodsFailure(errors)
 
   if (pluginFailure) {
+    if (pluginFailure.type === "binding_pending_approval") {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        BINDING_PENDING_APPROVAL_COPY
+      )
+    }
+
     const coreType = coreTypeForPaymentMethodsStatus(pluginFailure.status)
 
     if (coreType) {

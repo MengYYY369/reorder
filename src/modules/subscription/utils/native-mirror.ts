@@ -8,36 +8,56 @@ import { buildNativeSubscriptionReference } from "./native-subscription"
 import type { SubscriptionWriteInput } from "./subscription-write-input"
 
 /**
- * Turns a `paypal.subscription.*` event into the fields of a mirror row.
+ * Turns a provider's own record of a subscription into the fields of a mirror
+ * row.
  *
- * The mirror exists so "does this customer already have a PayPal recurrence for
- * this product" is a local indexed query instead of a provider call. Reorder
- * never charges these rows, extends them, or puts them into dunning — see
- * `native-subscription.ts` for how they are recognized.
+ * The mirror exists so "does this customer already have a provider recurrence
+ * for this product" is a local indexed query instead of a provider call.
+ * Reorder never charges these rows, extends them, or puts them into dunning —
+ * see `native-subscription.ts` for how they are recognized.
  *
- * Every field a row needs must come from the payload. Nothing here infers a
- * date from the event type: `next_billing_at` is only known when PayPal said
- * so, so a mirror row may legitimately have `next_renewal_at: null`, and the
- * Admin surfaces that as "to be confirmed" rather than a guessed date.
+ * **Two paths, one builder.** The neutral rail event
+ * (`payment-rail.native_subscription.changed`) and the hourly backfill
+ * (`capabilities[].native.listRecords`) hand over the same shape — the record
+ * the provider package defines — so there is one mapping here, not two. That is
+ * the fix for the dead event path: the two halves used to disagree about what an
+ * event carries, and nothing failed loudly because each half was tested against
+ * its own invented payload.
+ *
+ * Every field a row needs must come from the record. Nothing here infers a date:
+ * `next_billing_at` is only known when the provider said so, so a mirror row may
+ * legitimately have `next_renewal_at: null`, and the Admin surfaces that as "to
+ * be confirmed" rather than a guessed date.
  */
 
-export type NativeSubscriptionEventPayload = {
-  subscription_id?: string | null
-  paypal_subscription_id?: string | null
-  status?: string | null
-  customer_id?: string | null
-  product_id?: string | null
-  variant_id?: string | null
-  plan_id?: string | null
-  frequency_interval?: string | number | null
-  frequency_value?: string | number | null
-  next_billing_at?: string | null
-  last_billing_at?: string | null
+/**
+ * One subscription as a provider package reports it, plus the two facts reorder
+ * supplies: which family it is (`kind`, the reference's middle token) and which
+ * payment-module provider key it was registered under (`provider_id`, what the
+ * checkout gates and the cancel path resolve against).
+ */
+export type NativeSubscriptionRecordInput = {
+  kind: string
+  provider_id: string
+  provider_subscription_id: string
+  plan_id: string | null
+  /** The rail-neutral status vocabulary; `null` means "do not mirror". */
+  status: string | null
+  customer_id: string | null
+  variant_id: string | null
+  interval_unit: string
+  interval_count: number
+  next_billing_at: string | null
+  last_billing_at: string | null
 }
 
 export type NativeMirrorFields = {
   reference: string
-  paypal_subscription_id: string
+  /** The provider's own subscription id, the value its `cancel` takes. */
+  provider_subscription_id: string
+  /** The payment-module provider key this row belongs to. */
+  provider_id: string
+  kind: string
   status: SubscriptionStatus
   customer_id: string
   product_id: string
@@ -53,123 +73,80 @@ export type NativeMirrorResult =
   | { ok: true; fields: NativeMirrorFields }
   | { ok: false; reason: string }
 
-/** Event names whose payload status must not decide the mirrored status. */
-export const PAYPAL_SUBSCRIPTION_EVENT_NAMES = [
-  "paypal.subscription.activated",
-  "paypal.subscription.suspended",
-  "paypal.subscription.resumed",
-  "paypal.subscription.cancelled",
-  "paypal.subscription.expired",
-  "paypal.subscription.payment_succeeded",
-  "paypal.subscription.payment_failed",
-  "paypal.subscription.revised",
-] as const
-
-export type PaypalSubscriptionEventName =
-  (typeof PAYPAL_SUBSCRIPTION_EVENT_NAMES)[number]
-
 /**
- * PayPal reports five states; reorder has `active | paused | cancelled |
- * past_due`. EXPIRED maps to `cancelled` for the same reason the manual dunning
- * silence does: there is nothing left to charge, and `cancelled` is the state
- * the rest of the plugin already treats as terminal.
+ * The rail's status vocabulary, read as reorder's own.
  *
- * APPROVAL_PENDING has no mirror: a recurrence the customer never finished
- * approving blocks nothing, and writing an `active` row for it would reject
- * their checkout.
+ * The two are deliberately the same four words (`active | paused | past_due |
+ * cancelled`) — that sameness is what lets a provider map its states once,
+ * inside its own package, and lets this file be a lookup instead of a second
+ * provider-specific table. A status outside the vocabulary (or `null`, the
+ * provider's "do not mirror": an approval nobody finished) writes nothing: a
+ * half-populated row would look like a live recurrence to the checkout gates.
  */
-const STATUS_BY_PAYPAL_STATE: Record<string, SubscriptionStatus | null> = {
-  APPROVAL_PENDING: null,
-  ACTIVE: SubscriptionStatus.ACTIVE,
-  SUSPENDED: SubscriptionStatus.PAUSED,
-  CANCELLED: SubscriptionStatus.CANCELLED,
-  EXPIRED: SubscriptionStatus.CANCELLED,
-}
-
-export function mapNativeStatus(
-  paypalStatus: string | null | undefined
-): SubscriptionStatus | null {
-  if (typeof paypalStatus !== "string") {
-    return null
-  }
-
-  return STATUS_BY_PAYPAL_STATE[paypalStatus.trim().toUpperCase()] ?? null
+const MIRROR_STATUS_BY_RAIL_STATUS: Record<string, SubscriptionStatus> = {
+  active: SubscriptionStatus.ACTIVE,
+  paused: SubscriptionStatus.PAUSED,
+  past_due: SubscriptionStatus.PAST_DUE,
+  cancelled: SubscriptionStatus.CANCELLED,
 }
 
 /**
- * @param eventName the bus event; only `payment_failed` and `expired` override
- * the payload status.
- */
-export function resolveNativeStatus(
-  eventName: string,
-  payload: NativeSubscriptionEventPayload
-): SubscriptionStatus | null {
-  if (eventName === "paypal.subscription.payment_failed") {
-    return SubscriptionStatus.PAST_DUE
-  }
-
-  if (eventName === "paypal.subscription.expired") {
-    return SubscriptionStatus.CANCELLED
-  }
-
-  return mapNativeStatus(payload.status)
-}
-
-/**
- * Fields that identify and model the row. Missing any of them means the event
+ * Fields that identify and model the row. Missing any of them means the record
  * cannot produce a usable row, and a half-populated mirror is worse than none:
  * it would look like a live recurrence to the exclusivity checks.
  */
 const MIRROR_BUILD_FIELDS = [
   "customer_id",
-  "product_id",
   "variant_id",
-  "frequency_interval",
-  "frequency_value",
+  "interval_unit",
 ] as const
 
-export function buildNativeMirrorFields(
-  eventName: string,
-  payload: NativeSubscriptionEventPayload
+/**
+ * @param productId resolved by the caller from the record's variant: a provider
+ *   package knows the variant (that is what the merchant declared) but never
+ *   reorder's product graph.
+ */
+export function buildNativeMirrorFieldsFromRecord(
+  record: NativeSubscriptionRecordInput,
+  productId: string | null | undefined
 ): NativeMirrorResult {
-  const paypalSubscriptionId =
-    text(payload.paypal_subscription_id) ?? text(payload.subscription_id)
+  const providerSubscriptionId = text(record.provider_subscription_id)
 
-  if (!paypalSubscriptionId) {
-    return { ok: false, reason: "missing_paypal_subscription_id" }
+  if (!providerSubscriptionId) {
+    return { ok: false, reason: "missing_provider_subscription_id" }
   }
 
-  const reference = buildNativeSubscriptionReference(paypalSubscriptionId)
+  const reference = buildNativeSubscriptionReference(
+    record.kind,
+    providerSubscriptionId
+  )
 
   if (!reference) {
-    return { ok: false, reason: "missing_paypal_subscription_id" }
+    return { ok: false, reason: "missing_kind" }
   }
 
-  const status = resolveNativeStatus(eventName, payload)
+  const status = text(record.status)
+    ? MIRROR_STATUS_BY_RAIL_STATUS[text(record.status)!.toLowerCase()] ?? null
+    : null
 
   if (!status) {
-    return { ok: false, reason: `unmappable_status_${String(payload.status)}` }
+    return { ok: false, reason: `unmappable_status_${String(record.status)}` }
   }
 
-  if (eventName === "paypal.subscription.revised") {
-    // `paypal.subscription.revised` is not delivered by medusa-paypal: as of
-    // 0.6.1 the in-place revise flow (and this event with it) exists only as a
-    // planned item in that plugin's changelog, so a plan or frequency change on
-    // a native subscription is noticed only by the hourly reconciliation job,
-    // never by an event. TODO(#06, blocked externally): drop this guard once
-    // `paypal.subscription.revised` is emitted with plan_id + frequency fields,
-    // and let it update the plan and frequency of the existing row in place.
-    // The reason string below is a pinned test identifier, not a version claim.
-    return { ok: false, reason: "revised_not_supported_until_paypal_0_5_0" }
+  const missing = MIRROR_BUILD_FIELDS.filter(
+    (field) => !isPresent((record as Record<string, unknown>)[field])
+  )
+
+  if (missing.length || !text(productId)) {
+    const reasons = [
+      ...missing,
+      ...(text(productId) ? [] : ["product_id"]),
+    ]
+
+    return { ok: false, reason: `missing_${reasons.join("_and_")}` }
   }
 
-  const missing = MIRROR_BUILD_FIELDS.filter((field) => !isPresent(payload[field]))
-
-  if (missing.length) {
-    return { ok: false, reason: `missing_${missing.join("_and_")}` }
-  }
-
-  const frequency = readFrequency(payload)
+  const frequency = readFrequency(record)
 
   if (!frequency) {
     return { ok: false, reason: "unsupported_frequency" }
@@ -179,26 +156,28 @@ export function buildNativeMirrorFields(
     ok: true,
     fields: {
       reference,
-      paypal_subscription_id: paypalSubscriptionId,
+      provider_subscription_id: providerSubscriptionId,
+      provider_id: text(record.provider_id) ?? "",
+      kind: text(record.kind)!,
       status,
-      customer_id: text(payload.customer_id)!,
-      product_id: text(payload.product_id)!,
-      variant_id: text(payload.variant_id)!,
+      customer_id: text(record.customer_id)!,
+      product_id: text(productId)!,
+      variant_id: text(record.variant_id)!,
       frequency_interval: frequency.interval,
       frequency_value: frequency.value,
-      next_renewal_at: readDate(payload.next_billing_at),
-      last_renewal_at: readDate(payload.last_billing_at),
-      plan_id: text(payload.plan_id),
+      next_renewal_at: readDate(record.next_billing_at),
+      last_renewal_at: readDate(record.last_billing_at),
+      plan_id: text(record.plan_id),
     },
   }
 }
 
-function readFrequency(payload: NativeSubscriptionEventPayload): {
+function readFrequency(record: NativeSubscriptionRecordInput): {
   interval: SubscriptionFrequencyInterval
   value: number
 } | null {
-  const interval = text(payload.frequency_interval)?.toLowerCase()
-  const rawValue = payload.frequency_value
+  const interval = text(record.interval_unit)?.toLowerCase()
+  const rawValue = record.interval_count
   const value =
     typeof rawValue === "number"
       ? rawValue
@@ -223,57 +202,9 @@ function readFrequency(payload: NativeSubscriptionEventPayload): {
 }
 
 /**
- * A row of medusa-paypal's `paypal_subscription` table, as it arrives through
- * query.graph. Used by the backfill: existing provider subscriptions never
- * re-emit their `activated` event, so without this the mirror set would only
- * cover subscriptions created after the plugin was installed.
- */
-export type ProviderSubscriptionRecord = {
-  id?: string | null
-  paypal_subscription_id?: string | null
-  paypal_plan_id?: string | null
-  status?: string | null
-  customer_id?: string | null
-  variant_id?: string | null
-  interval_unit?: string | null
-  interval_count?: string | number | null
-  next_billing_at?: string | Date | null
-  last_billing_at?: string | Date | null
-}
-
-/**
- * Map a provider row to mirror fields. `product_id` comes from the caller
- * because the provider table only knows the variant.
- */
-export function buildNativeMirrorFieldsFromRecord(
-  record: ProviderSubscriptionRecord,
-  productId: string | null | undefined
-): NativeMirrorResult {
-  return buildNativeMirrorFields("paypal.subscription.activated", {
-    paypal_subscription_id: record.paypal_subscription_id,
-    subscription_id: record.id,
-    status: record.status,
-    customer_id: record.customer_id,
-    product_id: productId,
-    variant_id: record.variant_id,
-    plan_id: record.paypal_plan_id,
-    frequency_interval: record.interval_unit,
-    frequency_value: record.interval_count,
-    next_billing_at:
-      record.next_billing_at instanceof Date
-        ? record.next_billing_at.toISOString()
-        : record.next_billing_at,
-    last_billing_at:
-      record.last_billing_at instanceof Date
-        ? record.last_billing_at.toISOString()
-        : record.last_billing_at,
-  })
-}
-
-/**
- * Update payload for an existing mirror row. A date the event did not carry is
+ * Update payload for an existing mirror row. A date the record did not carry is
  * left out rather than written as null: the previous value came from a real
- * PayPal response, and a later event without the field knows nothing about it.
+ * provider response, and a later event without the field knows nothing about it.
  */
 export function nativeMirrorReconcileFields(
   id: string,
@@ -299,7 +230,8 @@ export function nativeMirrorReconcileFields(
   return update
 }
 
-function isPresent(value: unknown): boolean {  if (typeof value === "string") {
+function isPresent(value: unknown): boolean {
+  if (typeof value === "string") {
     return !!value.trim()
   }
 
@@ -327,7 +259,7 @@ function readDate(value: unknown): string | null {
 }
 
 /**
- * The subscription model requires a shipping-address snapshot, but a PayPal
+ * The subscription model requires a shipping-address snapshot, but a provider
  * recurrence is billed by the provider and never re-ordered by this plugin, so
  * no fulfillment is ever computed from it. This placeholder is inert, and its
  * `N/A` country is what tells an operator the row is a mirror rather than a
@@ -347,7 +279,7 @@ export const NATIVE_MIRROR_SHIPPING_ADDRESS: SubscriptionShippingAddress = {
 }
 
 /**
- * Product snapshot from the ids the event carries plus whatever titles the
+ * Product snapshot from the ids the record carries plus whatever titles the
  * caller resolved. Titles fall back to the ids because the Admin lists mirror
  * rows, and a blank column reads as a data bug while an id reads as "provider
  * row, not resolved".

@@ -4,6 +4,7 @@ import {
   validateAndTransformQuery,
 } from "@medusajs/framework/http"
 import {
+  GetAdminSubscriptionOfferProviderDeclarationsSchema,
   GetAdminSubscriptionOfferSchema,
   GetAdminSubscriptionOffersSchema,
   PostAdminCreateSubscriptionOfferSchema,
@@ -34,6 +35,19 @@ export const adminSubscriptionOffersMiddlewares: MiddlewareRoute[] = [
         ],
         isList: true,
       }),
+    ],
+  },
+  {
+    matcher: "/admin/subscription-offers/providers/declarations",
+    method: "GET",
+    middlewares: [
+      validateAndTransformQuery(
+        GetAdminSubscriptionOfferProviderDeclarationsSchema,
+        {
+          defaults: [],
+          isList: false,
+        }
+      ),
     ],
   },
   {

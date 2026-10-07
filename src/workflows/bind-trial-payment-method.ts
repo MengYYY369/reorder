@@ -19,11 +19,11 @@ import {
 
 /**
  * Phase 14 (`vault` binding, plan Task 22): a claimed trial gains extra days
- * when the customer binds a payment method — a PayPal setup token approved in
- * a redirect, exchanged for a vault id, never charged. The provider half is
- * medusa-paypal's; the capability is consumed by duck-typing
- * (`src/workflows/utils/paypal-vault-binding.ts`), and an installed provider
- * that predates it makes both workflows refuse before anything is created.
+ * when the customer binds a payment method — a provider setup token approved in
+ * a redirect, exchanged for a vault id, never charged. The provider half is the
+ * provider package's; the capability is consumed by duck-typing
+ * (`workflows/utils/payment-method-binding.ts`), and a provider that predates it
+ * makes both workflows refuse before anything is created.
  *
  * The flow is two-phase because the customer leaves for PayPal and returns:
  * - `startTrialPaymentMethodBindingWorkflow` — phase (a): store the pending

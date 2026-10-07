@@ -5,6 +5,7 @@ import {
   buildNativeSubscriptionReference,
   findBlockingNativeRow,
   isNativeSubscriptionReference,
+  readNativeProviderTarget,
 } from "../utils/native-subscription"
 import { SubscriptionStatus } from "../types"
 
@@ -28,18 +29,55 @@ describe("isNativeSubscriptionReference", () => {
 })
 
 describe("buildNativeSubscriptionReference", () => {
-  it("is stable for one provider id", () => {
-    expect(buildNativeSubscriptionReference("I-abc123")).toEqual("NATIVE-I-abc123")
-    expect(buildNativeSubscriptionReference(" I-abc123 ")).toEqual(
-      "NATIVE-I-abc123"
+  it("carries the provider kind in the middle, so a row names its own rail", () => {
+    expect(buildNativeSubscriptionReference("paypal", "I-abc123")).toEqual(
+      "NATIVE-paypal-I-abc123"
+    )
+    expect(buildNativeSubscriptionReference(" paypal ", " I-abc123 ")).toEqual(
+      "NATIVE-paypal-I-abc123"
     )
   })
 
-  it("refuses to build an anchorless reference", () => {
-    expect(buildNativeSubscriptionReference(null)).toBeNull()
-    expect(buildNativeSubscriptionReference(undefined)).toBeNull()
-    expect(buildNativeSubscriptionReference("   ")).toBeNull()
-    expect(buildNativeSubscriptionReference(42)).toBeNull()
+  it("keeps the provider's own dashes intact", () => {
+    expect(buildNativeSubscriptionReference("paypal", "I-BW452GLLEP1G")).toEqual(
+      "NATIVE-paypal-I-BW452GLLEP1G"
+    )
+  })
+
+  it("refuses to build a reference missing either half", () => {
+    expect(buildNativeSubscriptionReference("paypal", null)).toBeNull()
+    expect(buildNativeSubscriptionReference("paypal", undefined)).toBeNull()
+    expect(buildNativeSubscriptionReference("paypal", "   ")).toBeNull()
+    expect(buildNativeSubscriptionReference("paypal", 42)).toBeNull()
+    expect(buildNativeSubscriptionReference(null, "I-abc123")).toBeNull()
+    expect(buildNativeSubscriptionReference("", "I-abc123")).toBeNull()
+    expect(buildNativeSubscriptionReference(42, "I-abc123")).toBeNull()
+  })
+})
+
+describe("readNativeProviderTarget", () => {
+  it("reads the provider key and the provider's own id off a mirror row", () => {
+    expect(
+      readNativeProviderTarget({
+        reference: "NATIVE-paypal-I-ABC",
+        payment_context: {
+          payment_provider_id: "pp_paypal_paypal",
+          customer_payment_reference: "I-ABC",
+        },
+      })
+    ).toEqual({ providerId: "pp_paypal_paypal", reference: "I-ABC" })
+  })
+
+  it("answers null for a row that is not a mirror", () => {
+    expect(
+      readNativeProviderTarget({ reference: "SUB-1001", payment_context: null })
+    ).toBeNull()
+  })
+
+  it("answers nulls for a row whose context predates the discriminator", () => {
+    expect(
+      readNativeProviderTarget({ reference: "NATIVE-paypal-I-ABC" })
+    ).toEqual({ providerId: null, reference: null })
   })
 })
 

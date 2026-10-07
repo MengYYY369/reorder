@@ -17,7 +17,6 @@ import {
 } from "../../../../../../../../workflows/steps/auto-renew-binding"
 import {
   classifyStepFailure,
-  findSerializedErrorMessageByName,
   findSerializedPaymentMethodsFailure,
   coreTypeForPaymentMethodsStatus,
   logUnquotedStepFailure,
@@ -97,13 +96,6 @@ export const AUTO_RENEW_BIND_CUSTOMER_REFUSALS = [
     copy: CAPABILITY_REFUSAL_COPY,
   },
   {
-    // The plugin's binder authors this refusal when the buyer has not
-    // approved yet (the sandbox's normal pending case).
-    step: COMPLETE_STEP,
-    type: MedusaError.Types.INVALID_DATA,
-    copy: /^PayPal setup token is not approved \(status: [^)]*\)$/,
-  },
-  {
     // The toggle's overdue guard, rethrown by the complete step: the binding
     // succeeded but the surprise-charge protection keeps auto-renewal off
     // until the customer renews manually first.
@@ -119,6 +111,15 @@ const AUTO_RENEW_BIND_FAILURE_COPY: StepFailureCopy = {
   refused: "auto-renewal binding was refused",
   failed: "auto-renewal binding failed",
 }
+
+/**
+ * The buyer-facing copy for the plugin's `binding_pending_approval` (422).
+ *
+ * The plugin's own message for that code is the operator line; this is what the
+ * customer reads, and it names the recovery path.
+ */
+const BINDING_PENDING_APPROVAL_COPY =
+  "the payment method is not approved yet — finish the approval at the provider, then retry"
 
 export const POST = async (
   req: AuthenticatedMedusaRequest<PostStoreAutoRenewBindSchemaType>,
@@ -233,25 +234,21 @@ export const POST = async (
 }
 
 /**
- * One disclosure path for both phases. The same typed escapes as the trial
- * bind route: the plugin's `PaymentMethodsError` keeps its contract status
- * (`already_bound` → 409, …), and medusa-paypal's
- * `PaypalCredentialEnvironmentMismatchError` (ticket 03, #18) keeps its own
- * message as a 500 — never swallowed into the route's fixed text.
+ * One disclosure path for both phases. The plugin's `PaymentMethodsError` keeps
+ * its contract status (`already_bound` → 409, …) through
+ * `coreTypeForPaymentMethodsStatus`, with two cases that need more than the
+ * status and neither needing a name match any more:
+ *
+ * - `binding_pending_approval` (422) gets **reorder's** copy — the plugin's
+ *   message is the operator line, the buyer-facing wording is ours;
+ * - a 500 (`unexpected_state`, the credential-environment mismatch) keeps the
+ *   plugin's message verbatim — that text names both environments, and it is
+ *   what tells an operator what to fix.
  */
 function throwClassified(
   req: AuthenticatedMedusaRequest<PostStoreAutoRenewBindSchemaType>,
   errors: unknown
 ) {
-  const mismatchMessage = findSerializedErrorMessageByName(
-    errors,
-    "PaypalCredentialEnvironmentMismatchError"
-  )
-
-  if (mismatchMessage) {
-    throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, mismatchMessage)
-  }
-
   const failure = classifyStepFailure({
     errors,
     refusals: AUTO_RENEW_BIND_CUSTOMER_REFUSALS,
@@ -266,6 +263,13 @@ function throwClassified(
   const pluginFailure = findSerializedPaymentMethodsFailure(errors)
 
   if (pluginFailure) {
+    if (pluginFailure.type === "binding_pending_approval") {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        BINDING_PENDING_APPROVAL_COPY
+      )
+    }
+
     const coreType = coreTypeForPaymentMethodsStatus(pluginFailure.status)
 
     if (coreType) {

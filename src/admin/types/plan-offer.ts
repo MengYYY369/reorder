@@ -91,6 +91,26 @@ export type PlanOfferAdminDetailResponse = {
   plan_offer: PlanOfferAdminDetail
 }
 
+export type PlanOfferAdminProviderDeclarationField = {
+  key: string
+  label: string
+  value: string | null
+}
+
+export type PlanOfferAdminProviderDeclaration = {
+  product_id: string
+  variant_id: string
+  variant_title: string | null
+  provider_id: string
+  kind: string
+  display_name: string
+  fields: PlanOfferAdminProviderDeclarationField[]
+}
+
+export type PlanOfferAdminProviderDeclarationsResponse = {
+  declarations: PlanOfferAdminProviderDeclaration[]
+}
+
 export type CreatePlanOfferAdminRequest = {
   name: string
   scope: PlanOfferScope

@@ -10,7 +10,7 @@ import {
   SubscriptionWorkflowRecord,
   SubscriptionWorkflowStepResult,
 } from "./pause-subscription"
-import { cancelNativeProviderSubscription } from "../utils/native-provider-cancel"
+import { cancelNativeSubscriptionRow } from "../../modules/subscription/utils/provider-capabilities"
 
 export type CancelSubscriptionStepInput = {
   id: string
@@ -47,14 +47,14 @@ export const cancelSubscriptionStep = createStep(
         ? subscription.next_renewal_at
         : cancelledAt
 
-    // Native mirror rows are billed by PayPal itself: the local status change
-    // alone would leave the provider agreement charging the payer. The helper
-    // never throws - a failed provider cancel is recorded in the metadata
+    // Native mirror rows are billed by the provider itself: the local status
+    // change alone would leave the provider agreement charging the payer. The
+    // helper never throws - a failed provider cancel is recorded in the metadata
     // below and the local cancellation still goes through (2026-10-02 plan,
-    // T04; the PayPal admin page remains the manual retry path).
-    const providerCancel = await cancelNativeProviderSubscription(
+    // T04; the provider's own admin page remains the manual retry path).
+    const providerCancel = await cancelNativeSubscriptionRow(
       container,
-      subscription.reference
+      subscription
     )
 
     if (providerCancel.status === "failed") {

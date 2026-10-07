@@ -1,60 +1,17 @@
 import { Container, Text } from "@medusajs/ui"
 import { useTranslation } from "react-i18next"
-import {
-  useAdminProductVariantsMetadataQuery,
-  type ProductVariantMetadataRow,
-} from "../data-loading"
-
-type NativeTrialMetadata = {
-  trial_periods?: unknown
-  setup_fee?: unknown
-}
-
-function readNativeTrialMetadata(
-  metadata: Record<string, unknown> | null
-): NativeTrialMetadata | null {
-  const raw = metadata?.paypal_subscription
-
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return null
-  }
-
-  return raw as NativeTrialMetadata
-}
-
-function formatTrialPeriods(value: unknown): string | null {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .map((period) => {
-        if (typeof period === "object" && period !== null) {
-          const record = period as Record<string, unknown>
-          const days = record.trial_days ?? record.trial ?? record.days
-
-          return days !== undefined && days !== null ? String(days) : null
-        }
-
-        return String(period)
-      })
-      .filter((entry): entry is string => entry !== null)
-      .join(", ")
-  }
-
-  return String(value)
-}
+import type { PlanOfferAdminProviderDeclaration } from "../../../../types/plan-offer"
+import { useAdminProviderDeclarationsQuery } from "../data-loading"
 
 /**
- * Read-only display of the native rail's own trial facts, beside the offer's
- * trial inputs. The native trial's length lives in the variant's
- * `paypal_subscription` metadata (a plan is immutable and cached by a hash
- * including `trial_periods`, so the offer must never become its source —
- * Q14), and `setup_fee` is charged at approval — hiding it while showing a
- * zero-price trial would leave the operator blind to the one field that
- * actually charges. A product-scoped offer covers every native variant of the
- * product, so all of them are listed.
+ * Read-only display of the native rail's own facts, beside the offer's trial
+ * inputs.
+ *
+ * The facts come from the providers through the capability view — the browser
+ * no longer parses a provider's metadata key itself. Every native-capable
+ * provider that recognises a variant contributes a card titled with its own
+ * display name, and field labels prefer the admin's own wording over the
+ * descriptor's fallback.
  */
 export const NativeTrialVariantDisplay = ({
   productId,
@@ -62,57 +19,83 @@ export const NativeTrialVariantDisplay = ({
   productId?: string | null
 }) => {
   const { t } = useTranslation("reorder")
-  const { data: variants } = useAdminProductVariantsMetadataQuery(productId)
+  const { data } = useAdminProviderDeclarationsQuery(productId)
 
-  const nativeVariants = (variants ?? []).filter(
-    (variant: ProductVariantMetadataRow) =>
-      readNativeTrialMetadata(variant.metadata) !== null
-  )
+  const declarations = data?.declarations ?? []
 
-  if (!nativeVariants.length) {
+  if (!declarations.length) {
     return null
   }
 
+  const byProvider = new Map<string, PlanOfferAdminProviderDeclaration[]>()
+
+  for (const declaration of declarations) {
+    const group = byProvider.get(declaration.provider_id) ?? []
+
+    group.push(declaration)
+    byProvider.set(declaration.provider_id, group)
+  }
+
   return (
-    <Container className="divide-y divide-ui-border-base p-0">
-      <div className="px-6 py-4">
-        <Text size="small" leading="compact" weight="plus">
-          {t("planOffers.form.nativeTrialTitle")}
-        </Text>
-        <Text size="small" leading="compact" className="text-ui-fg-subtle">
-          {t("planOffers.form.nativeTrialHint")}
-        </Text>
-      </div>
-      {nativeVariants.map((variant) => {
-        const metadata = readNativeTrialMetadata(variant.metadata)!
-        const trialPeriods = formatTrialPeriods(metadata.trial_periods)
-        const setupFee = metadata.setup_fee
+    <>
+      {Array.from(byProvider.values()).map((group) => {
+        const provider = group[0]
 
         return (
-          <div
-            key={variant.id}
-            className="grid grid-cols-3 gap-3 px-6 py-3 text-ui-fg-subtle"
+          <Container
+            key={provider.provider_id}
+            className="divide-y divide-ui-border-base p-0"
           >
-            <Text size="small" leading="compact" weight="plus">
-              {variant.title ?? variant.id}
-            </Text>
-            <Text size="small" leading="compact">
-              {trialPeriods !== null
-                ? t("planOffers.form.nativeTrialPeriods", {
-                    value: trialPeriods,
-                  })
-                : t("planOffers.form.nativeTrialPeriodsMissing")}
-            </Text>
-            <Text size="small" leading="compact">
-              {setupFee !== undefined && setupFee !== null
-                ? t("planOffers.form.nativeTrialSetupFee", {
-                    value: String(setupFee),
-                  })
-                : t("planOffers.form.nativeTrialSetupFeeMissing")}
-            </Text>
-          </div>
+            <div className="px-6 py-4">
+              <Text size="small" leading="compact" weight="plus">
+                {t("planOffers.form.nativeTrialTitle", {
+                  provider: provider.display_name,
+                })}
+              </Text>
+              <Text
+                size="small"
+                leading="compact"
+                className="text-ui-fg-subtle"
+              >
+                {t("planOffers.form.nativeTrialHint", {
+                  provider: provider.display_name,
+                })}
+              </Text>
+            </div>
+            {group.map((declaration) => (
+              <div
+                key={declaration.variant_id}
+                className="grid gap-2 px-6 py-3"
+              >
+                <Text size="small" leading="compact" weight="plus">
+                  {declaration.variant_title ?? declaration.variant_id}
+                </Text>
+                <div className="grid gap-1">
+                  {declaration.fields.map((field) => (
+                    <div
+                      key={field.key}
+                      className="grid grid-cols-3 gap-3 text-ui-fg-subtle"
+                    >
+                      <Text size="small" leading="compact">
+                        {t(`planOffers.form.nativeField.${field.key}`, {
+                          defaultValue: field.label,
+                        })}
+                      </Text>
+                      <Text
+                        size="small"
+                        leading="compact"
+                        className="col-span-2"
+                      >
+                        {field.value ?? t("common.empty.noValue")}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </Container>
         )
       })}
-    </Container>
+    </>
   )
 }

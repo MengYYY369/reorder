@@ -4,7 +4,7 @@
  * a payment-method binding and returns the ledger method it created.
  *
  * **The contract is consumed by duck-typing, on purpose** — the same mechanism
- * `paypal-vault-binding.ts` uses for the provider side. reorder compiles
+ * the capability view uses for the provider side (`provider-capabilities.ts`). reorder compiles
  * against the published package's reader surface (`ensureCustomerAccountHolder`,
  * the container key, the row types); the binding methods arrived in 0.2.0 with
  * a **breaking** signature change (`container` moved to the first argument of

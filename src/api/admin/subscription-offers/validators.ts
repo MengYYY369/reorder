@@ -106,6 +106,14 @@ export type GetAdminSubscriptionOfferSchemaType = z.infer<
   typeof GetAdminSubscriptionOfferSchema
 >
 
+export const GetAdminSubscriptionOfferProviderDeclarationsSchema = z.object({
+  product_id: z.string().trim().min(1),
+})
+
+export type GetAdminSubscriptionOfferProviderDeclarationsSchemaType = z.infer<
+  typeof GetAdminSubscriptionOfferProviderDeclarationsSchema
+>
+
 export const PostAdminCreateSubscriptionOfferSchema = z
   .object({
     name: z.string().trim().min(1).max(255),
