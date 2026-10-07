@@ -722,7 +722,15 @@ Also covered:
 - `medusa-better-auth`: the secret dialog renders the value into the DOM; the `config.example.*`
   keys are gone from both locales.
 - Host smoke gate: a bind completes, a mirror row is written from a live event, a cancel reaches
-  the provider.
+  the provider. **Where each half stands** (the audit asked): the event→mirror half is proven at
+  integration level, not only unit level — `integration-tests/http/native-subscription-mirror.spec.ts`
+  boots the real app against a real database, emits `payment-rail.native_subscription.changed` and
+  asserts the row is upserted (plus the scheduler exclusion and both write-side refusals), and
+  `subscriptions-workflows.spec.ts` drives the cancel through the capability view and asserts the
+  recorded `NativeCancelOutcome`. The host half is proven by the boot + the descriptor view on the
+  live server (the smoke recorded in the release-status section). What is **not** proven is the same
+  three paths on production **with a real PayPal subscription** — that needs a sandbox buyer and
+  writes real customer records, so it is the owner's (deploy.md §7.5).
 
 ## Verification log — implementation pass (2026-10-06/07)
 
@@ -758,6 +766,32 @@ tick).
 | medusa-saas storefront | `vitest run` | 24/24 files, 222/222 tests |
 | medusa-saas storefront | `next build` | OK |
 | cross-repo | canonical fixture vs medusa-paypal's copy (deep compare of both built modules) | same six keys, identical payload content, name `payment-rail.native_subscription.changed` |
+
+### How to reproduce (the auditor could not, on a machine whose WSL mounts were broken)
+
+Only two of the five need a database, and it may be any empty Postgres — the runner
+creates its own throwaway database per suite and leaves nothing behind:
+
+```sh
+# reorder (module suite, then the http suite in batches — one free PORT per batch)
+cd D:/Projects/reorder
+DB_HOST=… DB_PORT=… DB_USERNAME=… DB_PASSWORD=… TEST_TYPE=integration:modules \
+  NODE_OPTIONS=--experimental-vm-modules node node_modules/jest/bin/jest.js --runInBand --forceExit
+DB_HOST=… DB_PORT=… DB_USERNAME=… DB_PASSWORD=… PORT=… TEST_TYPE=integration:http \
+  NODE_OPTIONS="--experimental-vm-modules --max-old-space-size=4096" \
+  node node_modules/jest/bin/jest.js --runInBand --forceExit integration-tests/http/<file>.spec.ts
+
+# medusa-payment-methods (unit, then the module integration suite)
+cd D:/Projects/medusa-payment-methods
+node node_modules/jest/bin/jest.js
+DB_HOST=… DB_PORT=… DB_USERNAME=… DB_PASSWORD=… \
+  node --experimental-vm-modules node_modules/jest/bin/jest.js -c jest.integration.config.js --runInBand
+```
+
+No database needed for the rest: `medusa-paypal` (`node node_modules/jest/bin/jest.js`),
+`medusa-better-auth` (`pnpm test`), `medusa-saas` (`node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json`
+and `pnpm --filter @medusa-saas/storefront build`). The migration script's own proof is
+in the release-status section (dry run → apply → re-run, and the same on production).
 
 ### Grep sweep (the contract's own criteria)
 
