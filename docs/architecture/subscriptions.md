@@ -369,10 +369,29 @@ purchase landing in that window therefore extends `next_renewal_at` while the
 in-flight cycle keeps its own date, leaving two chargeable slots for one period.
 The checkout gate tolerates this on every rail it admits — a paid row carries an
 in-flight order exactly as a bound trial can — so it is a property of the `defer`
-branch, not of the exception above; for a trial whose `trial_ends_at` is still in
-the future it is unreachable, because `process-renewal-cycle` refuses to process a
-cycle dated before that date. Closing it needs either a refusal at the prepay
-boundary or an operator surface for the overlap, and is not done here.
+branch, not of the exception above.
+
+Two consequences follow, and neither is hypothetical:
+
+- **no cycle lands on the new entitlement date.** `create` is the only branch that
+  writes one, and `defer` is not it. A row that later turns auto-renewal on has no
+  cycle for the scheduler to fire, so the renewal it was switched on for never
+  happens.
+- **the stranded cycle stays chargeable once the row is not in manual mode.**
+  `resolveCycleDisposition` (`src/modules/renewal/utils/cycle-disposition.ts`)
+  answers `not_chargeable` for a `manual` row and `charge` for anything else, and
+  `process-renewal-cycle` holds no guard tying a cycle's `scheduled_for` to
+  `next_renewal_at`. A stranded cycle therefore bills its own slot the moment the
+  subscription is not `manual` — and turning auto-renewal on is exactly that
+  transition.
+
+`is_trial` / `trial_ends_at` do not shield this for long: `process-renewal-cycle`
+refuses a cycle dated before `trial_ends_at`, but the prepay that creates the
+overlap is also what clears both fields, so the shield expires with the purchase
+that needed it. Resolving the overlap is the operator's job, as `defer` says:
+retire the stranded cycle and let the next reconciliation create the anchor's own.
+Closing the window in code needs either a refusal at the prepay boundary or a
+disposition that reads the entitlement date, and is not done here.
 
 ## 3. Read Path
 
