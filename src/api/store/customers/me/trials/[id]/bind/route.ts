@@ -9,7 +9,9 @@ import {
 import type { PostStoreTrialBindSchemaType } from "../../validators"
 import {
   bindTrialPaymentMethodWorkflow,
+  reuseTrialPaymentMethodWorkflow,
   startTrialPaymentMethodBindingWorkflow,
+  type BindTrialPaymentMethodWorkflowOutput,
 } from "../../../../../../../workflows/bind-trial-payment-method"
 import {
   completeTrialVaultApprovalStep,
@@ -128,6 +130,10 @@ const BINDING_PENDING_APPROVAL_COPY =
  * from the body. `trial_requires_payment_method` needs nothing further here:
  * the rule governs claiming without a method, and this endpoint's only
  * outcome is a bound method.
+ *
+ * Both phases answer `phase: "bound"` when the binding landed; `start` does so
+ * on the reuse path, where the customer already owns a chargeable method and no
+ * approval is needed (see `reuseAlreadyOwnedMethod`).
  */
 export const POST = async (
   req: AuthenticatedMedusaRequest<PostStoreTrialBindSchemaType>,
@@ -169,22 +175,35 @@ export const POST = async (
     })
 
     if (errors?.length) {
-      throwClassified(req, errors)
-    }
+      const reuse = await reuseAlreadyOwnedMethod(req, customerId, errors)
 
-    if (!result?.setup_token_id || !result?.approve_url) {
+      if (!reuse) {
+        throwClassified(req, errors)
+      }
+
+      response = {
+        phase: "bound",
+        subscription_id: reuse.subscription_id,
+        payment_provider_id: reuse.payment_provider_id,
+        payment_method_reference: reuse.payment_method_reference,
+        trial_ends_at: reuse.trial_ends_at,
+        next_renewal_at: reuse.next_renewal_at,
+        bonus_days_applied: reuse.bonus_days_applied,
+        payment_mode: "auto",
+      }
+    } else if (!result?.setup_token_id || !result?.approve_url) {
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         TRIAL_BIND_FAILURE_COPY.failed
       )
-    }
-
-    response = {
-      phase: "approval_pending",
-      subscription_id: result.subscription_id,
-      setup_token_id: result.setup_token_id,
-      approve_url: result.approve_url,
-      trial_ends_at: result.trial_ends_at,
+    } else {
+      response = {
+        phase: "approval_pending",
+        subscription_id: result.subscription_id,
+        setup_token_id: result.setup_token_id,
+        approve_url: result.approve_url,
+        trial_ends_at: result.trial_ends_at,
+      }
     }
   } else {
     if (!body.setup_token_id) {
@@ -250,7 +269,7 @@ export const POST = async (
 function throwClassified(
   req: AuthenticatedMedusaRequest<PostStoreTrialBindSchemaType>,
   errors: unknown
-) {
+): never {
   const failure = classifyStepFailure({
     errors,
     refusals: TRIAL_BIND_CUSTOMER_REFUSALS,
@@ -286,4 +305,41 @@ function throwClassified(
   )
 
   throw new MedusaError(failure.type, failure.message)
+}
+
+/**
+ * The plugin's provider-dedup answer, turned into the outcome the customer
+ * asked for.
+ *
+ * `startBinding` refuses with 409 `already_bound` whenever the customer already
+ * owns a method for the requested provider. That is deliberate — one method per
+ * provider, so a second approval cannot mint a second identical wallet — and
+ * its message names the recovery path ("Use the existing one, or unbind it
+ * first"). The storefront's "bind a payment method to this trial" button is
+ * asking for the first of those, so the host adopts the method that already
+ * exists rather than surfacing a refusal the customer cannot act on.
+ *
+ * Only the plugin's own `already_bound` machine code is honoured, never a
+ * message match, and only when that method is chargeable on the trial's region
+ * — `reuseTrialPaymentMethodWorkflow` answers with its own refusal otherwise.
+ * When it does, this returns null and the caller sees the provider's original
+ * failure, unaltered.
+ */
+async function reuseAlreadyOwnedMethod(
+  req: AuthenticatedMedusaRequest<PostStoreTrialBindSchemaType>,
+  customerId: string,
+  errors: unknown
+): Promise<BindTrialPaymentMethodWorkflowOutput | null> {
+  const pluginFailure = findSerializedPaymentMethodsFailure(errors)
+
+  if (pluginFailure?.type !== "already_bound") {
+    return null
+  }
+
+  const { result } = await reuseTrialPaymentMethodWorkflow(req.scope).run({
+    input: { subscription_id: req.params.id, customer_id: customerId },
+    throwOnError: false,
+  })
+
+  return result?.payment_method_reference ? result : null
 }

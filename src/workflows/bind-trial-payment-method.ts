@@ -8,11 +8,13 @@ import {
   bindTrialPaymentMethodStep,
   completeTrialVaultApprovalStep,
   markTrialClaimVaultBoundStep,
+  resolveReusableTrialMethodStep,
   resolveTrialBindContextStep,
   startTrialVaultApprovalStep,
   type BindTrialPaymentMethodStepOutput,
   type CompleteTrialVaultApprovalStepOutput,
   type MarkTrialClaimVaultBoundStepOutput,
+  type ResolveReusableTrialMethodStepOutput,
   type StartTrialVaultApprovalStepOutput,
   type TrialBindContext,
 } from "./steps/bind-trial-payment-method"
@@ -124,6 +126,83 @@ export const bindTrialPaymentMethodWorkflow = createWorkflow(
     ensureNextRenewalCycleStep({
       subscription_id: context.subscription_id,
     }).config({ name: "re-point-bound-trial-renewal-cycle" })
+
+    const ledger: MarkTrialClaimVaultBoundStepOutput =
+      markTrialClaimVaultBoundStep({
+        subscription_id: context.subscription_id,
+      })
+
+    const result = transform(
+      { context, bound, ledger },
+      function ({
+        context,
+        bound,
+        ledger,
+      }: {
+        context: TrialBindContext
+        bound: BindTrialPaymentMethodStepOutput
+        ledger: MarkTrialClaimVaultBoundStepOutput
+      }) {
+        return {
+          subscription_id: context.subscription_id,
+          payment_provider_id: bound.payment_provider_id,
+          payment_method_reference: bound.payment_method_reference,
+          trial_ends_at: bound.trial_ends_at,
+          next_renewal_at: bound.next_renewal_at,
+          bonus_days_applied: bound.bonus_days_applied,
+          ledger_updated: ledger.ledger_updated,
+        }
+      }
+    )
+
+    return new WorkflowResponse<BindTrialPaymentMethodWorkflowOutput>(result)
+  }
+)
+
+export type ReuseTrialPaymentMethodWorkflowInput = {
+  subscription_id: string
+  customer_id: string
+}
+
+/**
+ * The one-shot alternative to the two-phase binding: the customer already owns
+ * a payment method this trial can charge through, so nothing has to be approved
+ * at the provider and the whole binding happens in a single request.
+ *
+ * This exists because the payment-methods plugin dedups **one method per
+ * provider** and answers 409 `already_bound` from `startBinding` — by design,
+ * so a second approval cannot mint a second identical wallet. The plugin's
+ * message tells the caller exactly what to do ("use the existing one"), and
+ * this workflow is that path. The route runs it only after the provider's own
+ * `startBinding` refused, so a customer with no usable method keeps the
+ * provider's answer.
+ *
+ * The bonus days still apply: the offer's consideration is "a payment method is
+ * on file for this subscription", not "you completed an approval".
+ */
+export const reuseTrialPaymentMethodWorkflow = createWorkflow(
+  "reuse-trial-payment-method",
+  function (input: ReuseTrialPaymentMethodWorkflowInput) {
+    // The start action's guards: ownership, still an active trial, not native,
+    // and not already bound — the same refusals the approval path answers with.
+    const context: TrialBindContext = resolveTrialBindContextStep({
+      action: "start",
+      subscription_id: input.subscription_id,
+      customer_id: input.customer_id,
+    })
+
+    const reusable: ResolveReusableTrialMethodStepOutput =
+      resolveReusableTrialMethodStep({ context })
+
+    const bound: BindTrialPaymentMethodStepOutput = bindTrialPaymentMethodStep({
+      context,
+      vault_id: reusable.vault_id,
+      provider_id: reusable.provider_id,
+    })
+
+    ensureNextRenewalCycleStep({
+      subscription_id: context.subscription_id,
+    }).config({ name: "re-point-reused-trial-renewal-cycle" })
 
     const ledger: MarkTrialClaimVaultBoundStepOutput =
       markTrialClaimVaultBoundStep({

@@ -2,8 +2,10 @@ import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { MedusaError } from "@medusajs/framework/utils"
 import type { MedusaContainer } from "@medusajs/framework/types"
 import { ensureCustomerAccountHolder } from "@mengyyy369/medusa-payment-methods"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import SubscriptionModuleService from "../../modules/subscription/service"
+import { listCustomerPaymentMethods } from "../../modules/subscription/utils/payment-methods"
 import {
   SubscriptionPaymentContext,
   SubscriptionStatus,
@@ -18,6 +20,7 @@ import {
   resolvePaymentMethodBindingCapability,
   PLUGIN_TRIAL_PAYMENT_SCOPE,
 } from "../utils/payment-method-binding"
+import { listEnabledProviderIds } from "../utils/region-payment-provider"
 
 /**
  * Phase 14, plan Task 22 — binding a payment method to a claimed trial
@@ -67,6 +70,8 @@ export type TrialBindContext = {
   product_id: string
   variant_id: string
   reference: string
+  /** The template cart, whose region decides which providers may be charged. */
+  cart_id: string | null
   started_at: string
   trial_ends_at: string
   payment_context: Partial<SubscriptionPaymentContext>
@@ -234,6 +239,7 @@ export const resolveTrialBindContextStep = createStep(
       product_id: subscription.product_id,
       variant_id: subscription.variant_id,
       reference: subscription.reference,
+      cart_id: subscription.cart_id ?? null,
       started_at: new Date(subscription.started_at).toISOString(),
       trial_ends_at: new Date(subscription.trial_ends_at).toISOString(),
       payment_context: paymentContext,
@@ -245,6 +251,91 @@ export const resolveTrialBindContextStep = createStep(
     return new StepResponse(context, null)
   }
 )
+
+export type ResolveReusableTrialMethodStepInput = {
+  context: TrialBindContext
+}
+
+export type ResolveReusableTrialMethodStepOutput = {
+  vault_id: string
+  provider_id: string
+}
+
+/**
+ * The method a trial adopts instead of running a second provider approval.
+ *
+ * The payment-methods plugin deliberately dedups **one method per provider**,
+ * ignoring `scope`: a customer who already owns a PayPal method gets a 409
+ * `already_bound` from `startBinding` rather than a second identical wallet.
+ * That contract is the plugin's to keep, so the host has to honour it — when a
+ * usable method already exists, attaching it is exactly what the customer asked
+ * for ("bind a payment method to this trial"), and the bonus days still apply.
+ *
+ * "Usable" means the method's provider is enabled on the trial's own region:
+ * adopting a rail that region cannot charge through would produce a
+ * subscription that looks bound and cannot be billed, which is worse than the
+ * 409 it replaces. When nothing is usable the step refuses, and the caller
+ * keeps the provider's own answer.
+ *
+ * Writes nothing, so there is nothing to compensate.
+ */
+export const resolveReusableTrialMethodStep = createStep(
+  "resolve-reusable-trial-method",
+  async function (
+    input: ResolveReusableTrialMethodStepInput,
+    { container }
+  ) {
+    const methods = await listCustomerPaymentMethods(container, {
+      customer_id: input.context.customer_id,
+    })
+
+    // `listCustomerPaymentMethods` is newest first, so the most recently
+    // vaulted usable method wins — the same one the payment-method page shows
+    // at the top.
+    const enabled = await listEnabledProviderIds(
+      container,
+      await resolveCartRegionId(container, input.context.cart_id)
+    )
+    const reusable = methods.find((method) =>
+      enabled.includes(method.provider_id)
+    )
+
+    if (!reusable) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "This customer has no saved payment method that this subscription's region can charge through."
+      )
+    }
+
+    return new StepResponse(
+      { vault_id: reusable.id, provider_id: reusable.provider_id },
+      null
+    )
+  }
+)
+
+async function resolveCartRegionId(
+  container: MedusaContainer,
+  cartId: string | null
+): Promise<string | null> {
+  if (!cartId) {
+    return null
+  }
+
+  const query = container.resolve(ContainerRegistrationKeys.QUERY) as {
+    graph: (config: Record<string, unknown>) => Promise<{
+      data: Array<{ region_id?: string | null }>
+    }>
+  }
+
+  const { data } = await query.graph({
+    entity: "cart",
+    fields: ["id", "region_id"],
+    filters: { id: [cartId] },
+  })
+
+  return data[0]?.region_id ?? null
+}
 
 export type StartTrialVaultApprovalStepOutput = {
   /** The plugin's approval-session handle (PayPal: the setup token id). */
@@ -485,7 +576,11 @@ export const bindTrialPaymentMethodStep = createStep(
   async function (
     input: {
       context: TrialBindContext
-      setup_token_id: string
+      /**
+       * Absent on the reuse path: no provider approval was run, so there is no
+       * token to carry. The step writes the vault id the plugin already owns.
+       */
+      setup_token_id?: string
       vault_id: string
       provider_id: string
     },
