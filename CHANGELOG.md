@@ -1,3 +1,44 @@
+## [1.12.6] - 2026-10-09
+
+**A renewal order that never took money no longer pins its cycle.**
+
+`hasInFlightRenewal` read `generated_order_id != null` as "money is in motion"
+without ever reading the order. A manual renewal that minted an order and was
+never paid therefore held its `scheduled` cycle as unadoptable forever, and
+because `defer` is the one branch that writes nothing, a prepaid repeat purchase
+could move `next_renewal_at` past that cycle and leave the subscription with a
+row on a date it had already paid for and **no cycle at all on the date it
+owed**. `resolveCycleDisposition` answers `not_chargeable` for a `manual` row but
+`charge` for any other, and `process-renewal-cycle` carries no guard tying a
+cycle's `scheduled_for` to `next_renewal_at`, so turning auto-renewal on would
+have billed the stranded slot.
+
+The upcoming-cycle decision now reads the order's payment state. Only a
+positively uncharged order (`not_captured`) supersedes its row: a captured one
+defers, and so does anything the reader cannot settle — an authorized but
+uncaptured collection is money that a late capture can still take, and
+"unreadable" must never be recorded as "there is no hope". `readOrderPaymentVerdict`
+moves out of `reconcile-stuck-renewal-cycle.ts` into
+`src/workflows/utils/order-payment-verdict.ts` so both callers share one reader,
+and `resolveUpcomingCycle` takes the verdicts as an optional third argument
+(defaulting to an empty map, so an order nobody read still counts as in flight).
+
+Because `renewal_cycle_one_scheduled_per_subscription` is a partial unique index
+on `(subscription_id) WHERE status = 'scheduled' AND deleted_at IS NULL`, the
+`create` branch now names the superseded rows it had to clear, and the step
+retires them before inserting. `retireStaleUpcomingCycles` gained an injectable
+write-time recheck: its row-local `stillRetirable` would answer "no" for every
+superseded row (they carry a `generated_order_id` by definition) and withhold
+them until the insert failed on that index, so the step now passes a recheck that
+re-reads the verdict.
+
+Known limitation, unchanged and now documented with its real cost: a superseded
+row's order is retired, not canceled, so a customer who pays it anyway still
+completes the period they bought through `complete-manual-renewal`.
+
+See `docs/architecture/subscriptions.md` (*Checkout completion gate*) and
+`.agents/specs/2026-10-09-unpaid-renewal-order-does-not-hold-its-cycle.md`.
+
 ## [1.12.5] - 2026-10-09
 
 **A bound trial row can be extended by a repeat purchase.** The checkout gate's
