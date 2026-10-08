@@ -1,5 +1,5 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
-import { MedusaError } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/utils"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import SubscriptionModuleService from "../../modules/subscription/service"
 import {
@@ -16,7 +16,7 @@ import {
   createManualRenewalWorkflow,
   RENEW_CUSTOMER_REFUSALS,
 } from "../create-manual-renewal"
-import { classifyStepFailure } from "../utils/store-step-failure"
+import { classifyStepFailure, logUnquotedStepFailure, type StepFailureLogger } from "../utils/store-step-failure"
 
 /**
  * The on-demand "renew now" path (0.9.3, plan ticket 01④, user item 8): the
@@ -211,6 +211,18 @@ export const renewNowStep = createStep(
       if (refusal.quoted) {
         throw new MedusaError(refusal.type, refusal.message)
       }
+
+      // A failure outside the workflow's declared refusals is an operator
+      // problem, not a customer one: the step answers with one fixed sentence
+      // so nothing internal leaks, which means this log is the only place the
+      // real cause is ever written down. Without it a broken renewal reads as
+      // "unexpected_state" in the HTTP log and nowhere else — which is exactly
+      // how a unique-constraint collision on `renewal_attempt` stayed invisible.
+      logUnquotedStepFailure(
+        container.resolve<StepFailureLogger>(ContainerRegistrationKeys.LOGGER),
+        "renew-now",
+        refusal
+      )
 
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
