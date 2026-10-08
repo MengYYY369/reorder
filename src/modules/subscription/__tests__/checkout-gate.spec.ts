@@ -870,6 +870,50 @@ describe("resolveCheckoutGate (the decision unit)", () => {
       ).toEqual({ action: "allow" })
     })
 
+    it.each([
+      [
+        "a bound auto trial row",
+        {
+          is_trial: true,
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "auto",
+            payment_method_reference: "pm_bound",
+          },
+        },
+      ],
+      [
+        "a bound manual trial row",
+        {
+          is_trial: true,
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "manual",
+            payment_method_reference: "pm_bound",
+          },
+        },
+      ],
+    ])(
+      "lets a subscription purchase fold into %s",
+      async (_label, overrides) => {
+        // A trial row qualifies whether or not it has bound a method: the
+        // extend clears the trial state and moves the anchor the upcoming
+        // cycle follows, so the conversion charge is the slot the purchase
+        // just paid for.
+        expect(
+          await resolveCheckoutGate({
+            find_live_recurrences: async () => [],
+            find_live_reorder_rows: async () => [
+              reorderRow(overrides as Partial<ReorderRailRowCandidate>),
+            ],
+            read_cart_product_ids: async () => ["prod_1"],
+            read_cart_item_signals: subscriptionCart,
+            read_product_title: async (productId) => productId,
+          })
+        ).toEqual({ action: "allow" })
+      }
+    )
+
     it("still blocks a pure one-time purchase of the same product", async () => {
       // The cart carries no subscription signal: buying the product once more
       // is the double-buy the strict rule refuses, whatever the live row is.
@@ -901,17 +945,6 @@ describe("resolveCheckoutGate (the decision unit)", () => {
     })
 
     it.each([
-      [
-        "a bound auto trial row",
-        {
-          is_trial: true,
-          payment_context: {
-            payment_provider_id: "pp_paypal_paypal",
-            payment_mode: "auto",
-            payment_method_reference: "pm_bound",
-          },
-        },
-      ],
       [
         "a redemption row with no provider",
         {
@@ -1016,6 +1049,22 @@ describe("resolveCheckoutGate (the decision unit)", () => {
             payment_provider_id: "pp_paypal_paypal",
             payment_mode: "auto",
             payment_method_reference: "pm_1",
+          },
+        }),
+        reorderRow({
+          is_trial: true,
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "auto",
+            payment_method_reference: "pm_bound",
+          },
+        }),
+        reorderRow({
+          is_trial: true,
+          payment_context: {
+            payment_provider_id: "pp_paypal_paypal",
+            payment_mode: "manual",
+            payment_method_reference: "pm_bound",
           },
         }),
         reorderRow({

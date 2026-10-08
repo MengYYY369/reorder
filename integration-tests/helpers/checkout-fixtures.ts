@@ -169,3 +169,54 @@ export async function seedSubscriptionCheckoutCart(
     payment_collection_id: paymentCollection.id,
   }
 }
+
+/**
+ * A bare cart the completion gate can decide on — no order, no payment
+ * collection, nothing the core handler needs. Only the line item matters: the
+ * gate reads the cart's product ids and whether it carries the subscription
+ * signal, and `isSubscription: false` is how a case proves the reorder rail's
+ * occupancy rule is independent of the subscription track's fold exception.
+ */
+export async function seedGateCart(
+  container: MedusaContainer,
+  customer: { id: string; email: string | null },
+  variantId: string,
+  isSubscription: boolean
+): Promise<string> {
+  const cartModule = container.resolve<ICartModuleService>(Modules.CART)
+
+  // SAFETY: `createCarts` answers a single created cart at runtime, while the
+  // pinned types declare an array; this narrows it to the id the request uses.
+  const cart = (await cartModule.createCarts({
+    currency_code: "usd",
+    email: customer.email,
+    customer_id: customer.id,
+    metadata: {},
+    shipping_address: {
+      first_name: "Gate",
+      last_name: "Test",
+      address_1: "1 Test Way",
+      city: "Testville",
+      postal_code: "00001",
+      country_code: "us",
+    },
+    items: [
+      {
+        title: "Item",
+        unit_price: 18,
+        quantity: 1,
+        variant_id: variantId,
+        metadata: isSubscription
+          ? {
+              is_subscription: true,
+              frequency_interval: "month",
+              frequency_value: 1,
+              payment_mode: "manual",
+            }
+          : {},
+      } as never,
+    ],
+  } as never)) as unknown as { id: string }
+
+  return cart.id
+}

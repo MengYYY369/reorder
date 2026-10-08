@@ -12,7 +12,10 @@ import {
   createSubscriptionSeed,
   createStoreCustomerAuthHeaders,
 } from "../helpers/subscription-fixtures"
-import { seedSubscriptionCheckoutCart } from "../helpers/checkout-fixtures"
+import {
+  seedGateCart,
+  seedSubscriptionCheckoutCart,
+} from "../helpers/checkout-fixtures"
 
 jest.setTimeout(120 * 1000)
 
@@ -191,8 +194,9 @@ medusaIntegrationTestRunner({
         // stay distinguishable in this spec and in the logs.
         //
         // Ticket 12 (D12) narrowed that rule for the subscription track: a
-        // foldable live row (a card-free trial, or a paid row with a provider)
-        // no longer blocks a subscription-track cart. This case pins the other
+        // foldable live row (a card-free trial, a bound trial, or a paid row
+        // with a provider) no longer blocks a subscription-track cart. This
+        // case pins the other
         // half with a redemption-shaped row — no provider, its free period
         // ending at `cancel_effective_at` — which the exception must not let
         // through. The exception's own coverage lives in
@@ -234,11 +238,14 @@ medusaIntegrationTestRunner({
         expect(await orderCount(container, customer.id)).toEqual(ordersBefore)
       })
 
-      it("counts a live trial row on the reorder rail as occupying", async () => {
+      it("counts a live trial row on the reorder rail as occupying a cart that carries no subscription signal", async () => {
+        // The D12 fold exception is scoped to the subscription track: a trial
+        // row folds only when the purchase is itself a prepaid cycle. The same
+        // card-free trial row therefore still occupies a cart with no
+        // `is_subscription` signal. The folding half of this pair lives in
+        // `checkout-subscription-exception.spec.ts`.
         const container = getContainer()
-        const { customer, product, variant, checkout, headers } = await setup(
-          null
-        )
+        const { customer, product, variant, headers } = await setup(null)
 
         await createSubscriptionSeed(container, {
           customer_id: customer.id,
@@ -247,15 +254,25 @@ medusaIntegrationTestRunner({
           reference: `SUB-TRIAL-${Date.now()}`,
           status: SubscriptionStatus.ACTIVE,
           is_trial: true,
+          payment_context: {
+            payment_provider_id: null,
+            payment_mode: "manual",
+            source_payment_collection_id: null,
+            source_payment_session_id: null,
+            payment_method_reference: null,
+            customer_payment_reference: null,
+          },
         })
 
-        const response = await postComplete(api, checkout.cart_id, headers)
+        const cartId = await seedGateCart(container, customer, variant.id, false)
+        const response = await postComplete(api, cartId, headers)
         const body = response.data as GateError
 
         expect(response.status).toEqual(400)
         expect(body.type).toEqual("not_allowed")
         expect(body.message).toContain(REORDER_GUARD_MESSAGE)
         expect(body.message).not.toContain(GUARD_MESSAGE)
+        expect(body.data).toMatchObject({ product_id: product.id })
       })
 
       it("lets a cancelled row on the reorder rail reach the core handler", async () => {

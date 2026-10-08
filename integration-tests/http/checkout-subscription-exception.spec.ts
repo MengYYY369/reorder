@@ -2,7 +2,6 @@ import path from "path"
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
 import { Modules } from "@medusajs/framework/utils"
 import type {
-  ICartModuleService,
   IPaymentModuleService,
   IWorkflowEngineService,
   MedusaContainer,
@@ -20,7 +19,10 @@ import {
   PlanOfferStackingPolicy,
 } from "../../src/modules/plan-offer/types"
 import { createPlanOfferSeed } from "../helpers/plan-offer-fixtures"
-import { seedSubscriptionCheckoutCart } from "../helpers/checkout-fixtures"
+import {
+  seedGateCart,
+  seedSubscriptionCheckoutCart,
+} from "../helpers/checkout-fixtures"
 import {
   createCustomer,
   createProductWithVariant,
@@ -116,54 +118,6 @@ async function seedOffer(
       consent_from_session: "customer_id",
     },
   })
-}
-
-/**
- * A cart the checkout gate can decide on. Only the line item matters: the gate
- * reads the cart's product ids and its subscription signal.
- */
-async function seedGateCart(
-  container: MedusaContainer,
-  customer: { id: string; email: string | null },
-  variantId: string,
-  isSubscription: boolean
-): Promise<string> {
-  const cartModule = container.resolve<ICartModuleService>(Modules.CART)
-
-  // SAFETY: `createCarts` answers a single created cart at runtime, while the
-  // pinned types declare an array; this narrows it to the id the request uses.
-  const cart = (await cartModule.createCarts({
-    currency_code: "usd",
-    email: customer.email,
-    customer_id: customer.id,
-    metadata: {},
-    shipping_address: {
-      first_name: "Gate",
-      last_name: "Test",
-      address_1: "1 Test Way",
-      city: "Testville",
-      postal_code: "00001",
-      country_code: "us",
-    },
-    items: [
-      {
-        title: "Item",
-        unit_price: 18,
-        quantity: 1,
-        variant_id: variantId,
-        metadata: isSubscription
-          ? {
-              is_subscription: true,
-              frequency_interval: "month",
-              frequency_value: 1,
-              payment_mode: "manual",
-            }
-          : {},
-      } as never,
-    ],
-  } as never)) as unknown as { id: string }
-
-  return cart.id
 }
 
 async function seedTrialRow(
@@ -273,6 +227,29 @@ medusaIntegrationTestRunner({
         expect(body.type).not.toEqual("not_allowed")
       })
 
+      it("lets a subscription-track cart fold into a bound auto trial row", async () => {
+        // The shape a claimed trial reaches once it binds a method: the
+        // purchase folds into the row and the extend clears the trial state,
+        // so the conversion charge is the slot this purchase paid for.
+        const { container, customer, product, variant, headers } = await setup()
+        await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          product_id: product.id,
+          variant_id: variant.id,
+          reference: `SUB-TRIAL-${Date.now()}`,
+          status: SubscriptionStatus.ACTIVE,
+          is_trial: true,
+          payment_context: vaultedContext,
+        })
+        const cartId = await seedGateCart(container, customer, variant.id, true)
+
+        const response = await completeCart(cartId, headers)
+        const body = response.data as GateError
+
+        expect(body.message ?? "").not.toContain(REORDER_GUARD_MESSAGE)
+        expect(body.type).not.toEqual("not_allowed")
+      })
+
       it("lets a subscription-track cart fold into a paid vaulted row", async () => {
         const { container, customer, product, variant, headers } = await setup()
         await createSubscriptionSeed(container, {
@@ -315,14 +292,6 @@ medusaIntegrationTestRunner({
       })
 
       it.each([
-        [
-          "a bound auto trial row",
-          {
-            is_trial: true,
-            status: SubscriptionStatus.ACTIVE,
-            payment_context: vaultedContext,
-          },
-        ],
         [
           "a redemption row with no provider",
           {

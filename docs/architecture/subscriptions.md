@@ -281,16 +281,28 @@ Ticket 12 (D12) opens exactly **one exception on the reorder rail**: when the
 cart itself runs on the subscription track (`metadata.is_subscription` on a line
 for the colliding product — the same boolean wording `validate-subscription-cart`
 reads), a live row the engine's own `extend` stacking would fold the purchase
-into no longer blocks — a card-free trial row (`status: ACTIVE`, `is_trial`, no
-stored payment method) or a paid ACTIVE row carrying a provider
+into no longer blocks — a live trial row (`status: ACTIVE`, `is_trial`, whether or
+not it has bound a payment method) or a paid ACTIVE row carrying a provider
 (`payment_context.payment_provider_id`). That purchase becomes an `extend` of the
 existing row, not a second subscription. The exception is a **true subset** of the
 stacking fold condition (`isFoldableReorderRailRow`), so it can never let through
-a cart the engine would not fold. Everything else still blocks: a bound (auto)
-trial, a `PAUSED` row, a redemption-shaped row with no provider (its free period
-ends at `cancel_effective_at`, leaving an extension's billing undefined), a native
+a cart the engine would not fold. Everything else still blocks: a `PAUSED` row, a
+redemption-shaped row with no provider (its free period ends at
+`cancel_effective_at`, leaving an extension's billing undefined), a native
 recurrence, and any pure one-time purchase — a cart with no subscription signal
 never gets the exception.
+
+A trial row qualifies whether or not it has bound a payment method. An earlier
+version admitted only the card-free shape, on the grounds that a bound auto trial
+"would double-charge against the method it already holds"; that assumed the row
+keeps two independent charge dates, and it does not. The extend anchors on the
+row's own `next_renewal_at` (`extendSubscriptionRenewalDate`),
+`ensureNextRenewalCycleStep` reconciles the upcoming cycle onto that date by role
+(`resolveUpcomingCycle`'s `adopt`, not a date-equality match), and
+`process-renewal-cycle` refuses any cycle dated before `trial_ends_at` — so the
+conversion charge *is* the slot the prepaid cadence moved, and the extend clears
+`is_trial` / `trial_ends_at` on the way through. See the known limitation below
+for the one window this does not close.
 
 Both readers apply the **same occupying status set**, so the two directions
 cannot disagree about what "already subscribed" means. An unauthenticated
@@ -346,6 +358,21 @@ in both the create and the update schema
 (`@medusajs/medusa/dist/api/admin/products/validators.js:167`, `:207`), so `""` is a
 value nothing rejects. Nothing in this repository pins either the reachability or
 that wording.
+
+**Known limitation — an in-flight renewal cycle is not moved by a prepay.**
+`resolveUpcomingCycle` (`src/modules/renewal/utils/upcoming-cycle.ts`) reconciles
+the subscription's upcoming cycle onto `next_renewal_at` with an `adopt`, but it
+declines to adopt a row whose money is already in motion (`status: processing`, or
+`generated_order_id` set) and answers `defer` instead: every row is left where it
+is, and the overlap is named for an operator rather than repaired. A repeat
+purchase landing in that window therefore extends `next_renewal_at` while the
+in-flight cycle keeps its own date, leaving two chargeable slots for one period.
+The checkout gate tolerates this on every rail it admits — a paid row carries an
+in-flight order exactly as a bound trial can — so it is a property of the `defer`
+branch, not of the exception above; for a trial whose `trial_ends_at` is still in
+the future it is unreachable, because `process-renewal-cycle` refuses to process a
+cycle dated before that date. Closing it needs either a refusal at the prepay
+boundary or an operator surface for the overlap, and is not done here.
 
 ## 3. Read Path
 

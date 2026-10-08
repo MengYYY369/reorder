@@ -6,10 +6,7 @@ import {
   TRACK_OCCUPYING_SUBSCRIPTION_STATUSES,
   isNativeSubscriptionReference,
 } from "./native-subscription"
-import {
-  hasStoredPaymentMethod,
-  readPaymentProviderId,
-} from "./payment-context"
+import { readPaymentProviderId } from "./payment-context"
 
 /**
  * The reorder-rail half of the checkout-completion exclusion rule (T8).
@@ -67,22 +64,44 @@ export type ReorderRailRowCandidate = {
  *
  * The predicate is a STRICT SUBSET of `resolveExtendTarget`'s fold set
  * (`stacking.ts`): that fold takes any non-native ACTIVE row, and this takes
- * only the two shapes a repeat purchase can actually extend without leaving
+ * only the shapes a repeat purchase can actually extend without leaving
  * undefined billing semantics behind —
  *
- * - a card-free trial row (`ACTIVE` + `is_trial` + no stored method), which the
- *   extend converts to a paid row, and
+ * - a live trial row (`ACTIVE` + `is_trial`), which the extend converts to a
+ *   paid row, and
  * - a paid live row (`ACTIVE` + not a trial + a stored provider id, i.e. the
  *   vaulted/epay rails), which the extend stacks onto.
  *
+ * A trial row qualifies whether or not it has bound a payment method. An
+ * earlier version of this predicate admitted only the card-free shape, on the
+ * grounds that a bound auto trial "would double-charge against the method it
+ * already holds" — that assumed the row keeps two independent charge dates, and
+ * it does not. `extendSubscriptionRenewalDate` moves the anchor
+ * (`next_renewal_at`), `ensureNextRenewalCycleStep` reconciles the upcoming
+ * cycle onto it by role (`resolveUpcomingCycle`'s `adopt`, not a date-equality
+ * match), and `process-renewal-cycle` refuses any cycle dated before
+ * `trial_ends_at` — so the conversion charge *is* the slot the prepaid cadence
+ * moved, and the extend clears `is_trial` / `trial_ends_at` on the way through.
+ * The refusal made the ordinary production shape (a trial that has bound a
+ * method, so its `payment_mode` is `auto`) unpayable: the customer's money
+ * moved and the completion gate then answered `400 not_allowed`.
+ *
+ * The residual risk the old wording gestured at is `resolveUpcomingCycle`'s
+ * `defer` branch, which refuses to move a cycle whose renewal order is already
+ * in flight and so can leave two chargeable slots for one period. That window
+ * is not a trial property — this predicate already admits paid rows, and a paid
+ * row carries an in-flight order exactly as a bound trial can — and for a trial
+ * whose `trial_ends_at` is still in the future it is unreachable, because the
+ * eligibility gate in `process-renewal-cycle` refuses to process a cycle before
+ * that date.
+ *
  * Everything the fold would take but this refuses keeps the strict exclusion:
  * a redemption row (no provider id, its free period ends at
- * `cancel_effective_at`) would extend into undefined billing, a bound auto
- * trial row would double-charge against the method it already holds, and a
- * PAUSED row is not `ACTIVE` so the fold would `create` a second live row for
- * the same product. The subset property is pinned by
- * `checkout-gate.spec.ts`, so a change to the fold that this predicate does not
- * follow reddens there rather than at a customer's checkout.
+ * `cancel_effective_at`) would extend into undefined billing, and a PAUSED row
+ * is not `ACTIVE` so the fold would `create` a second live row for the same
+ * product. The subset property is pinned by `checkout-gate.spec.ts`, so a
+ * change to the fold that this predicate does not follow reddens there rather
+ * than at a customer's checkout.
  */
 export function isFoldableReorderRailRow(
   row: ReorderRailRowCandidate
@@ -96,7 +115,7 @@ export function isFoldableReorderRailRow(
   }
 
   if (row.is_trial) {
-    return !hasStoredPaymentMethod(row.payment_context)
+    return true
   }
 
   return readPaymentProviderId(row.payment_context) !== null
