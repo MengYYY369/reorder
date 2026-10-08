@@ -14,6 +14,10 @@ import {
   type RenewalLogEventSubscriptionDisplay,
 } from "../utils/renewal-log-event"
 import {
+  readOrderPaymentVerdict,
+  type OrderPaymentVerdict,
+} from "../utils/order-payment-verdict"
+import {
   RenewalAttemptStatus,
   RenewalCycleStatus,
 } from "../../modules/renewal/types"
@@ -30,15 +34,6 @@ const STUCK_CYCLE_STATUSES = [
   RenewalCycleStatus.PROCESSING,
   RenewalCycleStatus.AWAITING_MANUAL_RESOLUTION,
 ]
-
-/**
- * What reconciliation concluded about a candidate order's payment, following
- * the v2.20 derivation in `src/api/store/saas/reconcile/route.ts`: the order
- * entity carries no `payment_status` column, so state is read through the
- * order → payment collection link (`order_payment_collection`) and the
- * collection's own `status` + `payments[].status`.
- */
-type OrderPaymentVerdict = "captured" | "not_captured" | "ambiguous"
 
 export type ReconcileStuckRenewalOutcome =
   | "finalize"
@@ -223,106 +218,6 @@ async function findOrphanOrderIds(
   })
 
   return (orders as Array<{ id: string }>).map((order) => order.id)
-}
-
-/**
- * Confirms what happened to an order's payment. Every branch below answers
- * only from positively readable state; anything it cannot settle on is
- * `ambiguous`, which parks the cycle (decision R5: "we do not know" must not
- * be recorded as "there is no hope").
- */
-async function readOrderPaymentVerdict(
-  container: MedusaContainer,
-  orderId: string
-): Promise<OrderPaymentVerdict> {
-  const query = container.resolve(ContainerRegistrationKeys.QUERY)
-
-  try {
-    const { data: collectionLinks } = await query.graph({
-      entity: "order_payment_collection",
-      fields: ["payment_collection_id"],
-      filters: {
-        order_id: orderId,
-      },
-    })
-
-    const paymentCollectionId = (
-      collectionLinks as Array<{ payment_collection_id?: string }>
-    )[0]?.payment_collection_id
-
-    // No collection linked to the order: the payment-collection step never
-    // completed. Capture requires an authorized payment record against a
-    // linked collection, so no money moved and no webhook can move it later.
-    if (!paymentCollectionId) {
-      return "not_captured"
-    }
-
-    const { data: collections } = await query.graph({
-      entity: "payment_collection",
-      fields: ["status", "payments.status"],
-      filters: {
-        id: paymentCollectionId,
-      },
-    })
-
-    const collection = (
-      collections as unknown as Array<{
-        status?: string
-        payments?: Array<{ status?: string }> | null
-      }>
-    )[0]
-
-    if (!collection) {
-      return "ambiguous"
-    }
-
-    const paymentStatuses =
-      collection.payments?.map((payment) => payment.status) ?? []
-
-    // Money was taken and then returned: the period is neither cleanly paid
-    // nor cleanly uncharged. Park.
-    if (
-      paymentStatuses.includes("refunded") ||
-      paymentStatuses.includes("partially_refunded")
-    ) {
-      return "ambiguous"
-    }
-
-    if (
-      paymentStatuses.includes("captured") ||
-      collection.status === "completed"
-    ) {
-      return "captured"
-    }
-
-    const everyPaymentCanceled =
-      paymentStatuses.length > 0 &&
-      paymentStatuses.every((status) => status === "canceled")
-
-    // Canceled payments or a canceled collection are positively "nothing was
-    // charged". The same holds for a collection with NO payment record at all
-    // (`not_paid`, or `awaiting` with a session that was never authorized):
-    // capture acts on an authorized payment record, so zero records means
-    // zero authorizations and no webhook can capture on its own — and a
-    // retried attempt reuses not_paid/awaiting collections instead of
-    // creating a second order (`resolveOrderPaymentCollection`).
-    if (
-      everyPaymentCanceled ||
-      collection.status === "canceled" ||
-      (paymentStatuses.length === 0 &&
-        (collection.status === "not_paid" || collection.status === "awaiting"))
-    ) {
-      return "not_captured"
-    }
-
-    // authorized / awaiting / partially_authorized / requires_action /
-    // pending payments / unrecognized statuses: money may still be captured
-    // by a late webhook. Park.
-    return "ambiguous"
-  } catch {
-    // Unreadable payment state parks the cycle — never reverts it.
-    return "ambiguous"
-  }
 }
 
 function buildParkReason(orderId: string): string {

@@ -367,6 +367,100 @@ describe("retireStaleUpcomingCycles", () => {
 })
 
 /**
+ * The recheck is a parameter because the honest qualification is not always a
+ * property of the row. A superseded row is named for CARRYING an order, so the
+ * row-local question — `stillRetirable` — answers "no" for it on every run: the
+ * retire would withhold it, it would keep the subscription's one live
+ * `scheduled` slot, and the insert the retire exists to make room for would fail
+ * on `renewal_cycle_one_scheduled_per_subscription` every time.
+ *
+ * The default stays the row-local question, so a caller with no verdicts to read
+ * is unchanged — that is the third case below, and it is the one that would
+ * break silently if the default ever moved.
+ */
+describe("retireStaleUpcomingCycles recheck", () => {
+  const ANCHOR = "2026-11-20T05:08:23.447Z"
+
+  it("retires a row whose order the recheck read as never charged", async () => {
+    const fake = fakeRetireWriter(["rcy_superseded", "rcy_keeper"])
+    fake.bill("rcy_superseded", "order_unpaid")
+
+    await retireStaleUpcomingCycles(
+      fake.writer,
+      "sub_1",
+      [cycle({ id: "rcy_superseded", generated_order_id: "order_unpaid" })],
+      fake.logger,
+      ANCHOR,
+      async () => true
+    )
+
+    expect(fake.live()).toEqual(["rcy_keeper"])
+    expect(fake.journal()).toEqual(["soft:rcy_superseded", "warn"])
+    expect(fake.warnings[0]).toContain(ANCHOR)
+  })
+
+  it("withholds a row whose order the recheck read as paid", async () => {
+    const fake = fakeRetireWriter(["rcy_superseded", "rcy_keeper"])
+    fake.bill("rcy_superseded", "order_paid")
+
+    await retireStaleUpcomingCycles(
+      fake.writer,
+      "sub_1",
+      [cycle({ id: "rcy_superseded", generated_order_id: "order_paid" })],
+      fake.logger,
+      ANCHOR,
+      async () => false
+    )
+
+    expect(fake.live()).toEqual(["rcy_keeper", "rcy_superseded"])
+    expect(fake.journal()).toEqual(["warn"])
+    expect(fake.warnings[0]).toContain("withheld 1")
+    expect(fake.warnings[0]).not.toContain("retired")
+  })
+
+  it("defaults to the row-local qualification", async () => {
+    const fake = fakeRetireWriter(["rcy_billed", "rcy_keeper"])
+    fake.bill("rcy_billed", "order_in_flight")
+
+    await retireStaleUpcomingCycles(
+      fake.writer,
+      "sub_1",
+      [cycle({ id: "rcy_billed" })],
+      fake.logger,
+      "rcy_keeper"
+    )
+
+    expect(fake.live()).toEqual(["rcy_billed", "rcy_keeper"])
+    expect(fake.warnings[0]).toContain("withheld 1")
+  })
+
+  /**
+   * Asked once per row the read returned, in the read's order, and never for a
+   * row the read did not return: a recheck may cost a query, and asking it about
+   * a row that is already gone would be asking about nothing.
+   */
+  it("asks the recheck once per row the write read back", async () => {
+    const fake = fakeRetireWriter(["rcy_a", "rcy_b", "rcy_keeper"])
+    const asked: string[] = []
+
+    await retireStaleUpcomingCycles(
+      fake.writer,
+      "sub_1",
+      [cycle({ id: "rcy_a" }), cycle({ id: "rcy_b" })],
+      fake.logger,
+      "rcy_keeper",
+      async (row) => {
+        asked.push(row.id)
+        return true
+      }
+    )
+
+    expect(asked).toEqual(["rcy_a", "rcy_b"])
+    expect(fake.live()).toEqual(["rcy_keeper"])
+  })
+})
+
+/**
  * The `defer` branch: the protected row is the in-flight one this run refuses to
  * write, so the retire is the branch's whole write set and the report keeps
  * saying `deferred` while the named neighbour goes. A branch that reported a
@@ -696,6 +790,45 @@ describe("rollBackUpcomingCycleWrites", () => {
     })
 
     expect(fake.journal()).toEqual(["delete:rcy_new"])
+  })
+
+  /**
+   * Delete first: the restore brings back a live `scheduled` row, and the index
+   * that forced the retire in the first place will not admit it while the run's
+   * own row still holds the subscription's one slot.
+   */
+  it("restores the rows a created run had to clear, after deleting its own row", async () => {
+    const fake = fakeRollbackWriter()
+
+    await rollBackUpcomingCycleWrites(fake.writer, fake.logger, {
+      action: "created",
+      renewal_cycle_id: "rcy_new",
+      retired_ids: ["rcy_superseded"],
+    })
+
+    expect(fake.journal()).toEqual([
+      "delete:rcy_new",
+      "restore:rcy_superseded",
+    ])
+    expect(fake.warnings).toHaveLength(1)
+  })
+
+  /**
+   * The shape every run before supersession had, and every run today whose rows
+   * were all adoptable: the field is absent, not empty, and an absent field has
+   * to roll back exactly what it always did.
+   */
+  it("restores nothing extra for a created run that had room to begin with", async () => {
+    const fake = fakeRollbackWriter()
+
+    await rollBackUpcomingCycleWrites(fake.writer, fake.logger, {
+      action: "created",
+      renewal_cycle_id: "rcy_new",
+      retired_ids: [],
+    })
+
+    expect(fake.journal()).toEqual(["delete:rcy_new"])
+    expect(fake.warnings).toEqual([])
   })
 
   it("puts the deleted rows back through the keeper-last restore", async () => {

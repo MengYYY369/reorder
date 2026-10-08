@@ -1,6 +1,7 @@
 import {
   RenewalApprovalStatus,
   RenewalCycleStatus,
+  type OrderPaymentVerdict,
 } from "../types"
 import {
   restoreForUpcomingCycleReconcile,
@@ -41,18 +42,10 @@ const cycle = (
 })
 
 /**
- * The retire set of a resolution, as ids. `create` is the only branch without a
- * `retire` field, so the three that have one are narrowed out first, and
- * throwing on `create` is what keeps a wrong-branch resolution from reading as
- * an empty retire set.
+ * The retire set of a resolution, as ids. Every arm carries one, so this is a
+ * plain projection: it exists to keep the cases reading as ids rather than rows.
  */
 function retireIds(resolution: UpcomingCycleResolution): string[] {
-  if (resolution.action === "create") {
-    throw new Error(
-      `resolution has no retire set (action '${resolution.action}')`
-    )
-  }
-
   return resolution.retire.map((row) => row.id)
 }
 
@@ -315,17 +308,18 @@ describe("resolveUpcomingCycle", () => {
   })
 
   /**
-   * `create` is the one branch with no `retire` field, so the exact-shape
-   * equality below is the pin: were a retire set ever added to it, the extra
-   * property would fail these cases rather than pass unnoticed. It is reached
-   * only when no open row exists, and a row qualified for `retire` has to be
-   * open, so its retire set would be empty by construction anyway.
+   * `create` was the one branch with no `retire` field, and the exact-shape
+   * equality below pinned that: were a retire set ever added, the extra property
+   * would fail these cases rather than pass unnoticed. A superseded row is open
+   * but refused as a candidate, so `create` can now be reached with a row still
+   * sitting there and the field is real — the pin moved to "empty when there is
+   * nothing to clear".
    */
   describe("create", () => {
     it("creates when there is no row at all", () => {
       expect(
         resolveUpcomingCycle([], new Date("2026-11-24T10:00:00.000Z"))
-      ).toEqual<UpcomingCycleResolution>({ action: "create" })
+      ).toEqual<UpcomingCycleResolution>({ action: "create", retire: [] })
     })
 
     it("creates when every existing row is terminal", () => {
@@ -344,7 +338,141 @@ describe("resolveUpcomingCycle", () => {
           [succeeded, failed],
           new Date("2026-11-24T10:00:00.000Z")
         )
-      ).toEqual<UpcomingCycleResolution>({ action: "create" })
+      ).toEqual<UpcomingCycleResolution>({ action: "create", retire: [] })
+    })
+  })
+
+  /**
+   * Supersession: a `scheduled` row whose `generated_order_id` names an order
+   * that was positively never charged.
+   *
+   * `hasInFlightRenewal` is coarse on purpose — any `generated_order_id` counts,
+   * because the row cannot tell an order the customer is about to pay from one
+   * nobody will ever pay. The verdict map can, and this is the one shape where
+   * the coarse reading is wrong in the direction that hurts: the row holds the
+   * entitlement date back, so no cycle ever lands on the date the customer paid
+   * through, and once the subscription stops reading `manual` the scheduler
+   * charges the row again — billing a period that was already paid for.
+   *
+   * Every case below turns on one of the three verdicts plus its absence, because
+   * that is the whole difference between a row to clear and a row to respect.
+   */
+  describe("superseded rows", () => {
+    const ANCHOR = new Date("2026-11-24T10:00:00.000Z")
+
+    /** A `scheduled` row naming an order, dated off the entitlement date. */
+    const superseded = (id = "rcy_superseded") =>
+      cycle({ id, generated_order_id: "order_unpaid" })
+
+    const readings = (...entries: Array<[string, OrderPaymentVerdict]>) =>
+      new Map(entries)
+
+    const neverCharged = readings(["order_unpaid", "not_captured"])
+
+    it("clears a superseded row instead of deferring to it", () => {
+      const row = superseded()
+
+      expect(resolveUpcomingCycle([row], ANCHOR, neverCharged)).toEqual<
+        UpcomingCycleResolution
+      >({ action: "create", retire: [row] })
+    })
+
+    it("adopts the healthy row beside it and clears the superseded one", () => {
+      const healthy = cycle({ id: "rcy_healthy" })
+      const row = superseded()
+
+      expect(
+        resolveUpcomingCycle([healthy, row], ANCHOR, neverCharged)
+      ).toEqual<UpcomingCycleResolution>({
+        action: "adopt",
+        cycle: healthy,
+        retire: [row],
+      })
+    })
+
+    it("names it in the retire set of a match that chose another row", () => {
+      const exact = cycle({ id: "rcy_exact", scheduled_for: ANCHOR })
+      const row = superseded()
+
+      expect(
+        resolveUpcomingCycle([exact, row], ANCHOR, neverCharged)
+      ).toEqual<UpcomingCycleResolution>({
+        action: "match",
+        cycle: exact,
+        retire: [row],
+      })
+    })
+
+    /**
+     * The date-agrees case, pinned because it looks like the bug and is not one:
+     * a row sitting on the entitlement date is the cycle for the period the
+     * customer is entering, so charging it is charging the right period. What
+     * the prepay bought is the period before it.
+     */
+    it("matches a superseded row that sits on the entitlement date itself", () => {
+      const row = superseded()
+      const dated = { ...row, scheduled_for: ANCHOR }
+
+      expect(resolveUpcomingCycle([dated], ANCHOR, neverCharged)).toEqual<
+        UpcomingCycleResolution
+      >({ action: "match", cycle: dated, retire: [] })
+    })
+
+    it("defers to a row whose order was charged", () => {
+      const row = superseded()
+
+      expect(
+        resolveUpcomingCycle(
+          [row],
+          ANCHOR,
+          readings(["order_unpaid", "captured"])
+        )
+      ).toEqual<UpcomingCycleResolution>({
+        action: "defer",
+        cycle: row,
+        retire: [],
+      })
+    })
+
+    it("defers to a row whose order the reader could not settle", () => {
+      const row = superseded()
+
+      expect(
+        resolveUpcomingCycle(
+          [row],
+          ANCHOR,
+          readings(["order_unpaid", "ambiguous"])
+        )
+      ).toEqual<UpcomingCycleResolution>({
+        action: "defer",
+        cycle: row,
+        retire: [],
+      })
+    })
+
+    /**
+     * The default argument, which is the coarse reading: a caller that read no
+     * verdicts has no basis for clearing anything, and "not read" must never be
+     * treated as "not charged".
+     */
+    it("defers to a row whose order nobody read", () => {
+      const row = superseded()
+
+      expect(resolveUpcomingCycle([row], ANCHOR, readings())).toEqual<
+        UpcomingCycleResolution
+      >({ action: "defer", cycle: row, retire: [] })
+    })
+
+    it("defers to a processing row whatever its order says", () => {
+      const row = cycle({
+        id: "rcy_processing",
+        status: RenewalCycleStatus.PROCESSING,
+        generated_order_id: "order_unpaid",
+      })
+
+      expect(resolveUpcomingCycle([row], ANCHOR, neverCharged)).toEqual<
+        UpcomingCycleResolution
+      >({ action: "defer", cycle: row, retire: [] })
     })
   })
 
@@ -412,11 +540,11 @@ describe("resolveUpcomingCycle", () => {
       expect(retireIds(resolution)).toEqual([])
     })
 
-    it("reports create without a retire set", () => {
-      const resolution = resolveUpcomingCycle([], DATE)
-
-      expect(resolution).toEqual<UpcomingCycleResolution>({ action: "create" })
-      expect(resolution).not.toHaveProperty("retire")
+    it("reports an empty retire set when there is nothing to clear", () => {
+      expect(resolveUpcomingCycle([], DATE)).toEqual<UpcomingCycleResolution>({
+        action: "create",
+        retire: [],
+      })
     })
   })
 })

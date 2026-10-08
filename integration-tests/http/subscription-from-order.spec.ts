@@ -243,6 +243,88 @@ async function seedSubscriptionOrder(
 }
 
 /**
+ * Builds the order a `defer` is protecting: a real one, linked to a payment
+ * collection that is authorized but never captured.
+ *
+ * A non-null `generated_order_id` used to be the whole test for "an order is
+ * in flight", so a bare id string stood in for one. The decision now reads what
+ * happened to that order's money, and an id that resolves to no order at all
+ * reads as never charged — correctly, because capture acts on a payment record
+ * against a linked collection, so no collection means no capture happened and
+ * none can arrive later. The fixture therefore has to build the money instead
+ * of naming it. Authorized-but-uncaptured is the shape worth protecting: a late
+ * capture can still land, so the row carrying it must not be moved.
+ */
+async function seedOutstandingRenewalOrder(
+  container: MedusaContainer
+): Promise<string> {
+  // Resolved with a local shape, like `reconcile-stuck-renewal-cycle.spec.ts`
+  // does: `IOrderModuleService.createOrders` is typed as returning an array,
+  // which the rest of this file already trips over.
+  const orderModule = container.resolve(Modules.ORDER) as {
+    createOrders: (input: Record<string, unknown>) => Promise<{ id: string }>
+  }
+  const paymentModule = container.resolve<IPaymentModuleService>(
+    Modules.PAYMENT
+  )
+  const link = container.resolve<ILinkModuleService>(
+    ContainerRegistrationKeys.LINK
+  )
+
+  const customer = await createCustomer(container, {
+    email: `outstanding-${Date.now()}-${Math.random()}@medusa.test`,
+  })
+  const { product, variant } = await createProductWithVariant(container)
+
+  const paymentCollection = await paymentModule.createPaymentCollections({
+    currency_code: "usd",
+    amount: 1800,
+  })
+
+  // Zero payment records plus an `authorized` collection is what a provider
+  // leaves behind when the run dies between authorize and capture. The reader
+  // cannot settle it either way, so it parks the row instead of clearing it.
+  await paymentModule.updatePaymentCollections(paymentCollection.id, {
+    status: "authorized",
+  })
+
+  const order = await orderModule.createOrders({
+    customer_id: customer.id,
+    email: customer.email,
+    currency_code: "usd",
+    status: "completed",
+    items: [
+      {
+        title: "Renewal item",
+        subtitle: product.title,
+        quantity: 1,
+        unit_price: 1800,
+        variant_id: variant.id,
+      },
+    ],
+    shipping_address: {
+      first_name: "Outstanding",
+      last_name: "Renewal",
+      address_1: "1 Test Way",
+      city: "Testville",
+      postal_code: "00001",
+      country_code: "us",
+    },
+  })
+
+  await link.create([
+    {
+      [Modules.ORDER]: { order_id: order.id },
+      [Modules.PAYMENT]: {
+        payment_collection_id: paymentCollection.id,
+      },
+    },
+  ])
+
+  return order.id
+}
+
+/**
  * Deep copy of every `metadata` object in an update input, taken before the
  * input reaches the DAL: jsonb payloads are merged on the way in, so a reference
  * held by a test spy would show the post-merge state rather than the write.
@@ -940,11 +1022,12 @@ medusaIntegrationTestRunner({
           next_renewal_at: entitlementAt,
         })
 
-        const outstandingOrderId = `order_outstanding_${Date.now()}`
+        const outstandingOrderId = await seedOutstandingRenewalOrder(container)
 
         // The manual renewal flow reuses a due SCHEDULED row and only stamps
-        // generated_order_id, so an unpaid order can sit on a row that still
-        // reads SCHEDULED. Moving its date would re-arm a billed period.
+        // generated_order_id, so an order whose money is still in motion can sit
+        // on a row that still reads SCHEDULED. Moving its date would re-arm a
+        // billed period.
         const inFlight = await createRenewalCycleSeed(container, {
           subscription_id: subscription.id,
           scheduled_for: inFlightAt,
@@ -1239,7 +1322,7 @@ medusaIntegrationTestRunner({
           next_renewal_at: entitlementAt,
         })
 
-        const outstandingOrderId = `order_outstanding_${Date.now()}`
+        const outstandingOrderId = await seedOutstandingRenewalOrder(container)
 
         await withUpcomingCycleIndexDropped(container, async () => {
           const stale = await createRenewalCycleSeed(container, {

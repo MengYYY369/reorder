@@ -1,4 +1,5 @@
 import {
+  OrderPaymentVerdict,
   RenewalApprovalStatus,
   RenewalCycleStatus,
 } from "../types"
@@ -33,14 +34,31 @@ export type UpcomingRenewalCycleRecord = {
 }
 
 /**
+ * The payment verdict of every order a subscription's cycles point at, keyed by
+ * order id.
+ *
+ * A row whose order is missing from the map counts as in flight: a verdict
+ * nobody read is not evidence that nothing was charged, and this module cannot
+ * read one itself — it is the decision half behind a pure boundary, and the
+ * caller is the half that owns a container.
+ */
+export type UpcomingCycleOrderVerdicts = ReadonlyMap<
+  string,
+  OrderPaymentVerdict
+>
+
+/**
  * The four things the upcoming-cycle step can do with the rows a subscription
  * already carries. See `resolveUpcomingCycle` for the decision rules.
  *
- * `match`, `adopt` and `defer` each also name, in `retire`, the live `scheduled`
- * rows the decision leaves in place: rows no branch moves or deletes, so a
- * caller that does not act on them leaves them chargeable. `create` carries no
- * `retire` at all — it is reached only when no open row exists, and only an open
- * row can qualify.
+ * Every arm names, in `retire`, the live `scheduled` rows the decision leaves in
+ * place: rows no branch moves or deletes, so a caller that does not act on them
+ * leaves them chargeable. `create` used to be the exception — it was reached
+ * only when no open row existed, and only an open row could qualify. A
+ * superseded row is the exception to that: it is `scheduled`, it is refused as a
+ * candidate, and it still has to go before the insert, because
+ * `renewal_cycle_one_scheduled_per_subscription` admits one live `scheduled` row
+ * per subscription.
  */
 export type UpcomingCycleResolution =
   | {
@@ -58,7 +76,10 @@ export type UpcomingCycleResolution =
       cycle: UpcomingRenewalCycleRecord
       retire: UpcomingRenewalCycleRecord[]
     }
-  | { action: "create" }
+  | {
+      action: "create"
+      retire: UpcomingRenewalCycleRecord[]
+    }
 
 /**
  * Every column a reconciliation write is allowed to put on an existing upcoming
@@ -185,12 +206,64 @@ function isOpenUpcomingCycle(cycle: UpcomingRenewalCycleRecord) {
  * `generated_order_id`, so an order can sit unpaid on a row that still reads
  * `scheduled`; moving that row's date would re-arm a cycle that is already
  * billed. A `processing` row is mid-flight for the same reason.
+ *
+ * Deliberately coarse, and it stays coarse: this read cannot tell an order the
+ * customer is about to pay from one nobody will ever pay, so any
+ * `generated_order_id` counts. `isSupersededCycle` is what narrows it, and only
+ * where a verdict says the order was positively never charged.
  */
 function hasInFlightRenewal(cycle: UpcomingRenewalCycleRecord) {
   return (
     cycle.status === RenewalCycleStatus.PROCESSING ||
     cycle.generated_order_id != null
   )
+}
+
+/**
+ * The shape the supersession test reads: the status and the order the row names,
+ * which is all it decides on.
+ *
+ * Narrowed on purpose. The write half re-reads a row as identity plus
+ * qualification rather than as a full record, and it has to ask the same
+ * question; a predicate taking the full record would force that half into a cast
+ * or a second copy of the rule.
+ */
+export type UpcomingCycleSupersessionCandidate = {
+  status: RenewalCycleStatus
+  generated_order_id: string | null
+}
+
+/**
+ * A `scheduled` row whose `generated_order_id` names an order that was
+ * positively never charged.
+ *
+ * This is the one shape where `hasInFlightRenewal` is wrong in the direction
+ * that hurts. The row holds the entitlement date back, so no cycle ever lands on
+ * the date the customer actually paid through; and once the subscription stops
+ * reading `manual`, `resolveCycleDisposition` calls the row chargeable again —
+ * billing a period that was already paid for. Nothing is in motion: the
+ * collection was never paid, every payment on it was canceled, or there is no
+ * payment record at all.
+ *
+ * `ambiguous` is not supersession. An authorized-but-uncaptured payment, a
+ * refund, or a query that failed all leave the money able to move, and the row
+ * keeps its hold.
+ */
+export function isSupersededCycle(
+  cycle: UpcomingCycleSupersessionCandidate,
+  verdicts: UpcomingCycleOrderVerdicts
+) {
+  if (cycle.status !== RenewalCycleStatus.SCHEDULED) {
+    return false
+  }
+
+  const orderId = cycle.generated_order_id
+
+  if (!orderId) {
+    return false
+  }
+
+  return verdicts.get(orderId) === "not_captured"
 }
 
 /**
@@ -224,17 +297,20 @@ function preferLaterCycle(
  * `processing` money is already in motion, a row carrying a
  * `generated_order_id` is billed or awaiting payment, and `succeeded` / `failed`
  * belong to a period that already settled. What is left is a row the scheduler
- * can still charge.
+ * can still charge — plus the superseded rows, which do carry a
+ * `generated_order_id` but are the one shape that is provably not chargeable and
+ * provably in the way.
  */
 function collectRetirable(
   cycles: UpcomingRenewalCycleRecord[],
-  chosen?: UpcomingRenewalCycleRecord
+  chosen: UpcomingRenewalCycleRecord | undefined,
+  verdicts: UpcomingCycleOrderVerdicts
 ): UpcomingRenewalCycleRecord[] {
   return cycles.filter(
     (row) =>
       row.id !== chosen?.id &&
       row.status === RenewalCycleStatus.SCHEDULED &&
-      row.generated_order_id == null
+      (row.generated_order_id == null || isSupersededCycle(row, verdicts))
   )
 }
 
@@ -253,12 +329,19 @@ function collectRetirable(
  *               `scheduled` row is by definition still unclaimed
  * - `defer`     the row that would be adopted has an in-flight renewal order:
  *               leave every row alone and let the operator resolve the overlap
- * - `create`    no open row at all: the next period starts a fresh cycle
+ * - `create`    no adoptable row at all: the next period starts a fresh cycle,
+ *               after clearing any superseded row that would block the insert
  *
- * The first three carry `retire` alongside the chosen row — the live
- * `scheduled` rows this decision leaves in place, which it neither moves nor
- * deletes and therefore cannot be said to protect. `create` has no such field,
- * because reaching it means there was no open row to leave behind.
+ * Every arm carries `retire` — the live `scheduled` rows this decision leaves in
+ * place, which it neither moves nor deletes and therefore cannot be said to
+ * protect. `create` used to be exempt, because reaching it meant there was no
+ * open row to leave behind. A superseded row is open but refused as a candidate,
+ * so `create` can now be reached with one still sitting there, and it has to be
+ * named for the insert to be possible at all.
+ *
+ * `verdicts` carries what the caller read about the orders these rows point at,
+ * because reading one needs a container and this module has none. Defaults to
+ * empty, which is the coarse reading: every `generated_order_id` in flight.
  *
  * `match` outranks `adopt` for every status, pinned contract (see the `match`
  * block below and its spec cases).
@@ -272,7 +355,8 @@ function collectRetirable(
  */
 export function resolveUpcomingCycle(
   cycles: UpcomingRenewalCycleRecord[],
-  scheduledFor: Date
+  scheduledFor: Date,
+  verdicts: UpcomingCycleOrderVerdicts = new Map()
 ): UpcomingCycleResolution {
   const exactMatch = findUpcomingRenewalCycle(cycles, scheduledFor)
 
@@ -294,31 +378,37 @@ export function resolveUpcomingCycle(
     return {
       action: "match",
       cycle: exactMatch,
-      retire: collectRetirable(cycles, exactMatch),
+      retire: collectRetirable(cycles, exactMatch, verdicts),
     }
   }
 
   const candidate = cycles
-    .filter(isOpenUpcomingCycle)
+    .filter(
+      (cycle) =>
+        isOpenUpcomingCycle(cycle) && !isSupersededCycle(cycle, verdicts)
+    )
     .reduce<UpcomingRenewalCycleRecord | null>(
       (best, cycle) => (best ? preferLaterCycle(best, cycle) : cycle),
       null
     )
 
   if (!candidate) {
-    return { action: "create" }
+    return {
+      action: "create",
+      retire: collectRetirable(cycles, undefined, verdicts),
+    }
   }
 
   return hasInFlightRenewal(candidate)
     ? {
         action: "defer",
         cycle: candidate,
-        retire: collectRetirable(cycles, candidate),
+        retire: collectRetirable(cycles, candidate, verdicts),
       }
     : {
         action: "adopt",
         cycle: candidate,
-        retire: collectRetirable(cycles, candidate),
+        retire: collectRetirable(cycles, candidate, verdicts),
       }
 }
 

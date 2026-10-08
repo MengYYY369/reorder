@@ -21,6 +21,19 @@ export enum RenewalApprovalStatus {
   REJECTED = "rejected",
 }
 
+/**
+ * What a candidate renewal order's payment state was positively read as,
+ * following the v2.20 derivation in `src/api/store/saas/reconcile/route.ts`:
+ * the order entity carries no `payment_status` column, so state is read
+ * through the order → payment collection link (`order_payment_collection`) and
+ * the collection's own `status` + `payments[].status`.
+ *
+ * `ambiguous` is the answer for everything not positively readable — an
+ * authorized-but-uncaptured payment, a refund, a query that failed. "We do not
+ * know" must never be recorded as "there is no hope".
+ */
+export type OrderPaymentVerdict = "captured" | "not_captured" | "ambiguous"
+
 export type RenewalApprovalSummary = {
   approval_required: boolean
   approval_status: RenewalApprovalStatus | null

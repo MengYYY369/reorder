@@ -359,39 +359,54 @@ in both the create and the update schema
 value nothing rejects. Nothing in this repository pins either the reachability or
 that wording.
 
-**Known limitation — an in-flight renewal cycle is not moved by a prepay.**
-`resolveUpcomingCycle` (`src/modules/renewal/utils/upcoming-cycle.ts`) reconciles
-the subscription's upcoming cycle onto `next_renewal_at` with an `adopt`, but it
-declines to adopt a row whose money is already in motion (`status: processing`, or
-`generated_order_id` set) and answers `defer` instead: every row is left where it
-is, and the overlap is named for an operator rather than repaired. A repeat
-purchase landing in that window therefore extends `next_renewal_at` while the
-in-flight cycle keeps its own date, leaving two chargeable slots for one period.
-The checkout gate tolerates this on every rail it admits — a paid row carries an
-in-flight order exactly as a bound trial can — so it is a property of the `defer`
-branch, not of the exception above.
+**An in-flight renewal cycle is not moved by a prepay, but an uncharged one no
+longer holds its slot.** `resolveUpcomingCycle`
+(`src/modules/renewal/utils/upcoming-cycle.ts`) reconciles the subscription's
+upcoming cycle onto `next_renewal_at` with an `adopt`, and declines to adopt a row
+whose money is already in motion (`status: processing`, or `generated_order_id`
+set), answering `defer` instead: every row is left where it is and the overlap is
+named for an operator rather than repaired. The checkout gate tolerates that on
+every rail it admits — a paid row carries an in-flight order exactly as a bound
+trial can — so it is a property of the `defer` branch, not of the gate exception.
 
-Two consequences follow, and neither is hypothetical:
+What is no longer tolerated is a row held back by an order that never took money.
+`hasInFlightRenewal` still answers from `status`/`generated_order_id` alone, but
+`isSupersededCycle` narrows it: a `scheduled` row whose `generated_order_id` names
+an order that `readOrderPaymentVerdict`
+(`src/workflows/utils/order-payment-verdict.ts`) positively reports as
+`not_captured` is not a candidate. It is excluded from the choice, named in the
+`retire` set of whichever branch resolves, and cleared by
+`retireStaleUpcomingCycles` (`src/workflows/steps/ensure-next-renewal-cycle.ts`)
+before a `create` inserts — the ordering is forced by
+`renewal_cycle_one_scheduled_per_subscription`, a partial unique index on
+`(subscription_id) WHERE status = 'scheduled' AND deleted_at IS NULL`. A prepay
+landing in that window now leaves the next period with its own cycle on the new
+entitlement date, which is what the two consequences below used to cost.
 
-- **no cycle lands on the new entitlement date.** `create` is the only branch that
-  writes one, and `defer` is not it. A row that later turns auto-renewal on has no
-  cycle for the scheduler to fire, so the renewal it was switched on for never
-  happens.
-- **the stranded cycle stays chargeable once the row is not in manual mode.**
-  `resolveCycleDisposition` (`src/modules/renewal/utils/cycle-disposition.ts`)
-  answers `not_chargeable` for a `manual` row and `charge` for anything else, and
-  `process-renewal-cycle` holds no guard tying a cycle's `scheduled_for` to
-  `next_renewal_at`. A stranded cycle therefore bills its own slot the moment the
-  subscription is not `manual` — and turning auto-renewal on is exactly that
-  transition.
+Only `not_captured` supersedes. A `captured` order defers, and so does anything
+the reader cannot settle: an authorized-but-uncaptured collection is money a late
+capture can still take, and "unreadable" must never be recorded as "there is no
+hope" (`ambiguous`). A `processing` row defers whatever its order says, because
+the charge path owns it.
 
-`is_trial` / `trial_ends_at` do not shield this for long: `process-renewal-cycle`
-refuses a cycle dated before `trial_ends_at`, but the prepay that creates the
-overlap is also what clears both fields, so the shield expires with the purchase
-that needed it. Resolving the overlap is the operator's job, as `defer` says:
-retire the stranded cycle and let the next reconciliation create the anchor's own.
-Closing the window in code needs either a refusal at the prepay boundary or a
-disposition that reads the entitlement date, and is not done here.
+Two limitations remain, both deliberate:
+
+- **a retired order is not canceled.** The row is soft-deleted; its order and its
+  payment session are left alone, so a customer who pays that order anyway still
+  completes the period they bought — `payment-captured-manual-renewal` reads
+  `metadata.renewal_cycle_id` off the order and runs `complete-manual-renewal`
+  without re-reading the cycle, so a retired cycle still settles. That is the
+  intended outcome for a customer who paid, and it is why the retirement clears
+  the slot rather than the order.
+- **supersession reads `scheduled` rows only.** A `processing` row is deferred
+  even when its order never took money; that case belongs to
+  `reconcile-stuck-renewal-cycle`, which owns stuck `processing` rows and already
+  reads the same verdict.
+
+`is_trial` / `trial_ends_at` never shielded this: `process-renewal-cycle` refuses
+a cycle dated before `trial_ends_at`, but the prepay that creates the overlap is
+also what clears both fields, so the shield expired with the purchase that needed
+it.
 
 ## 3. Read Path
 

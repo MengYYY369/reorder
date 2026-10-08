@@ -1,4 +1,5 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
+import type { MedusaContainer } from "@medusajs/framework/types"
 import { RENEWAL_MODULE } from "../../modules/renewal"
 import type RenewalModuleService from "../../modules/renewal/service"
 import {
@@ -7,6 +8,7 @@ import {
 } from "../../modules/renewal/types"
 import {
   deriveUpcomingRenewalApprovalState,
+  isSupersededCycle,
   resolveUpcomingCycle,
   restoreForUpcomingCycleReconcile,
   type UpcomingCycleReconcilePatch,
@@ -18,6 +20,7 @@ import {
 import { SubscriptionRenewalBehavior } from "../../modules/settings/types"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
+import { readOrderPaymentVerdicts } from "../utils/order-payment-verdict"
 import { getEffectiveSubscriptionSettings } from "../utils/subscription-settings"
 
 export type EnsureNextRenewalCycleStepInput = {
@@ -113,6 +116,12 @@ export type UpcomingCycleQualificationRow = {
  * row whose order is already in flight — the one thing this step's own rules
  * refuse to charge. So the qualification is re-checked at the write, and only the
  * rows that still qualify are deleted and reported.
+ *
+ * That re-check is the `recheck` parameter rather than the local
+ * `stillRetirable`, because a superseded row is named for carrying an order and
+ * would be withheld by the row-local question on every run. The default is the
+ * row-local question, so a caller with no verdicts to read keeps exactly the
+ * behaviour it had.
  */
 export type UpcomingCycleRetireWriter = {
   listRenewalCycles: (filters: {
@@ -139,6 +148,54 @@ function stillRetirable(row: UpcomingCycleQualificationRow): boolean {
 }
 
 /**
+ * Whether a named row still deserves retirement, as the write re-asks it.
+ *
+ * Asynchronous because the honest answer is not always a property of the row.
+ * `stillRetirable` decides on the row alone, which is complete for a row named
+ * for carrying no order — and wrong for a superseded row, named for the opposite
+ * reason, whose qualification is the verdict on an order that lives outside it.
+ * Only the caller has a container, so only the caller can read that half.
+ */
+export type UpcomingCycleRetireRecheck = (
+  row: UpcomingCycleQualificationRow
+) => Promise<boolean>
+
+/** The default recheck: the qualification restated, with nothing else to read. */
+const recheckRetirable: UpcomingCycleRetireRecheck = async (row) =>
+  stillRetirable(row)
+
+/**
+ * The recheck the step hands the retire on the `create` path.
+ *
+ * A row with no order is asked the ordinary question. A row with one is asked the
+ * supersession question, because asking it `stillRetirable` would answer "no" on
+ * every run — the row was named precisely because it carries an order — and the
+ * withheld row would then stay in the one-live-`scheduled`-row slot, failing the
+ * insert on `renewal_cycle_one_scheduled_per_subscription` every time.
+ *
+ * A row that lost its verdict between the decision and the write — someone paid
+ * the order in the meantime — is withheld, and the run then fails loudly on that
+ * same index rather than writing a second chargeable cycle over money that is
+ * now in motion. Failing is the right direction here; the alternative is a
+ * double charge nobody is told about.
+ */
+function recheckUpcomingCycleRetire(
+  container: MedusaContainer
+): UpcomingCycleRetireRecheck {
+  return async (row) => {
+    const orderId = row.generated_order_id
+
+    if (!orderId) {
+      return stillRetirable(row)
+    }
+
+    const verdicts = await readOrderPaymentVerdicts(container, [orderId])
+
+    return isSupersededCycle(row, verdicts)
+  }
+}
+
+/**
  * Act on the rows `resolveUpcomingCycle` named.
  *
  * The selector reports the live `scheduled` rows a decision neither moves nor
@@ -162,7 +219,8 @@ export async function retireStaleUpcomingCycles(
   subscriptionId: string,
   retired: UpcomingRenewalCycleRecord[],
   logger: { warn: (message: string) => void },
-  madeRoomFor: string
+  madeRoomFor: string,
+  recheck: UpcomingCycleRetireRecheck = recheckRetirable
 ): Promise<void> {
   if (!retired.length) {
     return
@@ -170,9 +228,18 @@ export async function retireStaleUpcomingCycles(
 
   const named = retired.map((row) => row.id)
 
-  const qualifying = (await writer.listRenewalCycles({ id: named }))
-    .filter(stillRetirable)
-    .map((row) => row.id)
+  /**
+   * One row at a time, in the read's order: a superseded row's recheck costs a
+   * query, and the sets here are the one or two rows a reconciliation can leave
+   * behind.
+   */
+  const qualifying: string[] = []
+
+  for (const row of await writer.listRenewalCycles({ id: named })) {
+    if (await recheck(row)) {
+      qualifying.push(row.id)
+    }
+  }
 
   /**
    * The rows the selection named and the write then withheld. Said out loud
@@ -426,6 +493,13 @@ export type EnsureNextRenewalCycleCompensation =
   | {
       action: "created"
       renewal_cycle_id: string
+      /**
+       * The rows the insert needed cleared first. Absent when nothing was in the
+       * way, which is every run whose rows were all adoptable candidates — and
+       * every run persisted before supersession existed, since a payload
+       * outlives the deploy that stored it.
+       */
+      retired_ids?: string[]
     }
   | ({
       action: "updated"
@@ -667,7 +741,18 @@ export async function rollBackUpcomingCycleWrites(
 
   switch (payload.action) {
     case "created":
+      /**
+       * The new row first, then the rows the insert needed cleared. The order is
+       * forced by the same index that forced the retire: the restore brings back
+       * a live `scheduled` row, and it cannot land while the run's own row still
+       * holds the subscription's one slot.
+       */
       await writer.deleteRenewalCycles(payload.renewal_cycle_id)
+
+      if (payload.retired_ids?.length) {
+        await restoreRetiredUpcomingCycles(writer, payload.retired_ids, logger)
+      }
+
       return
     case "deleted":
       await restoreDeletedUpcomingCycles(writer, payload.previous)
@@ -770,7 +855,26 @@ export const ensureNextRenewalCycleStep = createStep(
 
     const scheduledFor = subscription.next_renewal_at!
     const settings = await getEffectiveSubscriptionSettings(container)
-    const resolution = resolveUpcomingCycle(existingCycles, scheduledFor)
+
+    /**
+     * Read before deciding, because supersession is the one judgement the rows
+     * cannot answer on their own. Only a `scheduled` row can be superseded and
+     * only by an order it names, so the verdicts are read for exactly those
+     * orders — a `processing` row is mid-flight whatever its order says.
+     */
+    const verdicts = await readOrderPaymentVerdicts(
+      container,
+      existingCycles
+        .filter((cycle) => cycle.status === RenewalCycleStatus.SCHEDULED)
+        .map((cycle) => cycle.generated_order_id)
+        .filter((orderId): orderId is string => orderId != null)
+    )
+
+    const resolution = resolveUpcomingCycle(
+      existingCycles,
+      scheduledFor,
+      verdicts
+    )
 
     if (resolution.action === "defer") {
       const deferred = resolution.cycle
@@ -790,6 +894,25 @@ export const ensureNextRenewalCycleStep = createStep(
     }
 
     if (resolution.action === "create") {
+      /**
+       * Before the insert, because `renewal_cycle_one_scheduled_per_subscription`
+       * admits one live `scheduled` row per subscription and a superseded row is
+       * refused as a candidate while still holding that slot. The entitlement
+       * date stands in for the chosen row as what the retirement made room for:
+       * this branch has no chosen row, and the date is what the new cycle exists
+       * to carry.
+       */
+      await retireStaleUpcomingCycles(
+        renewalModule,
+        subscription.id,
+        resolution.retire,
+        logger,
+        scheduledFor.toISOString(),
+        recheckUpcomingCycleRetire(container)
+      )
+
+      const retiredIds = resolution.retire.map((row) => row.id)
+
       const createTimeBehavior = settings.is_persisted
         ? settings.default_renewal_behavior
         : SubscriptionRenewalBehavior.REQUIRE_REVIEW_FOR_PENDING_CHANGES
@@ -825,6 +948,7 @@ export const ensureNextRenewalCycleStep = createStep(
         {
           action: "created",
           renewal_cycle_id: created.id,
+          ...(retiredIds.length ? { retired_ids: retiredIds } : {}),
         }
       )
     }
