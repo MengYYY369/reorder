@@ -27,6 +27,12 @@ if (process.env.TEST_TYPE === "integration:http") {
   config.testMatch = ["**/integration-tests/http/*.spec.[jt]s"]
 } else if (process.env.TEST_TYPE === "integration:modules") {
   config.testMatch = ["**/src/modules/*/__tests__/**/*.spec.[jt]s"]
+} else if (process.env.TEST_TYPE === "unit") {
+  // Pure-logic unit tests: no Medusa container, no PostgreSQL. Anything that
+  // needs either belongs in the integration suites above.
+  config.testMatch = ["**/src/**/__tests__/**/*.spec.[jt]s"]
+  config.testPathIgnorePatterns = ["/node_modules/", "/src/modules/", "/src/admin/"]
+  config.setupFiles = []
 } else if (process.env.TEST_TYPE === "i18n") {
   config.testMatch = ["**/src/admin/i18n/__tests__/**/*.spec.[jt]s"]
   config.setupFiles = []
