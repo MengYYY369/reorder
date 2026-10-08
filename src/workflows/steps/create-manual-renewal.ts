@@ -14,6 +14,11 @@ import {
 import { renewalErrors } from "../../modules/renewal/utils/errors"
 import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import { resolveOrderPaymentCollection } from "../utils/resolve-order-payment-collection"
+import { nextAttemptNumber } from "../utils/attempt-number"
+import {
+  listEnabledProviderIds,
+  pickChargeableProvider,
+} from "../utils/region-payment-provider"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import type SubscriptionModuleService from "../../modules/subscription/service"
 import { SubscriptionStatus } from "../../modules/subscription/types"
@@ -220,9 +225,17 @@ export const createManualRenewalStep = createStep(
       } as never)) as unknown as CycleRecord
     }
 
+    // `renewal_attempt` is unique on (renewal_cycle_id, attempt_no) for live
+    // rows, and a failed step keeps its own committed writes — so a hardcoded
+    // 1 makes every retry after the first a permanent constraint violation.
+    const previousAttempts = (await renewalModule.listRenewalAttempts(
+      { renewal_cycle_id: cycle.id },
+      { select: ["id", "attempt_no"] }
+    )) as unknown as Array<{ attempt_no?: number | null }>
+
     const attempt = await renewalModule.createRenewalAttempts({
       renewal_cycle_id: cycle.id,
-      attempt_no: 1,
+      attempt_no: nextAttemptNumber(previousAttempts),
       started_at: new Date(),
       status: RenewalAttemptStatus.PROCESSING,
       error_code: null,
@@ -293,13 +306,24 @@ export const createManualRenewalStep = createStep(
 
     let redirectUrl: string | null = null
 
-    if (total > 0) {
-      const paymentContext = subscription.payment_context
+    // A card-free trial stores no provider on purpose, so resolve one from the
+    // cart's region — the same list the storefront offers at checkout.
+    // Deliberately NOT written back to `subscription.payment_context`: that
+    // field is what routes the next renewal through the engine (auto-charge)
+    // path, and a trial with no vaulted card must not take it.
+    let providerId = subscription.payment_context?.payment_provider_id ?? null
 
-      if (!paymentContext?.payment_provider_id) {
+    if (total > 0) {
+      if (!providerId) {
+        providerId = pickChargeableProvider(
+          await listEnabledProviderIds(container, cart.region_id)
+        )
+      }
+
+      if (!providerId) {
         throw renewalErrors.renewalOrderCreationFailed(
           cycle.id,
-          `Subscription '${subscription.id}' has no payment provider in its payment context`
+          `Subscription '${subscription.id}' has no payment provider in its payment context and none chargeable is enabled on its region`
         )
       }
 
@@ -315,7 +339,7 @@ export const createManualRenewalStep = createStep(
       const sessionResult = await createPaymentSessionsWorkflow(container).run({
         input: {
           payment_collection_id: paymentCollection.id,
-          provider_id: paymentContext.payment_provider_id,
+          provider_id: providerId,
           customer_id: subscription.customer_id,
           data: {},
         },
@@ -351,8 +375,9 @@ export const createManualRenewalStep = createStep(
         renewal_order_id: order.id,
         total,
         currency_code: cart.currency_code,
-        payment_provider_id:
-          subscription.payment_context?.payment_provider_id ?? null,
+        // The provider actually charged through, which may have been resolved
+        // from the region rather than read from the subscription.
+        payment_provider_id: providerId,
         redirect_url: redirectUrl,
         reused: false,
       },
