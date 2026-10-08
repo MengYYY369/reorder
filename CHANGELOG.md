@@ -1,3 +1,25 @@
+## [1.12.5] - 2026-10-09
+
+**A bound trial row can be extended by a repeat purchase.** The checkout gate's
+subscription-track exception admitted only a *card-free* trial row or a paid row
+with a stored provider, so the ordinary shape a claimed trial reaches once it
+binds a payment method — `is_trial` with `payment_mode: auto` and a stored
+method reference — was refused at cart completion with `400 not_allowed`, after
+the customer's money had already moved. That refusal's stated reason was a
+double charge, and it does not hold: the extend anchors on the row's own
+`next_renewal_at`, `ensureNextRenewalCycleStep` reconciles the upcoming cycle
+onto that date by role (`adopt`), and `process-renewal-cycle` refuses any cycle
+dated before `trial_ends_at` — so the trial-conversion charge *is* the slot the
+prepaid cadence moved, and the extend clears `is_trial`/`trial_ends_at` on the
+way through. `isFoldableReorderRailRow` now accepts a trial row whether or not
+it has bound a method. The predicate stays a strict subset of the stacking fold:
+a redemption-shaped row (no provider id) and a `PAUSED` row are still refused,
+as are a native recurrence and any pure one-time purchase.
+
+See `docs/architecture/subscriptions.md` (*Checkout completion gate*, and the
+known limitation on a prepay landing while a renewal order is in flight) and
+`.agents/specs/2026-10-09-bound-trial-row-folds-into-repeat-purchase.md`.
+
 ## [1.12.2] - 2026-10-07
 
 **The published manifests of 1.12.0 and 1.12.1 declared a local path instead of a
