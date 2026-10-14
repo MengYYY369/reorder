@@ -1,3 +1,23 @@
+## [1.12.7] - 2026-10-14
+
+**A completion that arrives without a customer JWT is judged by the cart's owner.**
+
+The checkout gate refused a second subscription only when the request carried an
+`auth_context.actor_id`, and passed every other request straight through. But two
+real completion paths arrive with no actor at all — PayPal's capture webhook and
+the storefront's own payment-return page — while naming a cart that belongs to
+somebody. On 2026-10-13 that pass-through is how a native subscription came to
+exist beside a live vaulted one on the same product: the gate's readers were
+healthy and the very same cart was refused with a 400 the moment the request
+carried the customer's token (both directions reproduced against production).
+
+`rejectConflictingPurchase` now falls back to `readCartCustomerId` when there is
+no actor — one field wider than the cart read the gate already performs. Only a
+cart with no customer at all (a genuine guest checkout) is passed through, and an
+unreadable cart still answers "cannot decide, let it through", exactly like every
+other read here. The decision unit is untouched: the identity it receives is now
+the cart's owner instead of the header's.
+
 ## [1.12.6] - 2026-10-09
 
 **A renewal order that never took money no longer pins its cycle.**

@@ -67,6 +67,8 @@ import {
 /** Distinctive ids: the wiring assertions below fail on any other value. */
 const AUTH_CUSTOMER_ID = "cus_gate_42"
 const CART_ID = "cart_gate_77"
+/** The cart's own owner, used when a request arrives with no actor at all. */
+const CART_CUSTOMER_ID = "cus_cart_owner_9"
 
 /** The storefront contract, verbatim. */
 const REJECTION_BODY = {
@@ -184,6 +186,11 @@ function makeGraph(input: {
   cartProductIds?: string[]
   /** The cart's line metadata, keyed by product id, as `read_cart_item_signals` reads it. */
   cartSignals?: Array<{ product_id: string; is_subscription: boolean }>
+  /**
+   * The cart's owner, as `readCartCustomerId` reads it. Left out means the fake
+   * answers `null` — a guest cart.
+   */
+  cartCustomerId?: string | null
   productTitle?: string
   fail?: "cart"
 }) {
@@ -197,6 +204,7 @@ function makeGraph(input: {
         data: [
           {
             id: CART_ID,
+            customer_id: input.cartCustomerId ?? null,
             items: (input.cartProductIds ?? []).map((productId) => ({
               variant: { product_id: productId },
               metadata: input.cartSignals?.find(
@@ -230,15 +238,53 @@ describe("rejectConflictingPurchase (the gate middleware)", () => {
     next = jest.fn()
   })
 
-  it("passes a guest through without reading anything", async () => {
-    const scope = makeScope({})
+  it("passes a cart with no customer through (a real guest checkout)", async () => {
+    // No actor *and* no owner on the cart: there is genuinely nothing to match
+    // against. The cart is still read — that read is what tells the two cases
+    // apart — so this pins the answer, not the absence of work.
+    const graph = makeGraph({ cartCustomerId: null })
+    const scope = makeScope({ graph })
+    const res = makeRes()
+
+    await rejectConflictingPurchase(makeReq(scope, null), res, next)
+
+    expect(graph).toHaveBeenCalledTimes(1)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status).not.toHaveBeenCalled()
+  })
+
+  it("judges a cart that has a customer even when the request carries no actor", async () => {
+    // The hole that let a second subscription exist (2026-10-13): PayPal's
+    // capture webhook — and the storefront's payment-return page — complete the
+    // cart server-side with no customer JWT. The guest pass-through waved
+    // exactly that completion through, so the rule never ran. The cart knows its
+    // owner, so the gate must ask the cart.
+    const listSubscriptions = jest.fn(async () => [nativeRow()])
+    const graph = makeGraph({
+      cartCustomerId: CART_CUSTOMER_ID,
+      cartProductIds: ["prod_1"],
+    })
+    const scope = makeScope({ listSubscriptions, graph })
+    const res = makeRes()
+
+    await rejectConflictingPurchase(makeReq(scope, null), res, next)
+
+    expect(listSubscriptions).toHaveBeenCalledWith(
+      expect.objectContaining({ customer_id: CART_CUSTOMER_ID })
+    )
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith(REJECTION_BODY)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it("passes through when the cart read fails (unreadable still means let it through)", async () => {
+    const scope = makeScope({ graph: makeGraph({ fail: "cart" }) })
     const res = makeRes()
 
     await rejectConflictingPurchase(makeReq(scope, null), res, next)
 
     expect(next).toHaveBeenCalledTimes(1)
     expect(res.status).not.toHaveBeenCalled()
-    expect(scope.resolve).not.toHaveBeenCalled()
   })
 
   it("looks up both rails' rows for the customer on the request, and no one else's", async () => {

@@ -326,12 +326,54 @@ export async function resolveCheckoutGate(
 
 /**
  * `auth_context` is attached by the core authentication middleware, which runs
- * with `allowUnauthenticated: true` on store routes — so a guest request simply
- * has no actor to read.
+ * with `allowUnauthenticated: true` on store routes — so a request can arrive
+ * with no actor to read. That is not the same as a request with no customer:
+ * see `readCartCustomerId`.
  */
 function readAuthContext(req: MedusaRequest) {
   return (req as { auth_context?: { actor_id?: string; actor_type?: string } })
     .auth_context
+}
+
+/**
+ * The cart's owner, read only when the request carries no actor.
+ *
+ * A cart can be completed by a server-side caller that holds no customer JWT —
+ * PayPal's capture webhook and the storefront's own payment-return page both do
+ * exactly that — while the request still names a cart that belongs to somebody.
+ * Reading the owner from the cart keeps the rule attached to the customer
+ * instead of to a header, so "no actor" stops meaning "no rule". Before this
+ * fallback existed the guest pass-through waved those completions through, and
+ * on 2026-10-13 one of them created a second subscription beside a live one.
+ *
+ * A cart that cannot be read, or that genuinely has no customer (a guest
+ * checkout), answers null: the same "cannot decide means let it through" ruling
+ * as every other read here.
+ */
+async function readCartCustomerId(
+  container: MedusaContainer,
+  cartId: string | undefined
+): Promise<string | null> {
+  if (!cartId) {
+    return null
+  }
+
+  try {
+    const query = container.resolve<RemoteQueryFunction>(
+      ContainerRegistrationKeys.QUERY
+    )
+    const { data } = await query.graph({
+      entity: "cart",
+      fields: ["id", "customer_id"],
+      filters: { id: [cartId] },
+    })
+
+    const cart = (data as Array<{ customer_id?: string | null }>)[0]
+
+    return cart?.customer_id ?? null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -439,9 +481,13 @@ function readBoolean(value: unknown): boolean {
 
 /**
  * Deliberate choices baked into this handler:
- * - a guest is passed through: there is nothing to match against, and pulling a
- *   customer out of a completed order to retroactively cancel it is worse than
- *   letting it through.
+ * - a cart with no customer is passed through: there is nothing to match
+ *   against, and pulling a customer out of a completed order to retroactively
+ *   cancel it is worse than letting it through. A cart that *has* a customer is
+ *   judged even when the request carries no actor — the completion paths that
+ *   arrive without a JWT (PayPal's capture webhook, the storefront's
+ *   payment-return page) name a cart that belongs to somebody, so the rule
+ *   follows the cart's owner rather than the header.
  * - the whole cart is refused, but the message names the colliding product.
  *   Dropping a line from someone's cart changes the total, shipping and any
  *   promo threshold; a wrong bill is worse than a refused one.
@@ -463,7 +509,9 @@ export async function rejectConflictingPurchase(
   res: MedusaResponse,
   next: MedusaNextFunction
 ) {
-  const customerId = readAuthContext(req)?.actor_id ?? null
+  const customerId =
+    readAuthContext(req)?.actor_id ??
+    (await readCartCustomerId(req.scope, req.params?.id))
 
   if (!customerId) {
     next()
