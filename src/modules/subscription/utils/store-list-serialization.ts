@@ -27,6 +27,7 @@ export type StoreSubscriptionListItemSource = {
     variant_title?: string | null
   } | null
   payment_context?: Record<string, unknown> | null
+  metadata?: Record<string, unknown> | null
 }
 
 export type StoreSubscriptionActiveCancellationCase = {
@@ -50,6 +51,7 @@ export type StoreSubscriptionListItemDto = {
   trial_ends_at: string | null
   payment_mode: string | null
   has_payment_method: boolean
+  order_id: string | null
   active_cancellation_case: StoreSubscriptionActiveCancellationCase | null
 }
 
@@ -91,6 +93,17 @@ export function serializeStoreSubscriptionListItem(
     has_payment_method: Boolean(
       subscription.payment_context?.payment_method_reference
     ),
+    // The order this row was vaulted from, which is how the storefront locates
+    // "the row my checkout just produced" without a second round trip. It lives
+    // in `metadata` because that is where the checkout writes it
+    // (`source_order_id`), and the read is narrow on purpose: `metadata` is
+    // free-form jsonb, so anything that is not a string is not an id. A native
+    // mirror is written by the provider sync rather than by a checkout and
+    // carries no source order, so it reads back as `null` (Q15).
+    order_id:
+      typeof subscription.metadata?.source_order_id === "string"
+        ? subscription.metadata.source_order_id
+        : null,
     active_cancellation_case: activeCancellationCase
       ? {
           id: activeCancellationCase.id,

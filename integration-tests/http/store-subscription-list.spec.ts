@@ -31,6 +31,7 @@ type ListedSubscription = {
   trial_ends_at: string | null
   payment_mode: string | null
   has_payment_method: boolean
+  order_id: string | null
 }
 
 function seedId(created: unknown): string {
@@ -220,6 +221,46 @@ medusaIntegrationTestRunner({
           trial_ends_at: null,
           cancel_effective_at: cancelEffectiveAt.toISOString(),
         })
+      })
+
+      it("projects the order a vaulted row came from, and none for a mirror", async () => {
+        const container = getContainer()
+        const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
+
+        // The vaulted row: written by a checkout, so it knows its source order.
+        // The storefront locates "the row this checkout just produced" by this
+        // value, which is what makes the reconcile round trip unnecessary.
+        const vaulted = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.ACTIVE,
+          metadata: { source_order_id: "order_seed_1" },
+        })
+
+        // The mirror: written by the provider sync, not by a checkout, so it has
+        // no source order — and must not borrow another row's (Q15).
+        const mirror = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          reference: "NATIVE-paypal-I-SEED",
+          status: SubscriptionStatus.ACTIVE,
+          metadata: null,
+        })
+
+        const response = await api.get("/store/customers/me/subscriptions", {
+          headers,
+        })
+
+        const byId = new Map(
+          (response.data.subscriptions as ListedSubscription[]).map((item) => [
+            item.id,
+            item,
+          ])
+        )
+
+        expect(byId.get(seedId(vaulted))).toMatchObject({
+          order_id: "order_seed_1",
+        })
+        expect(byId.get(seedId(mirror))).toMatchObject({ order_id: null })
       })
     })
   },

@@ -16,6 +16,7 @@ const BASE: StoreSubscriptionListItemSource = {
   skip_next_cycle: false,
   product_snapshot: { product_title: "Coffee Club", variant_title: "Monthly" },
   payment_context: null,
+  metadata: null,
 }
 
 describe("serializeStoreSubscriptionListItem", () => {
@@ -120,5 +121,31 @@ describe("serializeStoreSubscriptionListItem", () => {
       trial_ends_at: null,
       cancel_effective_at: boundary,
     })
+  })
+
+  it("projects the order the vaulted row was created from", () => {
+    // The storefront locates "the row this checkout just produced" by this
+    // value, which is why it comes off the row instead of a second round trip.
+    expect(
+      serializeStoreSubscriptionListItem(
+        { ...BASE, metadata: { source_order_id: "order_123" } },
+        null
+      ).order_id
+    ).toBe("order_123")
+  })
+
+  it("reports no order id for a row that carries none", () => {
+    // A native mirror is written by the provider sync, not by a checkout, so it
+    // has no source order. A non-string is not an id either: `metadata` is
+    // free-form jsonb, and a number here would otherwise reach the storefront as
+    // a value that never matches.
+    expect(serializeStoreSubscriptionListItem(BASE, null).order_id).toBeNull()
+
+    expect(
+      serializeStoreSubscriptionListItem(
+        { ...BASE, metadata: { source_order_id: 42 } },
+        null
+      ).order_id
+    ).toBeNull()
   })
 })

@@ -54,6 +54,8 @@ type SubscriptionStoreListItem = {
     variant_title?: string | null
   } | null
   payment_context?: Record<string, unknown> | null
+  /** Free-form jsonb; the list projection reads `source_order_id` out of it. */
+  metadata?: Record<string, unknown> | null
 }
 
 type ActiveCancellationRecord = {
@@ -164,6 +166,9 @@ export async function listStoreCustomerSubscriptions(
       "skip_next_cycle",
       "product_snapshot",
       "payment_context",
+      // `order_id` on a serialized row is read from here, so leaving it out of
+      // the graph would make it permanently null on every row.
+      "metadata",
     ],
     filters: {
       customer_id: customerId,

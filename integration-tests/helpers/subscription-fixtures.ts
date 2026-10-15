@@ -65,6 +65,7 @@ type SubscriptionSeedInput = {
   trial_ends_at?: Date | string | null
   cancel_effective_at?: Date | string | null
   payment_context?: SubscriptionPaymentContext | null
+  metadata?: Record<string, unknown> | null
 }
 
 export async function createAdminAuthHeaders(container: MedusaContainer) {
@@ -305,7 +306,7 @@ export async function createSubscriptionSeed(
           }
         : input.payment_context,
     pending_update_data: null,
-    metadata: null,
+    metadata: input.metadata ?? null,
   })
 
   return created
