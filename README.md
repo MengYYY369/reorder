@@ -72,7 +72,7 @@ It adds recurring commerce capabilities to a Medusa store, including subscriptio
 - **Cancellation & Retention** — Pause offers, discounts, and bonuses shown to subscribers before cancellation is final.
 - **Activity Log** — A complete operational history of every subscription event, accessible in the Admin.
 - **Analytics** — MRR, churn rate, LTV, and active subscription counts with filterable trend charts.
-- **Self-service Store APIs** — Subscription checkout, offer selection, and customer portal endpoints for your storefront.
+- **Self-service Store APIs** — Subscription checkout, offer selection, and customer portal endpoints for your storefront, including a customer-authenticated auto-renewal toggle (`POST /store/customers/me/subscriptions/:id/auto-renew`) and an `order_id` on each subscription list item so a storefront can match a row to the order that minted it.
 - **Storefront building blocks** — Cart, checkout, and customer portal integration guides for your own frontend.
 
 &nbsp;

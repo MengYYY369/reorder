@@ -23,11 +23,12 @@ The endpoints live under `/store/customers/me/*` in the reorder plugin:
 | 8 | `GET /store/customers/me/subscriptions/:id/payment-methods` | List saved payment methods |
 | 9 | `POST /store/customers/me/subscriptions/:id/payment-method` | Change the payment method used for renewals |
 | 10 | `POST /store/customers/me/subscriptions/:id/retry-payment` | Retry a failed renewal payment |
-| 11 | `POST /store/customers/me/subscriptions/:id/cancellation` | Request cancellation (opens a case) |
-| 12 | `POST /store/customers/me/subscriptions/:id/cancellation/finalize` | Finalize your own open cancellation case |
-| 13 | `GET` / `POST /store/customers/me/redemptions` (+ `/preview`) | Redemption codes |
-| 14 | `POST /store/customers/me/trials` | Claim a card-free trial |
-| 15 | `POST /store/customers/me/trials/:id/bind` | Bind a payment method to a claimed trial (two-phase) |
+| 11 | `POST /store/customers/me/subscriptions/:id/auto-renew` | Turn automatic renewal on or off |
+| 12 | `POST /store/customers/me/subscriptions/:id/cancellation` | Request cancellation (opens a case) |
+| 13 | `POST /store/customers/me/subscriptions/:id/cancellation/finalize` | Finalize your own open cancellation case |
+| 14 | `GET` / `POST /store/customers/me/redemptions` (+ `/preview`) | Redemption codes |
+| 15 | `POST /store/customers/me/trials` | Claim a card-free trial |
+| 16 | `POST /store/customers/me/trials/:id/bind` | Bind a payment method to a claimed trial (two-phase) |
 
 Two more read routes exist beside this set: `GET /store/products/:id/subscription-offer`
 (pricing/cadence data for the product page) and the checkout routes under
@@ -135,6 +136,7 @@ Returns the customer's subscriptions, newest first.
       "trial_ends_at": null,
       "payment_mode": "auto",
       "has_payment_method": true,
+      "order_id": "order_01J...",
       "active_cancellation_case": null
     }
   ]
@@ -153,6 +155,10 @@ Returns the customer's subscriptions, newest first.
 - `payment_mode` is `"auto"` or `"manual"` (`null` only for rows created
   before the field existed).
 - `has_payment_method` says whether a chargeable payment method is on file.
+- `order_id` is the order that minted the row (the subscription's
+  `metadata.source_order_id`). It is `null` when the plugin did not vault the
+  row — a mirror of a provider-managed recurrence carries `null` — so read
+  `null` as "unknown", not as "no order".
 - `active_cancellation_case` is `{ id, status }` when a cancellation is in
   progress (statuses `requested`, `evaluating_retention`, `retention_offered`)
   and `null` otherwise.
@@ -367,6 +373,43 @@ Errors:
   the route maps to `404` / `400` / `409` by message class; the detail
   payload in `payment_recovery` (last error, next retry) is the source of
   truth for what happened.
+
+### `POST .../auto-renew`
+
+```json
+{ "enabled": true }
+```
+
+Turns automatic renewal on or off and answers with the mode the row now
+carries:
+
+```json
+{ "subscription_id": "sub_01J...", "payment_mode": "auto" }
+```
+
+`enabled: false` writes `manual`: renewals stop charging on their own until
+the customer turns the switch back on. The toggle writes `payment_mode`
+only — it never stores or changes the card itself; that is
+`POST .../payment-method`. The route does not require a card on file, so gate
+the switch on `has_payment_method` in the portal rather than leaving the
+customer on a mode that cannot charge.
+
+**An overdue row can be switched on.** `status: "past_due"`, or a
+`next_renewal_at` in the past, does not block the toggle — the customer who
+has just fixed their card is exactly the one who wants auto-renewal back. The
+scheduler picks the row up at the next renewal cycle.
+
+Errors:
+
+- `400` — `body.enabled must be a boolean`; or the subscription is a mirror of
+  a provider-managed recurrence (a PayPal-native row), which the provider
+  bills directly. The message names the subscription and says to manage
+  auto-renewal at the provider.
+- `404` — subscription unknown or not owned by the customer.
+
+This is the customer's only lever on the renewal mode. The post-checkout flip
+of a freshly vaulted row is not part of this route; see
+`architecture/payments.md`.
 
 ### `POST .../cancellation`
 
