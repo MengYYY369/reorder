@@ -7,7 +7,10 @@ import {
   createStoreCustomerAuthHeaders,
   createSubscriptionSeed,
 } from "../helpers/subscription-fixtures"
-import { SubscriptionStatus } from "../../src/modules/subscription/types"
+import {
+  SubscriptionStatus,
+  type SubscriptionPaymentContext,
+} from "../../src/modules/subscription/types"
 
 jest.setTimeout(120 * 1000)
 
@@ -49,7 +52,7 @@ async function storeHeaders(
 }
 
 /** A vaulted row: manual mode with a stored instrument the toggle can flip. */
-function vaultedPaymentContext() {
+function vaultedPaymentContext(): SubscriptionPaymentContext {
   return {
     payment_provider_id: "pp_system_default",
     payment_mode: "manual",
@@ -169,6 +172,64 @@ medusaIntegrationTestRunner({
         )
 
         expect(response.status).toEqual(401)
+      })
+
+      it("allows enabling auto-renewal on a PAST_DUE row", async () => {
+        const container = getContainer()
+        const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
+
+        const subscription = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.PAST_DUE,
+          payment_context: vaultedPaymentContext(),
+        })
+        const id = seedId(subscription)
+
+        // 2026-10-14 (Q9/Q17): a failed charge no longer blocks the switch. The
+        // customer is the only one who can turn automatic renewal back on, and
+        // refusing them there is what left lapsed subscriptions lapsed.
+        const response = await api.post(
+          `/store/customers/me/subscriptions/${id}/auto-renew`,
+          { enabled: true },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(response.data).toEqual({
+          subscription_id: id,
+          payment_mode: "auto",
+        })
+      })
+
+      it("allows enabling auto-renewal on a row past its renewal date", async () => {
+        const container = getContainer()
+        const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
+
+        const subscription = await createSubscriptionSeed(container, {
+          customer_id: customer.id,
+          status: SubscriptionStatus.ACTIVE,
+          // Well past the 24h grace the removed guard applied.
+          next_renewal_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+          payment_context: vaultedPaymentContext(),
+        })
+        const id = seedId(subscription)
+
+        // The other half of the removed guard: the date alone no longer
+        // refuses, even on a row that carries a stored method (which the old
+        // free-grant exemption did not cover).
+        const response = await api.post(
+          `/store/customers/me/subscriptions/${id}/auto-renew`,
+          { enabled: true },
+          { headers, validateStatus: () => true }
+        )
+
+        expect(response.status).toEqual(200)
+        expect(response.data).toEqual({
+          subscription_id: id,
+          payment_mode: "auto",
+        })
       })
 
       it("refuses to switch a provider mirror to auto-renewal", async () => {

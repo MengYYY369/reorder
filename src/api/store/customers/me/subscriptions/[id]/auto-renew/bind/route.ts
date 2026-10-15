@@ -95,15 +95,6 @@ export const AUTO_RENEW_BIND_CUSTOMER_REFUSALS = [
     type: MedusaError.Types.NOT_ALLOWED,
     copy: CAPABILITY_REFUSAL_COPY,
   },
-  {
-    // The toggle's overdue guard, rethrown by the complete step: the binding
-    // succeeded but the surprise-charge protection keeps auto-renewal off
-    // until the customer renews manually first.
-    step: COMPLETE_STEP,
-    type: MedusaError.Types.INVALID_DATA,
-    copy:
-      /^Subscription '[^']*' is overdue — renew manually before enabling auto-renewal$/,
-  },
 ] as const
 
 const AUTO_RENEW_BIND_FAILURE_COPY: StepFailureCopy = {

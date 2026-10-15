@@ -7,10 +7,9 @@ import {
 import { acquireLockStep, releaseLockStep } from "@medusajs/medusa/core-flows"
 import {
   ASSERT_AUTO_RENEW_NOT_NATIVE_STEP_NAME,
-  ASSERT_AUTO_RENEW_NOT_OVERDUE_STEP_NAME,
   assertAutoRenewNotNativeStep,
-  assertAutoRenewNotOverdueStep,
   updateSubscriptionPaymentModeStep,
+  type UpdateSubscriptionPaymentModeStepInput,
 } from "./steps/set-subscription-auto-renew"
 import type { CustomerRefusal } from "./utils/store-step-failure"
 import type { SubscriptionPaymentMode } from "../modules/subscription/types"
@@ -26,18 +25,18 @@ export type SetSubscriptionAutoRenewWorkflowResult = {
 }
 
 /**
- * The refusals this workflow authors for the caller, and the only ones a
- * `POST /store/saas/auto-renew` response may quote.
+ * The refusals this workflow authors for the caller, and the only ones
+ * `POST /store/customers/me/subscriptions/:id/auto-renew` may quote.
  *
- * Both guards refuse with their own `invalid_data` about the caller's request.
- * Everything else this workflow runs — above all the write — fails for
- * infrastructure reasons, and a caller must not be told those failures are its
- * own fault. The list is owned here because this is the module that composes the
- * steps, so the route never names a step itself.
+ * The one remaining guard refuses with its own `invalid_data` about the
+ * caller's request. Everything else this workflow runs — above all the write —
+ * fails for infrastructure reasons, and a caller must not be told those
+ * failures are its own fault. The list is owned here because this is the module
+ * that composes the steps, so the route never names a step itself.
  *
- * Each entry declares its exact text, and that is not decoration: the native
+ * The entry declares its exact text, and that is not decoration: the native
  * mirror guard is not a predicate over its input, it resolves the subscription
- * module and reads the row (`steps/set-subscription-auto-renew.ts:94-99`). The
+ * module and reads the row (`steps/set-subscription-auto-renew.ts:96-101`). The
  * DAL converts a driver fault on that read into an `INVALID_DATA` MedusaError
  * whose message is the database's own (`db-error-mapper.js:34-37` for SQLSTATE
  * 42703, which quotes the missing column), and the engine reports it under that
@@ -48,17 +47,17 @@ export type SetSubscriptionAutoRenewWorkflowResult = {
  *
  * The `not_found` the same read can produce is filtered out by the declared
  * `type` and answered as a 404 with the route's own text.
+ *
+ * A second entry used to sit here for the overdue guard (`PAST_DUE` + 24h
+ * grace). 2026-10-14 removed that guard entirely (Q9/Q17): an overdue row may
+ * now be switched to automatic renewal, because the customer is the only one
+ * who can turn it back on.
  */
 export const AUTO_RENEW_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
   {
     step: ASSERT_AUTO_RENEW_NOT_NATIVE_STEP_NAME,
     type: MedusaError.Types.INVALID_DATA,
     copy: /^Subscription '[^']*' is a mirror of a provider-managed recurrence; manage auto-renewal at the provider$/,
-  },
-  {
-    step: ASSERT_AUTO_RENEW_NOT_OVERDUE_STEP_NAME,
-    type: MedusaError.Types.INVALID_DATA,
-    copy: /^Subscription '[^']*' is overdue — renew manually before enabling auto-renewal$/,
   },
 ]
 
@@ -76,16 +75,24 @@ export const AUTO_RENEW_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
  *     compensation, so a run that fails between the two releases the lock too;
  *     nothing here restates it, exactly as in `create-manual-renewal`.
  *  1. `assert-subscription-auto-renew-not-native` — the write-side mirror guard
- *  2. `assert-subscription-auto-renew-not-overdue` — the surprise-charge guard
- *  3. `update-subscription-payment-mode` — the only state-changing write, which
+ *  2. `update-subscription-payment-mode` — the only state-changing write, which
  *     compensates by restoring the previous `payment_context`
  *
+ * The mode being written is derived from the request (`enabled`), not from the
+ * guard's snapshot: the write step re-reads the row and merges the stored
+ * `payment_context`, so nothing between the read and the write can be lost by
+ * trusting a stale mode.
+ *
  * The key names this workflow's own family: it serializes a toggle against
- * another toggle of the same subscription, which is what makes the overdue
- * verdict of step 2 and the re-read of step 3 describe one run instead of two
- * interleaved ones. It does not serialize against the renewal scheduler, which
- * locks under `renewal:<renewal_cycle_id>` (`docs/architecture/renewals.md`), so
- * a cycle already in flight is not held off by this lock.
+ * another toggle of the same subscription, so the guard's verdict and the
+ * re-read of the write step describe one run instead of two interleaved ones. It
+ * does not serialize against the renewal scheduler, which locks under
+ * `renewal:<renewal_cycle_id>` (`docs/architecture/renewals.md`), so a cycle
+ * already in flight is not held off by this lock.
+ *
+ * An overdue row is not refused (2026-10-14, Q9/Q17): the guard that used to
+ * send the customer to the manual renewal flow is gone, because it refused the
+ * only actor who can turn automatic renewal back on.
  *
  * A stale stored method reference is not checked here: it surfaces as
  * `renewal.failed` + PAST_DUE on the scheduler side, the documented behavior of
@@ -106,28 +113,17 @@ export const setSubscriptionAutoRenewWorkflow = createWorkflow(
       subscription_id: input.subscription_id,
     })
 
-    const guardInput = transform(
-      { subscription, input },
-      function ({ subscription, input }) {
-        return {
-          id: subscription.id,
-          status: subscription.status,
-          next_renewal_at: subscription.next_renewal_at,
-          current_mode: subscription.current_mode,
-          payment_method_reference: subscription.payment_method_reference,
-          enabled: input.enabled,
-        }
-      }
-    )
-
-    const committedMode = assertAutoRenewNotOverdueStep(guardInput)
-
     const writeInput = transform(
-      { committedMode, input },
-      function ({ committedMode, input }) {
+      { subscription, input },
+      function ({
+        subscription,
+        input,
+      }): UpdateSubscriptionPaymentModeStepInput {
         return {
-          subscription_id: input.subscription_id,
-          payment_mode: committedMode.payment_mode,
+          subscription_id: subscription.id,
+          // Derived from the request: the write step re-reads and merges, so a
+          // snapshot mode would only add a way to be stale.
+          payment_mode: input.enabled ? "auto" : "manual",
         }
       }
     )

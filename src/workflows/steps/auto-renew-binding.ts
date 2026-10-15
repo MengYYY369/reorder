@@ -41,10 +41,10 @@ import {
  * - **complete** — the plugin exchanges the approved session for its ledger
  *   method (session-gated, idempotent), the reference lands on the row, and
  *   `setSubscriptionAutoRenewWorkflow` flips the mode to auto **through its
- *   own guards** — so a row that is already overdue keeps the
- *   surprise-charge protection (renew manually first) even though the
- *   binding itself succeeded. The bound method stays visible and usable for
- *   manual renewal either way.
+ *   own guards** — which, since 2026-10-14, no longer refuse an overdue row
+ *   (Q9/Q17): the customer who just approved a method is exactly the one who
+ *   must be able to switch automatic renewal back on. The bound method stays
+ *   visible and usable for manual renewal either way.
  */
 
 const AUTO_RENEW_BINDING_METADATA_KEY = "auto_renew_binding"
@@ -363,8 +363,8 @@ type CompleteStepCompensation = {
 
 /**
  * Phase (b): the plugin completes the binding, the reference lands on the
- * row, and the mode flips through the toggle's own workflow — its overdue
- * guard keeps protecting the customer now that the row carries a method.
+ * row, and the mode flips through the toggle's own workflow — which, since
+ * 2026-10-14, no longer refuses an overdue row (Q9/Q17).
  */
 export const completeAutoRenewBindingStep = createStep(
   "complete-auto-renew-binding",
@@ -424,9 +424,9 @@ export const completeAutoRenewBindingStep = createStep(
     } as never)
 
     // The flip runs through the toggle's guards with the reference already on
-    // the row: a row that is already overdue is refused (renew manually
-    // first) even though the binding succeeded — the method stays bound and
-    // usable for manual renewal.
+    // the row. An overdue row is no longer refused (2026-10-14, Q9/Q17), so a
+    // successful binding now always leaves the row on automatic renewal; the
+    // method is usable for manual renewal either way.
     const { result: toggleResult, errors } = await setSubscriptionAutoRenewWorkflow(
       container
     ).run({
@@ -438,7 +438,7 @@ export const completeAutoRenewBindingStep = createStep(
     })
 
     if (errors?.length || !toggleResult) {
-      // The toggle's declared refusals (the overdue guard above all) are the
+      // The toggle's declared refusals (the native mirror guard) are the
       // customer's answer and are rethrown as-is; anything else is our fault
       // and keeps the step's own generic wording. The refusal copy stays
       // owned by the toggle workflow — the route declares it under this

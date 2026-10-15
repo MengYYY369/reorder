@@ -1,23 +1,13 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { SUBSCRIPTION_MODULE } from "../../modules/subscription"
 import SubscriptionModuleService from "../../modules/subscription/service"
-import {
-  SubscriptionStatus,
-  type SubscriptionPaymentMode,
-} from "../../modules/subscription/types"
+import type { SubscriptionPaymentMode } from "../../modules/subscription/types"
 import { subscriptionErrors } from "../../modules/subscription/utils/errors"
 import { isNativeSubscriptionReference } from "../../modules/subscription/utils/native-subscription"
 import {
   buildPaymentModeFields,
   readStoredPaymentMode,
 } from "../utils/payment-mode-mechanism"
-
-/**
- * How far past `next_renewal_at` a subscription may still opt into automatic
- * renewals. Beyond it the scheduler would charge in the same request that
- * enabled the switch, so the customer is sent to the manual renewal flow first.
- */
-export const AUTO_RENEW_OVERDUE_GRACE_MS = 24 * 60 * 60 * 1000
 
 /**
  * Stable step identities. The workflow engine reports a failure as
@@ -30,38 +20,20 @@ export const AUTO_RENEW_OVERDUE_GRACE_MS = 24 * 60 * 60 * 1000
 export const ASSERT_AUTO_RENEW_NOT_NATIVE_STEP_NAME =
   "assert-subscription-auto-renew-not-native"
 
-export const ASSERT_AUTO_RENEW_NOT_OVERDUE_STEP_NAME =
-  "assert-subscription-auto-renew-not-overdue"
-
 export type AutoRenewNativeGuardStepInput = {
   subscription_id: string
 }
 
 /**
- * Everything the toggle decides on, read once from the row.
+ * The row the guard resolved, read once. It carries no stored mode: the mode
+ * this workflow writes is derived from the request, never from the snapshot.
+ * (`status`, `next_renewal_at` and the stored method reference used to travel
+ * here for the overdue guard, which 2026-10-14 removed — Q9/Q17 — so nothing
+ * reads them any more.)
  */
 export type AutoRenewSubscriptionState = {
   id: string
   reference: string
-  status: SubscriptionStatus
-  next_renewal_at: Date | string | null
-  current_mode: SubscriptionPaymentMode
-  /** The stored vault reference, or `null` when the row carries no method. */
-  payment_method_reference: string | null
-}
-
-export type AutoRenewOverdueGuardStepInput = {
-  id: string
-  status: SubscriptionStatus
-  next_renewal_at: Date | string | null
-  current_mode: SubscriptionPaymentMode
-  /** The stored vault reference, or `null` when the row carries no method. */
-  payment_method_reference: string | null
-  enabled: boolean
-}
-
-export type AutoRenewOverdueGuardStepResult = {
-  payment_mode: SubscriptionPaymentMode
 }
 
 export type UpdateSubscriptionPaymentModeStepInput = {
@@ -78,22 +50,6 @@ export type UpdateSubscriptionPaymentModeStepResult = {
 type PaymentModeCompensation = {
   id: string
   payment_context: Record<string, unknown> | null
-}
-
-/**
- * The stored vault reference, or `null` when the row carries no method.
- * `payment_context` is a nullable jsonb column, so every reader narrows the
- * object first (same idiom as `readStoredPaymentMode`).
- */
-function readStoredMethodReference(paymentContext: unknown): string | null {
-  if (typeof paymentContext !== "object" || paymentContext === null) {
-    return null
-  }
-
-  const reference = (paymentContext as { payment_method_reference?: unknown })
-    .payment_method_reference
-
-  return typeof reference === "string" ? reference : null
 }
 
 /**
@@ -131,69 +87,13 @@ export const assertAutoRenewNotNativeStep = createStep(
     return new StepResponse<AutoRenewSubscriptionState>({
       id: subscription.id,
       reference: subscription.reference,
-      status: subscription.status,
-      next_renewal_at: subscription.next_renewal_at ?? null,
-      // A row with no stored mode is not charging on its own, so it cannot be
-      // reported as switching to auto by a stale renewal date.
-      current_mode: readStoredPaymentMode(subscription.payment_context, "manual"),
-      payment_method_reference: readStoredMethodReference(
-        subscription.payment_context
-      ),
     })
   }
 )
 
 /**
- * Surprise-charge guard: switching a subscription on is refused while it is
- * overdue, and disabling is never refused — turning automatic charging off
- * cannot charge anybody.
- *
- * Free grant rows are exempt (item 9): a row with no stored payment method
- * reference could never have been charged by the off-session engine (charging
- * requires a method), so its overdue renewal date says only that a free or
- * uncharged period lapsed — a redemption grant whose first free cycle is due
- * at `started_at` must not be told to "renew manually" when it has nothing to
- * renew with. A row that carries a method keeps the guard in full.
- */
-export const assertAutoRenewNotOverdueStep = createStep(
-  ASSERT_AUTO_RENEW_NOT_OVERDUE_STEP_NAME,
-  async function (input: AutoRenewOverdueGuardStepInput) {
-    const targetMode: SubscriptionPaymentMode = input.enabled ? "auto" : "manual"
-
-    if (targetMode !== "auto" || input.current_mode === "auto") {
-      return new StepResponse<AutoRenewOverdueGuardStepResult>({
-        payment_mode: targetMode,
-      })
-    }
-
-    if (input.payment_method_reference === null) {
-      return new StepResponse<AutoRenewOverdueGuardStepResult>({
-        payment_mode: targetMode,
-      })
-    }
-
-    const nextRenewal = input.next_renewal_at
-      ? new Date(input.next_renewal_at).getTime()
-      : null
-
-    if (
-      input.status === SubscriptionStatus.PAST_DUE ||
-      (nextRenewal !== null &&
-        Date.now() - nextRenewal > AUTO_RENEW_OVERDUE_GRACE_MS)
-    ) {
-      throw subscriptionErrors.invalidData(
-        `Subscription '${input.id}' is overdue — renew manually before enabling auto-renewal`
-      )
-    }
-
-    return new StepResponse<AutoRenewOverdueGuardStepResult>({
-      payment_mode: targetMode,
-    })
-  }
-)
-
-/**
- * The only write `POST /store/saas/auto-renew` performs.
+ * The only write `POST /store/customers/me/subscriptions/:id/auto-renew`
+ * performs.
  *
  * `payment_context` is a jsonb object several paths own, so the update merges
  * the stored object and replaces only the mode and its mechanism annotation
