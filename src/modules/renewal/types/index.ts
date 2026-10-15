@@ -22,8 +22,7 @@ export enum RenewalApprovalStatus {
 }
 
 /**
- * What a candidate renewal order's payment state was positively read as,
- * following the v2.20 derivation in `src/api/store/saas/reconcile/route.ts`:
+ * What a candidate renewal order's payment state was positively read as:
  * the order entity carries no `payment_status` column, so state is read
  * through the order → payment collection link (`order_payment_collection`) and
  * the collection's own `status` + `payments[].status`.

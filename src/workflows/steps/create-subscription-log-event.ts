@@ -19,8 +19,8 @@ import {
  * activity log (the single authoritative funnel for subscription state
  * changes). Payload = the normalized log event; receivers get
  * subscription_id, customer_id, event_type and state snapshots. Emission
- * failures never block the subscription flow (webhooks are best-effort;
- * reconciliation is provided by the saas-bridge endpoints).
+ * failures never block the subscription flow: the persisted log row is the
+ * authoritative record, and the bus emission is best-effort on top of it.
  */
 export async function emitSubscriptionBusEvent(
   container: { resolve<T>(key: string): T },

@@ -1,3 +1,35 @@
+## [1.13.0] - 2026-10-15
+
+**The tenant bridge is gone; the storefront speaks to the plugin as the customer it is.**
+
+The `saas_bridge` module, its six `/store/saas/*` routes and the
+`forward-saas-events` subscriber are removed. Every capability the bridge
+carried now lives on a customer-authenticated route — the auto-renewal toggle on
+`POST /store/customers/me/subscriptions/:id/auto-renew`, the subscription list
+on `GET /store/customers/me/subscriptions` — so a host no longer configures
+`saas_bridge` and no longer needs `BRIDGE_SHARED_SECRET`. The one behaviour the
+bridge enforced that was not worth keeping, the overdue refusal, is gone too:
+enabling auto-renewal on a `PAST_DUE` row is now allowed, because a customer
+asking to be charged again is not a request the plugin should refuse.
+
+### Breaking
+- Removed the `saas_bridge` module, its six `/store/saas/*` routes, the
+  `forward-saas-events` subscriber, and the optional `@mengyyy369/medusa-webhooks`
+  peer. The tenant bridge is gone: hosts no longer configure `saas_bridge` and no
+  longer need `BRIDGE_SHARED_SECRET`.
+- `listSubscriptionsWithCount` (0.11.0) is unchanged; nothing else moved.
+
+### Added
+- `POST /store/customers/me/subscriptions/:id/auto-renew` `{ enabled }` —
+  customer-authenticated auto-renewal toggle (replaces the bridge's
+  `/store/saas/auto-renew`).
+- `order_id` on `GET /store/customers/me/subscriptions` rows (from
+  `metadata.source_order_id`; `null` for provider mirrors).
+
+### Changed
+- Enabling auto-renewal on an overdue subscription is now allowed (the overdue
+  guard, `PAST_DUE` + 24h grace, was removed end to end).
+
 ## [1.12.7] - 2026-10-14
 
 **A completion that arrives without a customer JWT is judged by the cart's owner.**

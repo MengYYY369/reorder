@@ -147,9 +147,8 @@ digital-goods purchase has nothing to fulfil. Checkout therefore decides by
   country upper-cased
 - otherwise (a region-seeded stub carrying only `country_code`, or no address at
   all) → placeholder: names from the customer record falling back to
-  `Digital Delivery`, `address_1`/`city` `N/A`, `postal_code` `00000` (same
-  placeholder this plugin writes for SaaS carts in `src/api/store/saas/carts/route.ts`),
-  and the country from the stub or the cart region's first country
+  `Digital Delivery`, `address_1`/`city` `N/A`, `postal_code` `00000`, and the
+  country from the stub or the cart region's first country
 
 The placeholder is deliberately recognizable: a fulfillment-enabled product must
 not be silently sold a subscription with no deliverable address. If neither the
@@ -186,13 +185,13 @@ A mirror row is **never** charged, extended or dunned by reorder:
 | dunning retry | permanent failure with `native_subscription`, before any charge |
 | manual renewal creation | rejected |
 | forced renewal (Admin) | rejected |
-| `POST /store/saas/auto-renew` | refused by the `assert-subscription-auto-renew-not-native` step of `set-subscription-auto-renew`, before the write step runs |
+| `POST /store/customers/me/subscriptions/:id/auto-renew` | refused by the `assert-subscription-auto-renew-not-native` step of `set-subscription-auto-renew`, before the write step runs |
 | payment method update | rejected, for the same reason |
 
 The toggle's own run is serialized: `set-subscription-auto-renew` acquires the
 workflow lock `auto-renew:<subscription_id>` before that guard and releases it
-when the run ends, so two concurrent `POST /store/saas/auto-renew` calls for one
-subscription cannot interleave the guard's snapshot and the write's re-read —
+when the run ends, so two concurrent auto-renew calls for one subscription cannot
+interleave the guard's snapshot and the write's re-read —
 while the renewal scheduler, which locks `renewal:<renewal_cycle_id>`, is not
 serialized against them, and that race stays open (§C of
 `.agents/specs/2026-09-25-post-acceptance-backlog.md`).
@@ -732,6 +731,7 @@ The current store account flow uses:
 - `POST /store/customers/me/subscriptions/:id/skip-next-delivery`
 - `POST /store/customers/me/subscriptions/:id/swap-product`
 - `POST /store/customers/me/subscriptions/:id/retry-payment`
+- `POST /store/customers/me/subscriptions/:id/auto-renew`
 - `POST /store/customers/me/subscriptions/:id/cancellation`
 - `POST /store/customers/me/subscriptions/:id/cancellation/finalize`
 - `POST /store/customers/me/trials`
@@ -810,6 +810,7 @@ Implemented mutation routes:
 - `POST /store/customers/me/subscriptions/:id/skip-next-delivery`
 - `POST /store/customers/me/subscriptions/:id/swap-product`
 - `POST /store/customers/me/subscriptions/:id/retry-payment`
+- `POST /store/customers/me/subscriptions/:id/auto-renew`
 - `POST /store/customers/me/subscriptions/:id/cancellation`
 - `POST /store/customers/me/subscriptions/:id/cancellation/finalize`
 - `POST /store/customers/me/trials`
@@ -821,32 +822,21 @@ The Store API layer uses:
 - workflow-backed mutations
 - ownership checks before mutation execution
 
-### Tenant-scoping read failures
+### Read failures on the customer-account routes
 
-The six `/store/saas/*` routes decide tenant visibility with their own reads
-(`listSubscriptions`, `retrieveCustomer`, `listCustomers`, `query.graph`) before any
-workflow runs, and every one of those reads is made through `readTenantScoped`
-(`src/api/store/saas/lib/tenant-ownership.ts`). What a failure of such a read may
-disclose is decided by the pure `classifyStoreReadFailure`
-(`src/modules/subscription/utils/store-read-failure.ts`), which reads nothing from
-the error it is given: the answer is always `not_found` with the fixed sentence the
-caller passes — the sentence the same route already answers when the row genuinely
-is not there — while the raw cause is logged by the route. A DAL fault that
-`db-error-mapper` turns into an `invalid_data` naming a table and column therefore
-cannot reach a customer body from these routes.
+The customer-account routes under `src/api/store/customers/me/**` decide
+visibility with their own reads (`query.graph` filtered by both `id` and
+`customer_id`), and a failure of such a read is answered as the failure it was —
+not masked. Their reads take the customer id from `req.auth_context.actor_id`, so
+masking a fault as `not_found` would deny an authenticated caller a resource it
+owns. A read that finds nothing answers `not_found` with the route's own
+sentence, which is the same sentence another customer's row receives, so existence
+is not leaked; anything else keeps the status its `MedusaError` was thrown as, or
+becomes a 500 with the cause logged.
 
-Two consequences belong to this design and are stated as such: a database outage on
-a tenant-scoping read of `/store/saas/*` presents as a **404**, and a customer row
-that is gone answers with the route's own sentence rather than core's
-`Customer with id '…' was not found`. The first is §D's risk **R1** in
-`.agents/specs/2026-09-25-post-acceptance-backlog.md`, accepted deliberately for
-scoping reads only, because a fault that reads differently from an absence is a
-probeable difference. The boundary is therefore not applied to the customer-account
-routes under `src/api/store/customers/me/**`, whose reads take the customer id from
-`req.auth_context.actor_id`: masking their failure as a 404 would deny an
-authenticated caller a resource it owns. Admin routes and store reads that answer no
-tenant-scoping question are core's error path for the same reason. Per-route statuses
-are in `docs/api/saas-bridge.md` (*Tenant-scoping read failures*).
+Admin routes and store reads that answer no ownership question are core's error
+path for the same reason. Per-route statuses are in
+`docs/api/store-redemptions.md` and `docs/api/store-customer-self-service-tutorial.md`.
 
 ## 8. Admin UI Architecture
 

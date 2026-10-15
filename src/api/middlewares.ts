@@ -13,7 +13,6 @@ import { storeCustomerSubscriptionsMiddlewares } from "./store/customers/me/subs
 import { storeCustomerRedemptionsMiddlewares } from "./store/customers/me/redemptions/middlewares"
 import { storeCustomerTrialsMiddlewares } from "./store/customers/me/trials/middlewares"
 import { storeProductMiddlewares } from "./store/products/middlewares"
-import { saasBridgeMiddlewares } from "../modules/saas-bridge/auth"
 import { rejectConflictingPurchase } from "./store/carts/completion-gate"
 
 export default defineMiddlewares({
@@ -32,7 +31,6 @@ export default defineMiddlewares({
     ...storeCustomerRedemptionsMiddlewares,
     ...storeCustomerTrialsMiddlewares,
     ...storeProductMiddlewares,
-    ...saasBridgeMiddlewares,
     {
       // Guard on a core route, appended after the plugin's own groups so the
       // existing 13 matcher sets stay untouched. Method-scoped middlewares are

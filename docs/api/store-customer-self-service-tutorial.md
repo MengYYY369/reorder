@@ -562,7 +562,7 @@ when it is `false`.
 Everything the portal needs is already in the detail (and list) payload. No
 event, webhook, or polling channel beyond these fields is required — the
 plugin emits `renewal.failed` and the `dunning.*` lifecycle events on the
-event bus (see `saas-bridge.md`), but a customer portal does not need them:
+event bus, but a customer portal does not need them:
 reading the detail is authoritative and simpler.
 
 ### When to show the banner
@@ -660,9 +660,7 @@ does not exist server-side.
   and is not tied to an existing subscription.)
 - **Guest redemption is unsupported.** The redemption routes sit under
   `/store/customers/me/*` and require a customer identity; there is no
-  anonymous redemption path. (The SaaS bridge's `/store/saas/redeem` is a
-  server-to-server endpoint behind the bridge secret, not a customer-facing
-  fallback.)
+  anonymous redemption path.
 - **The list route is unpaginated.** No `limit`/`offset` exist on
   `GET /store/customers/me/subscriptions`.
 
@@ -683,8 +681,6 @@ exposed on store routes — the customer sees their consequences through
 - `api/store-subscription-payment-methods.md` — payment method routes and
   the recovery flow
 - `api/store-redemptions.md` — redemption codes
-- `api/saas-bridge.md` — the event stream a SaaS host can subscribe to
-  instead of polling
 - `architecture/dunning.md` — what the recovery machinery does behind
   `payment_recovery`
 - `architecture/subscriptions.md` — the domain model behind the payloads

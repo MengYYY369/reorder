@@ -180,10 +180,10 @@ The extend path carries the real reference from the stacking decision
 (`extend_subscription_reference`, `src/modules/subscription/utils/stacking.ts:116-128`).
 
 Later, the customer can also change the mode themselves through
-`POST /store/saas/auto-renew`, which runs the `set-subscription-auto-renew`
-workflow; its native guard refuses a mirror row before anything is written
-(`src/workflows/steps/set-subscription-auto-renew.ts:91-121`). See `payments.md`
-(*Automatic Renewal Switch*).
+`POST /store/customers/me/subscriptions/:id/auto-renew`, which runs the
+`set-subscription-auto-renew` workflow; its native guard refuses a mirror row
+before anything is written (`src/workflows/steps/set-subscription-auto-renew.ts:67-90`).
+See `payments.md` (*Automatic Renewal Switch*).
 
 ### R3 — Native subscription is exclusive
 

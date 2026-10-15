@@ -34,7 +34,8 @@ const RECORD_TRIAL_CLAIM_STEP = recordTrialClaimStep.__step__
 
 /**
  * The refusals this workflow authors for the caller, and the only ones a
- * `POST /store/saas/redeem` response may quote — each with its exact text.
+ * `POST /store/customers/me/redemptions` response may quote — each with its
+ * exact text.
  *
  * Owned here, with the composition, for the same reason as
  * `AUTO_RENEW_CUSTOMER_REFUSALS` and `RENEW_CUSTOMER_REFUSALS`: the route that

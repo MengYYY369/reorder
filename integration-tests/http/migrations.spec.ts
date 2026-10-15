@@ -133,7 +133,7 @@ const RENEWAL_AWAITING_MANUAL_RESOLUTION_EVENT = "renewal.awaiting_manual_resolu
 
 /**
  * The measured migration inventory: 28 migrations across the 10 module
- * directories that ship them (`saas-bridge` ships none). Task 12 of the billing
+ * directories that ship them. Task 12 of the billing
  * hardening plan added the third one (the two operational renewal event types
  * on the `subscription_log` check constraint) and Task 13 the fourth (the two
  * lookahead event types on the same constraint); Task 20's `trial_claim` table

@@ -16,19 +16,17 @@ import type SubscriptionModuleService from "../../src/modules/subscription/servi
 import {
   SubscriptionFrequencyInterval,
   SubscriptionStatus,
-  type SubscriptionPaymentContext,
 } from "../../src/modules/subscription/types"
 import { listDueRenewalCyclesForProcessing } from "../../src/modules/renewal/utils/scheduler-query"
 import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
 import {
   createCustomer,
   createProductWithVariant,
+  createStoreCustomerAuthHeaders,
   createSubscriptionSeed,
 } from "../helpers/subscription-fixtures"
 
 jest.setTimeout(120 * 1000)
-
-const BRIDGE_SECRET = "test-bridge-secret"
 
 const PAYPAL_ID = "I-MIRROR01"
 
@@ -132,11 +130,13 @@ async function emit(
 }
 
 /**
- * Headers `/store/saas/auto-renew` accepts: a publishable key plus the bridge
- * secret and tenant the SaaS bridge sends.
+ * Headers the customer-facing auto-renew route accepts: a publishable key plus
+ * the owning customer's session token. The route reads the subscription from its
+ * path and the ownership from this token, so nothing in the body names a tenant.
  */
-async function bridgeRequestHeaders(
-  container: MedusaContainer
+async function storeHeaders(
+  container: MedusaContainer,
+  customer: { id: string; email?: string | null }
 ): Promise<Record<string, string>> {
   const apiKeyModule = container.resolve<{
     createApiKeys: (input: {
@@ -152,9 +152,8 @@ async function bridgeRequestHeaders(
   })
 
   return {
+    ...(await createStoreCustomerAuthHeaders(container, customer)),
     "x-publishable-api-key": publishableKey.token,
-    "x-bridge-secret": BRIDGE_SECRET,
-    "x-tenant-id": "default",
   }
 }
 
@@ -414,19 +413,8 @@ medusaIntegrationTestRunner({
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
           SUBSCRIPTION_MODULE
         )
-        const apiKeyModule = container.resolve<{
-          createApiKeys: (input: {
-            title: string
-            type: string
-            created_by: string
-          }) => Promise<{ token: string }>
-        }>(Modules.API_KEY)
-        const publishableKey = await apiKeyModule.createApiKeys({
-          title: `native-mirror-${Date.now()}`,
-          type: "publishable",
-          created_by: "test",
-        })
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
 
         const nativeSubscription = await createSubscriptionSeed(container, {
           customer_id: customer.id,
@@ -448,16 +436,9 @@ medusaIntegrationTestRunner({
           : nativeSubscription.id
 
         const response = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
-          {
-            headers: {
-              "x-publishable-api-key": publishableKey.token,
-              "x-bridge-secret": BRIDGE_SECRET,
-              "x-tenant-id": "default",
-            },
-            validateStatus: () => true,
-          }
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
+          { headers, validateStatus: () => true }
         )
 
         expect(response.status).toEqual(400)
@@ -474,8 +455,8 @@ medusaIntegrationTestRunner({
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
           SUBSCRIPTION_MODULE
         )
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
 
         // A row in the shape the toggle used to be handed: manual, and with no
         // mechanism key at all, because it predates the discriminator.
@@ -501,8 +482,8 @@ medusaIntegrationTestRunner({
         const updateSpy = jest.spyOn(subscriptionModule, "updateSubscriptions")
 
         const enable = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
           { headers }
         )
 
@@ -536,8 +517,8 @@ medusaIntegrationTestRunner({
         })
 
         const disable = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: false },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: false },
           { headers }
         )
 
@@ -557,8 +538,8 @@ medusaIntegrationTestRunner({
 
       it("takes the subscription lock once and releases it, on a run that refuses too", async () => {
         const container = getContainer()
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
         const stamp = Date.now()
 
         // Spied on the resolved module service rather than by replacing the
@@ -608,17 +589,16 @@ medusaIntegrationTestRunner({
         const releaseSpy = jest.spyOn(locking, "release")
 
         const response = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
           { headers }
         )
 
         expect(response.status).toEqual(200)
 
-        // The count is the assertion: the toggle decides "overdue" from the
-        // guard's snapshot and re-reads at the write, so one run must hold one
-        // lock over both. A second acquire of the same key is the duplicate the
-        // siblings do not have.
+        // The count is the assertion: the guard reads the row and the write
+        // step re-reads it, so one run must hold one lock over both. A second
+        // acquire of the same key is the duplicate the siblings do not have.
         expect(autoRenewKeys(acquireSpy.mock.calls)).toEqual([
           `auto-renew:${subscriptionId}`,
         ])
@@ -637,8 +617,8 @@ medusaIntegrationTestRunner({
         // 30-second wait. `acquireLockStep` registers its own compensation, and
         // this is the only gate that reaches it.
         const refused = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: mirrorId, enabled: true },
+          `/store/customers/me/subscriptions/${mirrorId}/auto-renew`,
+          { enabled: true },
           { headers, validateStatus: () => true }
         )
 
@@ -654,134 +634,45 @@ medusaIntegrationTestRunner({
         releaseSpy.mockRestore()
       })
 
-      it("refuses an overdue row before writing anything", async () => {
+      it("answers the native-mirror refusal with 400 and the guard's own copy", async () => {
         const container = getContainer()
-        const subscriptionModule = container.resolve<SubscriptionModuleService>(
-          SUBSCRIPTION_MODULE
-        )
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
 
-        const overdueSubscription = await createSubscriptionSeed(container, {
+        // The guard is the only step allowed to speak to the customer, and what
+        // it says is authored as customer copy: the status is 400 and the
+        // message is the guard's, not the engine's. It is asserted in full,
+        // because the whole sentence is what the whitelist in
+        // `src/workflows/set-subscription-auto-renew.ts` declares.
+        const seeded = await createSubscriptionSeed(container, {
           customer_id: customer.id,
-          reference: `SUB-OVERDUE-${Date.now()}`,
+          reference: `NATIVE-GUARD-${Date.now()}`,
           status: SubscriptionStatus.ACTIVE,
-          next_renewal_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+          next_renewal_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
           payment_context: {
-            payment_provider_id: "pp_system_default",
+            payment_provider_id: "pp_paypal_paypal",
             payment_mode: "manual",
-            payment_method_reference: "pm_overdue",
+            mechanism: "native",
             source_payment_collection_id: null,
             source_payment_session_id: null,
+            payment_method_reference: null,
             customer_payment_reference: null,
           },
         })
 
-        const subscriptionId = Array.isArray(overdueSubscription)
-          ? overdueSubscription[0].id
-          : overdueSubscription.id
+        const subscriptionId = Array.isArray(seeded) ? seeded[0].id : seeded.id
 
         const response = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
           { headers, validateStatus: () => true }
         )
 
-        // Enabling here would let the scheduler charge in the same request, so
-        // the guard has to answer before the write step runs.
         expect(response.status).toEqual(400)
-
-        const [row] = await subscriptionModule.listSubscriptions({
-          id: [subscriptionId],
-        })
-
-        expect(row.payment_context).toMatchObject({ payment_mode: "manual" })
-        expect(row.payment_context).not.toHaveProperty("mechanism")
-      })
-
-      it("answers each guard refusal with 400 and that guard's own copy", async () => {
-        const container = getContainer()
-        const headers = await bridgeRequestHeaders(container)
-        const customer = await createCustomer(container)
-
-        // The two guards are the only steps allowed to speak to the customer,
-        // and what they say is authored as customer copy: the status is 400 and
-        // the message is theirs, not the engine's. Each is asserted in full,
-        // because the whole sentence is what the whitelist in
-        // `src/workflows/set-subscription-auto-renew.ts` declares.
-        type GuardRefusalSeed = {
-          reference: string
-          status: SubscriptionStatus
-          next_renewal_at: Date
-          payment_context: SubscriptionPaymentContext
-        }
-
-        const refusals: Array<{
-          seed: GuardRefusalSeed
-          copy: (id: string) => string
-        }> = [
-          {
-            seed: {
-              reference: `NATIVE-GUARD-${Date.now()}`,
-              status: SubscriptionStatus.ACTIVE,
-              next_renewal_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
-              payment_context: {
-                payment_provider_id: "pp_paypal_paypal",
-                payment_mode: "manual",
-                mechanism: "native",
-                source_payment_collection_id: null,
-                source_payment_session_id: null,
-                payment_method_reference: null,
-                customer_payment_reference: null,
-              },
-            },
-            copy: (id: string) =>
-              `Subscription '${id}' is a mirror of a provider-managed recurrence; manage auto-renewal at the provider`,
-          },
-          {
-            seed: {
-              reference: `SUB-GUARD-${Date.now()}`,
-              status: SubscriptionStatus.PAST_DUE,
-              next_renewal_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
-              payment_context: {
-                payment_provider_id: "pp_system_default",
-                payment_mode: "manual",
-                // The overdue guard exempts rows with no stored method (a free
-                // grant could never have been charged), so the row has to carry
-                // one for the refusal this case pins to fire at all.
-                payment_method_reference: "pm_guard",
-                source_payment_collection_id: null,
-                source_payment_session_id: null,
-                customer_payment_reference: null,
-              },
-            },
-            copy: (id: string) =>
-              `Subscription '${id}' is overdue — renew manually before enabling auto-renewal`,
-          },
-        ]
-
-        for (const refusal of refusals) {
-          const seeded = await createSubscriptionSeed(container, {
-            customer_id: customer.id,
-            ...refusal.seed,
-          })
-
-          const subscriptionId = Array.isArray(seeded)
-            ? seeded[0].id
-            : seeded.id
-
-          const response = await api.post(
-            "/store/saas/auto-renew",
-            { subscription_id: subscriptionId, enabled: true },
-            { headers, validateStatus: () => true }
-          )
-
-          expect(response.status).toEqual(400)
-          expect(response.data).toMatchObject({ type: "invalid_data" })
-          expect(String(response.data?.message)).toEqual(
-            refusal.copy(subscriptionId)
-          )
-        }
+        expect(response.data).toMatchObject({ type: "invalid_data" })
+        expect(String(response.data?.message)).toEqual(
+          `Subscription '${subscriptionId}' is a mirror of a provider-managed recurrence; manage auto-renewal at the provider`
+        )
       })
 
       it("keeps a guard step's DAL failure out of the response text", async () => {
@@ -789,8 +680,8 @@ medusaIntegrationTestRunner({
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
           SUBSCRIPTION_MODULE
         )
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
         const stamp = Date.now()
 
         const seeded = await createSubscriptionSeed(container, {
@@ -831,8 +722,8 @@ medusaIntegrationTestRunner({
           )
 
         const response = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
           { headers, validateStatus: () => true }
         )
 
@@ -862,8 +753,8 @@ medusaIntegrationTestRunner({
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
           SUBSCRIPTION_MODULE
         )
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
 
         const seeded = await createSubscriptionSeed(container, {
           customer_id: customer.id,
@@ -894,8 +785,8 @@ medusaIntegrationTestRunner({
           .mockRejectedValue(new Error(internalMessage))
 
         const response = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
           { headers, validateStatus: () => true }
         )
 
@@ -924,8 +815,8 @@ medusaIntegrationTestRunner({
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
           SUBSCRIPTION_MODULE
         )
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
         const stamp = Date.now()
 
         // The disclosure rule has two halves, and the previous case only pinned
@@ -981,8 +872,8 @@ medusaIntegrationTestRunner({
             .mockRejectedValue(internal.thrown)
 
           const response = await api.post(
-            "/store/saas/auto-renew",
-            { subscription_id: subscriptionId, enabled: true },
+            `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+            { enabled: true },
             { headers, validateStatus: () => true }
           )
 
@@ -1015,8 +906,8 @@ medusaIntegrationTestRunner({
         const subscriptionModule = container.resolve<SubscriptionModuleService>(
           SUBSCRIPTION_MODULE
         )
-        const headers = await bridgeRequestHeaders(container)
         const customer = await createCustomer(container)
+        const headers = await storeHeaders(container, customer)
         const stamp = Date.now()
 
         // Exactly what a driver fault looks like once the engine has
@@ -1059,8 +950,8 @@ medusaIntegrationTestRunner({
           .mockRejectedValue(driverFault)
 
         const response = await api.post(
-          "/store/saas/auto-renew",
-          { subscription_id: subscriptionId, enabled: true },
+          `/store/customers/me/subscriptions/${subscriptionId}/auto-renew`,
+          { enabled: true },
           { headers, validateStatus: () => true }
         )
 

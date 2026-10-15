@@ -79,35 +79,27 @@ Response:
 
 Validation is enforced under a lock on the code: batch/code active, validity window, per-code `max_redemptions`, one redemption per customer per code (schema-level unique index on (`code_id`, `customer_id`) as backstop).
 
-**Failure disclosure.** This route runs the same workflow as
-`POST /store/saas/redeem`, so a failure that is not one of the refusals that
-workflow declares answers with one of three fixed strings
-(`redemption target not found` / `redemption was refused` / `redemption failed`)
-while the step name and the serialized error go to the server log: a driver fault
-is a 500 and never a 422 quoting `table` and `detail`. What differs from the bridge
-route is only the status a *declared* refusal carries — this route answers it with
-the type the step threw it as, so an unknown code stays **404** here where the
-bridge has always flattened refusals to **400**. A session that outlived its
+**Failure disclosure.** This route runs the redemption workflow, and a failure
+that is not one of the refusals that workflow declares answers with one of three
+fixed strings (`redemption target not found` / `redemption was refused` /
+`redemption failed`) while the step name and the serialized error go to the server
+log: a driver fault is a 500 and never a 422 quoting `table` and `detail`. A
+*declared* refusal carries the type the step threw it as — an unknown code is
+**404** — because the route passes `preserveQuotedStatus`, so a refusal keeps its
+own status instead of being flattened to 400. A session that outlived its
 customer row is one of those declared refusals: **404** `Redemption customer <id>
 not found`, naming the id the caller authenticated as and no variant.
 The shared mechanism is
 `src/workflows/utils/store-step-failure.ts` and its `preserveQuotedStatus` option.
 
-That covers the workflow run. The route's own module reads are covered by a separate
-boundary, `readTenantScoped`
-(`src/api/store/saas/lib/tenant-ownership.ts`, deciding through
-`classifyStoreReadFailure` in `src/modules/subscription/utils/store-read-failure.ts`),
-and that boundary is confined to `/store/saas/*`: a tenant-scoping read that faults
-there answers 404 with the route's own sentence instead of `db-error-mapper`'s, and a
-gone customer on `POST /store/saas/redeem` now reads `redemption target not found`
-where it used to carry core's `Customer with id '…' was not found`. Nothing under
-this route's own subtree, `src/api/store/customers/me/**`, is behind it — the reads
-there take the customer id from `req.auth_context.actor_id`, so masking a fault as a
-404 would tell an authenticated customer that a resource they own does not exist. A
-DAL fault on those reads is still core's error path, and `listAndCountRedemptionRecords`
-is named in §D of `.agents/specs/2026-09-25-post-acceptance-backlog.md` as
-classified-and-left on that basis. See *Tenant-scoping read failures* in
-`docs/api/saas-bridge.md`.
+That covers the workflow run. The route's own module reads are behind no masking
+boundary: they take the customer id from `req.auth_context.actor_id`, so a read
+that faults stays core's error path rather than becoming a 404 — masking it would
+tell an authenticated customer that a resource they own does not exist. A read
+that finds nothing still answers with this route's own sentence, so existence is
+not leaked. `listAndCountRedemptionRecords` is named in §D of
+`.agents/specs/2026-09-25-post-acceptance-backlog.md` as classified-and-left on
+that basis.
 
 ### `GET /store/customers/me/redemptions`
 

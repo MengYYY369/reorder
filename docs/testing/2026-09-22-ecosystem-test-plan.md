@@ -6,6 +6,11 @@
 > `docs/plugins/2026-09-21-source-fix-spec.md`（决策 N/R/Q）与
 > `docs/plugins/2026-09-21-plugin-issues-for-source-repos.md`（源头清单 §3/§4）为准。
 
+> **历史文件（2026-10-15 注）**：本计划记录的是 2026-09-22 的事实，含当时的
+> saas-bridge 转发链路与 G10 缺陷。reorder 1.13.0 已退役 `saas_bridge` 模块、
+> 六条 `/store/saas/*` 路由与 `forward-saas-events` 订阅者，因此文中对
+> saas-bridge 的描述与 G10 均已失效；保留原文是为了不篡改当时的判断记录。
+
 ---
 
 ## 0. 这套搭配现在的实际状态

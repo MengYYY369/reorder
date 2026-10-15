@@ -36,12 +36,11 @@ const AUTO_RENEW_FAILURE_COPY: StepFailureCopy = {
  * Body: { enabled: boolean }
  * → { subscription_id, payment_mode }
  *
- * The customer-authenticated replacement for the tenant bridge's
- * `POST /store/saas/auto-renew` (2026-10-14): the subscription is addressed by
- * path and owned by the caller, so the request needs neither a tenant id nor a
- * shared secret. It runs the same workflow — the same write side the
- * payment-method update uses, so `payment_mode` and its `mechanism` annotation
- * always change together.
+ * This route replaced the retired tenant bridge's `POST /store/saas/auto-renew`
+ * on 2026-10-14: the subscription is addressed by path and owned by the caller,
+ * so the request needs neither a tenant id nor a shared secret. It runs the
+ * same workflow — the same write side the payment-method update uses, so
+ * `payment_mode` and its `mechanism` annotation always change together.
  *
  * AUTHORIZATION: the middleware mounted on `/store/customers/me/subscriptions*`
  * authenticates the customer; the ownership read below filters by

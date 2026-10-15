@@ -619,8 +619,8 @@ medusaIntegrationTestRunner({
         // that WOULD charge (auto mode, stored method, chargeable cart — pinned
         // as the conversion path in trial-conversion.spec.ts), flips only the
         // auto-renew toggle off (the same `set-subscription-auto-renew` write
-        // `POST /store/saas/auto-renew` performs), and proves the cycle still
-        // runs but charges nothing.
+        // `POST /store/customers/me/subscriptions/:id/auto-renew` performs), and
+        // proves the cycle still runs but charges nothing.
         const container = getContainer()
         const subscriptionModule =
           container.resolve<SubscriptionModuleService>(SUBSCRIPTION_MODULE)
@@ -745,7 +745,8 @@ medusaIntegrationTestRunner({
           scheduled_for: trialEndsAt,
         })
 
-        // The toggle: the only write `POST /store/saas/auto-renew` performs.
+        // The toggle: the only write
+        // `POST /store/customers/me/subscriptions/:id/auto-renew` performs.
         // Disabling is never refused, past the anchor included.
         const toggle = await setSubscriptionAutoRenewWorkflow(container).run({
           input: { subscription_id: subscription.id, enabled: false },

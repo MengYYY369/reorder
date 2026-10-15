@@ -39,9 +39,9 @@ import {
  *   inline in that directory could never be asserted — not even by a test that
  *   imports it from a module spec;
  * - this is already this repository's layout for middleware that belongs to a
- *   module: `src/api/middlewares.ts` pulls its middlewares from
- *   `src/modules/saas-bridge/auth.ts`, and `completion-gate.ts` is now the thin
- *   re-export of this file that keeps that registration path stable.
+ *   module: `src/api/middlewares.ts` pulls its middlewares from each module's
+ *   own directory, and `completion-gate.ts` is the thin re-export of this file
+ *   that keeps that registration path stable.
  *
  * The rule that makes the decision a unit: every failure mode of the *rule*
  * reads is fail-open. A throw there would surface as a rejected middleware

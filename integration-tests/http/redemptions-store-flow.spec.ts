@@ -714,10 +714,8 @@ medusaIntegrationTestRunner({
         )
         const stamp = Date.now()
 
-        // A declared refusal keeps its own status here. The bridge route answers
-        // the same refusal as a 400 because that is what its promise was built
-        // on; this one has always let the domain type through, and an unknown
-        // code is a 404.
+        // A declared refusal keeps its own status here: the route lets the
+        // domain type through, so an unknown code is a 404.
         const unknownCode = await api.post(
           "/store/customers/me/redemptions",
           { code: `NOSUCH-STORE-${stamp}` },
@@ -800,8 +798,7 @@ medusaIntegrationTestRunner({
         // `auth_context.actor_id`, so nothing checks the customer exists before
         // the workflow does, and the step's own customer read is the first to
         // find it gone. This route preserves a declared refusal's status, so the
-        // `not_found` arrives as a 404 — where `/store/saas/redeem` answers the
-        // same refusal with its promised 400.
+        // `not_found` arrives as a 404.
         const vanishedCustomerId = `cus_vanished_${Date.now()}`
         const headers = await createStoreHeadersWithPublishableKey(container, {
           id: vanishedCustomerId,

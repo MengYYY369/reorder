@@ -217,8 +217,9 @@ reason verbatim, so "why is this row still manual" is readable from the process
 log without re-running the rule:
 
 - rule off (`null`, the default) → `consent_from_session_disabled`; the mode stays
-  manual, and the customer opts in later through `POST /store/saas/auto-renew`,
-  which runs the `set-subscription-auto-renew` workflow
+  manual, and the customer opts in later through
+  `POST /store/customers/me/subscriptions/:id/auto-renew`, which runs the
+  `set-subscription-auto-renew` workflow
 - rule on but the payment session carries no non-empty value in the named field
   (`customer_id` today) → `consent_field_missing`; the token is still stored, the
   mode stays manual
@@ -306,37 +307,39 @@ The workflow does not trigger a payment retry. Retrying is an explicit action th
 
 ## Automatic Renewal Switch
 
-`POST /store/saas/auto-renew` changes which mode a subscription renews in
-(`manual` ↔ `auto`) by running the `set-subscription-auto-renew` workflow
+`POST /store/customers/me/subscriptions/:id/auto-renew` changes which mode a
+subscription renews in (`manual` ↔ `auto`) by running the
+`set-subscription-auto-renew` workflow
 (`src/workflows/set-subscription-auto-renew.ts`), not by writing the row from the
-request handler. The route validates the body, applies the request-bound tenant
-rule, runs the workflow and shapes the response.
+request handler. The route authenticates the customer, reads the row through the
+ownership filter, validates the body, runs the workflow and shapes the response.
 
-The workflow is three steps, and both refusals happen before anything is written:
+The workflow is three steps, and its one refusal happens before anything is written:
 
 1. `assert-subscription-auto-renew-not-native` — the write-side mirror guard, using
    the same `isNativeSubscriptionReference` predicate as every other site
-2. `assert-subscription-auto-renew-not-overdue` — switching a row **on** is refused
-   while it is `past_due` or its `next_renewal_at` is more than
-   `AUTO_RENEW_OVERDUE_GRACE_MS` (24 hours) in the past, because the scheduler
-   would charge in the same request that enabled the switch. Switching **off** is
-   never refused, and a row that already stores `payment_mode: "auto"` is not
-   re-checked for being overdue
+2. the input transform that derives `payment_mode` from the request's `enabled`
 3. `update-subscription-payment-mode` — the only state-changing write: it re-reads
    the row, merges the stored `payment_context`, and replaces just the mode and its
    label through `buildPaymentModeFields`. It compensates by restoring the previous
    `payment_context` verbatim
 
-Only two failures are quoted, because only two are declared: the mirror guard and
-the overdue guard, listed as `AUTO_RENEW_CUSTOMER_REFUSALS`
-(`src/workflows/set-subscription-auto-renew.ts:51-62`). Each answers 400 with its
-own customer-facing text.
+Only one failure is quoted, because only one is declared: the mirror guard, listed
+as `AUTO_RENEW_CUSTOMER_REFUSALS`
+(`src/workflows/set-subscription-auto-renew.ts:56-62`). It answers 400 with its own
+customer-facing text.
+
+Enabling auto-renewal on an overdue row is allowed. The guard that refused a
+`past_due` row, or one whose `next_renewal_at` was more than 24 hours in the past,
+was removed: a customer asking to be charged again is not a request this plugin
+refuses, and the scheduler's own read decides when the next charge is due.
 
 Anything else is neither blamed on the caller nor quoted: it keeps the HTTP status
 of the `MedusaError` it was thrown as, and the body carries one of the route's own
-fixed strings instead (`src/api/store/saas/auto-renew/route.ts:44-48,117-149`). A
+fixed strings instead
+(`src/api/store/customers/me/subscriptions/[id]/auto-renew/route.ts:28-32,90-109`). A
 `not_found` — the row vanishing after this handler validated it
-(`src/workflows/steps/set-subscription-auto-renew.ts:101-103,181-183`) — is
+(`src/workflows/steps/set-subscription-auto-renew.ts:77-79,117-119`) — is
 therefore still a 404 and a `conflict` still a 409; the preserved types and the
 statuses they map to are the `PRESERVED_TYPES` table in
 `src/workflows/utils/store-step-failure.ts`. Only what falls outside that table
@@ -345,10 +348,8 @@ class is the one that is genuinely a fault of this plugin: driver and connection
 faults, deserialized Postgres errors, `database_error`, `unauthorized`/`forbidden`,
 `unexpected_state`, `invalid_argument`, an unrecognized shape. For every failure
 that is not quoted, the step name and the serialized error go to the request
-logger (`src/api/store/saas/auto-renew/route.ts:137-142`,
-`store-step-failure.ts`'s `logUnquotedStepFailure`), so engine-reported text never
-reaches the SaaS caller. The per-status contract is documented in
-`api/saas-bridge.md` (*Failure disclosure on the three workflow-backed endpoints*).
+logger (`store-step-failure.ts`'s `logUnquotedStepFailure`), so engine-reported text
+never reaches the caller.
 
 A stale stored method reference is not checked here; it surfaces as a failed
 renewal and a `past_due` transition on the scheduler side.
@@ -395,4 +396,3 @@ Payment method references, customer payment references and payment session ident
 - `api/admin-subscriptions.md`
 - `api/store-subscription-payment-methods.md`
 - `api/store-subscription-checkout.md`
-- `api/saas-bridge.md`

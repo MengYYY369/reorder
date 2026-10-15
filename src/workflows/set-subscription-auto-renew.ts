@@ -65,8 +65,8 @@ export const AUTO_RENEW_CUSTOMER_REFUSALS: readonly CustomerRefusal[] = [
  * Flips a subscription between the manual (cashier-link) and the automatic
  * (off-session scheduler) renewal mode.
  *
- * Tenant visibility is a request-bound rule and stays with the route
- * (`src/api/store/saas/lib/tenant-ownership.ts`); everything that decides
+ * Ownership is a request-bound rule and stays with the route
+ * (`src/api/store/customers/me/subscriptions/utils.ts`); everything that decides
  * whether the mode may change and what gets written lives here:
  *
  *  0. `acquire-lock-step` on `auto-renew:<subscription_id>` — taken before the

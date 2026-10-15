@@ -14,7 +14,6 @@ import {
 } from "../../src/modules/subscription/types"
 import { RenewalCycleStatus } from "../../src/modules/renewal/types"
 import emitRenewalRemindersJob from "../../src/jobs/emit-renewal-reminders"
-import { config as forwardSaasEventsConfig } from "../../src/subscribers/forward-saas-events"
 import { createRenewalCycleSeed } from "../helpers/renewal-fixtures"
 import { createSubscriptionSeed } from "../helpers/subscription-fixtures"
 
@@ -381,17 +380,6 @@ medusaIntegrationTestRunner({
           // default so the other cases scan with lead days 3.
           await settingsModule.resetSettings()
         }
-      })
-
-      it("registers both reminder events for saas-bridge forwarding", async () => {
-        // The bus emission only reaches the medusa-webhooks fan-out when the
-        // subscriber is statically registered on the event name; an event type
-        // missing from that list is the same "written but never delivered" gap
-        // `renewal.failed` had for years.
-        expect(forwardSaasEventsConfig.event).toContain("renewal.upcoming")
-        expect(forwardSaasEventsConfig.event).toContain(
-          "subscription.trial_ending"
-        )
       })
     })
   },

@@ -9,7 +9,7 @@ import { subscriptionErrors } from "./errors"
  * strict snapshot and the placeholder.
  *
  * `postal_code: "00000"` mirrors the placeholder this plugin already writes for
- * SaaS carts in `src/api/store/saas/carts/route.ts`.
+ * digital carts.
  */
 const REQUIRED_ADDRESS_FIELDS = [
   "first_name",

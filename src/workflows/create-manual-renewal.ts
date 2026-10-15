@@ -19,7 +19,8 @@ export type CreateManualRenewalWorkflowInput = {
 
 /**
  * The refusals this workflow authors for the caller, and the only ones a
- * `POST /store/saas/renew` response may quote — each with its exact text.
+ * `POST /store/customers/me/subscriptions/:id/renew-now` response may quote —
+ * each with its exact text.
  *
  * Owned here, with the composition, for the same reason as
  * `AUTO_RENEW_CUSTOMER_REFUSALS`: the route that discloses a failure must not

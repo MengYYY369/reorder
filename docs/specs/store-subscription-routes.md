@@ -33,6 +33,10 @@ Current pricing semantics:
 - `POST /store/customers/me/subscriptions/:id/change-address`
 - `POST /store/customers/me/subscriptions/:id/swap-product`
 - `POST /store/customers/me/subscriptions/:id/retry-payment`
+- `POST /store/customers/me/subscriptions/:id/auto-renew`
+  - body `{ enabled: boolean }`, response `{ subscription_id, payment_mode }`
+  - the customer-authenticated auto-renewal toggle; a mirror row of a
+    provider-managed recurrence is refused with `400`
 
 ## Design rules
 
@@ -116,12 +120,17 @@ Current pricing semantics:
   - `effective_next_renewal_at`
   - `payment_mode`
   - `has_payment_method`
+  - `order_id`
   - `active_cancellation_case`
   - `frequency_*` and the two payment fields are what a benefit card needs to
     render the plan tier and the "renewal will/won't charge automatically" line
     without a per-row detail request; `payment_mode` is `null` when the row
     carries no payment context at all, and `has_payment_method` is derived from
     the presence of a stored reference, never from its value
+  - `order_id` is read from `metadata.source_order_id` and is `null` when the row
+    carries none — in particular for a provider mirror, whose metadata is not
+    written by this plugin — so a storefront must treat `null` as "unknown", not
+    as "no order"
 - subscription detail:
   - `id`
   - `reference`
