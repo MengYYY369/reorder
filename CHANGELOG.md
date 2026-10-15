@@ -1,3 +1,18 @@
+## [1.13.1] - 2026-10-16
+
+**A removal, not a behaviour change: the classifier the bridge left behind is gone.**
+
+`src/modules/subscription/utils/store-read-failure.ts` and its unit spec are
+deleted. The classifier decided what a failed tenant-scoping store read was
+allowed to disclose, and every caller it was written for — the six
+`/store/saas/*` routes, through the `readTenantScoped` wrapper — went away in
+1.13.0. Nothing imported it afterwards, so this release changes no behaviour;
+it only stops shipping a decision no route asks for.
+
+### Removed
+- `classifyStoreReadFailure` and its unit spec (no production caller since
+  1.13.0 retired the tenant bridge).
+
 ## [1.13.0] - 2026-10-15
 
 **The tenant bridge is gone; the storefront speaks to the plugin as the customer it is.**
